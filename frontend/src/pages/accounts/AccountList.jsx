@@ -9,6 +9,8 @@ import {
   Search,
   Activity,
   Eye,
+  Pencil,
+  Trash2,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
@@ -33,6 +35,8 @@ export default function AccountList() {
       a.fb_user_id?.toLowerCase().includes(search.toLowerCase())
   )
 
+  const [editAccount, setEditAccount] = useState(null)
+
   const healthCheckMutation = useMutation({
     mutationFn: (id) => api.post(`/accounts/${id}/check-health`),
     onSuccess: () => {
@@ -41,6 +45,21 @@ export default function AccountList() {
     },
     onError: () => toast.error('Health check failed'),
   })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => api.delete(`/accounts/${id}`),
+    onSuccess: () => {
+      toast.success('Account deleted')
+      queryClient.invalidateQueries({ queryKey: ['accounts'] })
+    },
+    onError: () => toast.error('Delete failed'),
+  })
+
+  const handleDelete = (account) => {
+    if (window.confirm(`Delete account "${account.username}"?`)) {
+      deleteMutation.mutate(account.id)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -146,6 +165,21 @@ export default function AccountList() {
                           <Activity className="w-3.5 h-3.5" />
                           Check
                         </button>
+                        <button
+                          onClick={() => setEditAccount(account)}
+                          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(account)}
+                          disabled={deleteMutation.isPending}
+                          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </button>
                         <Link
                           to={`/accounts/${account.id}`}
                           className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
@@ -161,6 +195,18 @@ export default function AccountList() {
             </table>
           </div>
         </div>
+      )}
+
+      {/* Edit Account Modal */}
+      {editAccount && (
+        <EditAccountModal
+          account={editAccount}
+          onClose={() => setEditAccount(null)}
+          onSuccess={() => {
+            setEditAccount(null)
+            queryClient.invalidateQueries({ queryKey: ['accounts'] })
+          }}
+        />
       )}
 
       {/* Add Account Modal */}
@@ -303,6 +349,132 @@ function AddAccountModal({ onClose, onSuccess }) {
             >
               {loading && <Loader className="w-4 h-4 animate-spin" />}
               {loading ? 'Adding...' : 'Add Account'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function EditAccountModal({ account, onClose, onSuccess }) {
+  const [username, setUsername] = useState(account.username || '')
+  const [browserType, setBrowserType] = useState(account.browser_type || 'chromium')
+  const [notes, setNotes] = useState(account.notes || '')
+  const [isActive, setIsActive] = useState(account.is_active !== false)
+  const [cookieString, setCookieString] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      await api.put(`/accounts/${account.id}`, {
+        username,
+        browser_type: browserType,
+        notes,
+        is_active: isActive,
+      })
+
+      // Update cookie if provided
+      if (cookieString.trim()) {
+        const parsed = parseCookieInput(cookieString)
+        await api.post(`/accounts/${account.id}/update-cookie`, {
+          cookie_string: parsed,
+        })
+      }
+
+      toast.success('Account updated')
+      onSuccess()
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Update failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Edit Account</h2>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-500">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Browser Type</label>
+            <select
+              value={browserType}
+              onChange={(e) => setBrowserType(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="chromium">Chromium</option>
+              <option value="camoufox">Camoufox</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Update Cookie (optional)
+            </label>
+            <textarea
+              value={cookieString}
+              onChange={(e) => setCookieString(e.target.value)}
+              rows={3}
+              placeholder="Leave empty to keep current cookie"
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="isActive"
+              checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <label htmlFor="isActive" className="text-sm text-gray-700">Active</label>
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+            >
+              {loading && <Loader className="w-4 h-4 animate-spin" />}
+              {loading ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </form>

@@ -1,12 +1,18 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 
+let authInitialized = false
+let authSubscription = null
+
 const useAuthStore = create((set) => ({
   user: null,
   profile: null,
   loading: true,
 
   init: async () => {
+    if (authInitialized) return
+    authInitialized = true
+
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
@@ -21,7 +27,11 @@ const useAuthStore = create((set) => ({
         set({ loading: false })
       }
 
-      supabase.auth.onAuthStateChange(async (event, session) => {
+      if (authSubscription) {
+        authSubscription.unsubscribe()
+      }
+
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
           const { data: profile } = await supabase
             .from('profiles')
@@ -33,6 +43,7 @@ const useAuthStore = create((set) => ({
           set({ user: null, profile: null })
         }
       })
+      authSubscription = subscription
     } catch (err) {
       console.error('Auth init failed:', err)
       set({ loading: false })
