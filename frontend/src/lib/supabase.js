@@ -9,7 +9,7 @@ if (!url || !key) {
 
 export const supabase = createClient(url, key, {
   auth: {
-    lock: false,
+    lock: async (name, acquireTimeout, fn) => await fn(),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
