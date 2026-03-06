@@ -1,4 +1,4 @@
-const { validateCookie, getFbDtsg, extractCUserId, generateFingerprint, getDefaultUA } = require('../services/facebook/fb-auth')
+const { extractCUserId, generateFingerprint } = require('../services/facebook/fb-auth')
 
 module.exports = async (fastify) => {
   const { supabase } = fastify
@@ -28,36 +28,19 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // POST /accounts - Add account via cookie
+  // POST /accounts - Add account (save only, no validation)
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { cookie_string, username, browser_type, proxy_id, notes, skip_validation } = req.body
+    const { cookie_string, username, browser_type, proxy_id, notes } = req.body
     if (!cookie_string) return reply.code(400).send({ error: 'cookie_string required' })
 
     const fbUserId = extractCUserId(cookie_string)
     const fingerprint = generateFingerprint(fbUserId)
-    let dtsg = null
-
-    // Only validate/fetch dtsg if not skipped (validation fails from datacenter IPs)
-    if (!skip_validation) {
-      try {
-        const mockAccount = { cookie_string, user_agent: fingerprint.userAgent }
-        const check = await validateCookie(mockAccount)
-        if (!check.valid) {
-          fastify.log.warn(`Cookie validation failed: ${check.reason}, saving anyway`)
-        }
-        dtsg = await getFbDtsg(mockAccount)
-      } catch (err) {
-        fastify.log.warn(`Cookie validation skipped: ${err.message}`)
-      }
-    }
 
     const { data, error } = await supabase.from('accounts').insert({
       owner_id: req.user.id,
       username: username || (fbUserId ? `User ${fbUserId}` : 'Unknown'),
       fb_user_id: fbUserId,
       cookie_string,
-      fb_dtsg: dtsg,
-      dtsg_expires_at: dtsg ? new Date(Date.now() + 6 * 60 * 60 * 1000) : null,
       browser_type: browser_type || 'chromium',
       proxy_id: proxy_id || null,
       user_agent: fingerprint.userAgent,
@@ -105,50 +88,62 @@ module.exports = async (fastify) => {
     return { success: true }
   })
 
-  // POST /accounts/:id/check-health
+  // POST /accounts/:id/check-health - Create job for agent to validate
   fastify.post('/:id/check-health', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: account } = await supabase
       .from('accounts')
-      .select('*, proxies(*)')
+      .select('id')
       .eq('id', req.params.id)
       .eq('owner_id', req.user.id)
       .single()
 
     if (!account) return reply.code(404).send({ error: 'Not found' })
 
-    const result = await validateCookie(account, account.proxies)
-    await supabase.from('accounts').update({
-      status: result.valid ? 'healthy' : (result.reason === 'CHECKPOINT' ? 'checkpoint' : 'expired'),
-      last_checked_at: new Date()
-    }).eq('id', req.params.id)
+    // Check if agent is online (heartbeat within last 30s)
+    const { data: agents } = await supabase
+      .from('agent_heartbeats')
+      .select('agent_id')
+      .gte('last_seen', new Date(Date.now() - 30000).toISOString())
+      .limit(1)
 
-    return result
+    if (!agents?.length) {
+      return reply.code(503).send({ error: 'No agent online. Start the SocialFlow Agent first.' })
+    }
+
+    // Create job for agent
+    const { data: job, error } = await supabase.from('jobs').insert({
+      type: 'check_health',
+      payload: { account_id: req.params.id },
+      status: 'pending',
+      scheduled_at: new Date().toISOString()
+    }).select().single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Update account status to show checking
+    await supabase.from('accounts').update({ status: 'checking' }).eq('id', req.params.id)
+
+    return { message: 'Check queued', job_id: job.id }
   })
 
-  // POST /accounts/:id/update-cookie - Update cookie for existing account
+  // POST /accounts/:id/update-cookie - Update cookie (save only, agent validates later)
   fastify.post('/:id/update-cookie', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { cookie_string } = req.body
     if (!cookie_string) return reply.code(400).send({ error: 'cookie_string required' })
 
-    const mockAccount = { cookie_string, user_agent: getDefaultUA() }
-    const check = await validateCookie(mockAccount)
-    if (!check.valid) return reply.code(400).send({ error: `Cookie invalid: ${check.reason}` })
-
-    const dtsg = await getFbDtsg(mockAccount)
+    const fbUserId = extractCUserId(cookie_string)
 
     const { data, error } = await supabase.from('accounts').update({
       cookie_string,
-      fb_dtsg: dtsg,
-      dtsg_expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000),
-      status: 'healthy',
-      last_checked_at: new Date()
+      fb_user_id: fbUserId || undefined,
+      status: 'unknown',
     }).eq('id', req.params.id).eq('owner_id', req.user.id).select().single()
 
     if (error) return reply.code(500).send({ error: error.message })
     return data
   })
 
-  // POST /accounts/bulk-import - Import multiple accounts
+  // POST /accounts/bulk-import - Import multiple accounts (save only)
   fastify.post('/bulk-import', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { cookies, browser_type } = req.body
     if (!cookies?.length) return reply.code(400).send({ error: 'cookies array required' })
@@ -156,14 +151,6 @@ module.exports = async (fastify) => {
     const results = []
     for (const cookie_string of cookies) {
       try {
-        const mockAccount = { cookie_string, user_agent: getDefaultUA() }
-        const check = await validateCookie(mockAccount)
-        if (!check.valid) {
-          results.push({ cookie: cookie_string.substring(0, 20) + '...', success: false, error: check.reason })
-          continue
-        }
-
-        const dtsg = await getFbDtsg(mockAccount)
         const fbUserId = extractCUserId(cookie_string)
         const fingerprint = generateFingerprint(fbUserId)
 
@@ -172,12 +159,11 @@ module.exports = async (fastify) => {
           username: `User ${fbUserId}`,
           fb_user_id: fbUserId,
           cookie_string,
-          fb_dtsg: dtsg,
-          dtsg_expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000),
           browser_type: browser_type || 'chromium',
           user_agent: fingerprint.userAgent,
           viewport: fingerprint.viewport,
-          timezone: fingerprint.timezone
+          timezone: fingerprint.timezone,
+          status: 'unknown'
         }).select().single()
 
         results.push({ fbUserId, success: !error, id: data?.id })
