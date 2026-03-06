@@ -30,31 +30,40 @@ module.exports = async (fastify) => {
 
   // POST /accounts - Add account via cookie
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { cookie_string, username, browser_type, proxy_id, notes } = req.body
+    const { cookie_string, username, browser_type, proxy_id, notes, skip_validation } = req.body
     if (!cookie_string) return reply.code(400).send({ error: 'cookie_string required' })
 
-    // Validate cookie
-    const mockAccount = { cookie_string, user_agent: getDefaultUA() }
-    const check = await validateCookie(mockAccount)
-    if (!check.valid) return reply.code(400).send({ error: `Cookie invalid: ${check.reason}` })
-
-    // Get dtsg and user info
-    const dtsg = await getFbDtsg(mockAccount)
     const fbUserId = extractCUserId(cookie_string)
     const fingerprint = generateFingerprint(fbUserId)
+    let dtsg = null
+
+    // Only validate/fetch dtsg if not skipped (validation fails from datacenter IPs)
+    if (!skip_validation) {
+      try {
+        const mockAccount = { cookie_string, user_agent: fingerprint.userAgent }
+        const check = await validateCookie(mockAccount)
+        if (!check.valid) {
+          fastify.log.warn(`Cookie validation failed: ${check.reason}, saving anyway`)
+        }
+        dtsg = await getFbDtsg(mockAccount)
+      } catch (err) {
+        fastify.log.warn(`Cookie validation skipped: ${err.message}`)
+      }
+    }
 
     const { data, error } = await supabase.from('accounts').insert({
       owner_id: req.user.id,
-      username: username || `User ${fbUserId}`,
+      username: username || (fbUserId ? `User ${fbUserId}` : 'Unknown'),
       fb_user_id: fbUserId,
       cookie_string,
       fb_dtsg: dtsg,
-      dtsg_expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000),
+      dtsg_expires_at: dtsg ? new Date(Date.now() + 6 * 60 * 60 * 1000) : null,
       browser_type: browser_type || 'chromium',
       proxy_id: proxy_id || null,
       user_agent: fingerprint.userAgent,
       viewport: fingerprint.viewport,
       timezone: fingerprint.timezone,
+      status: 'unknown',
       notes
     }).select().single()
 
