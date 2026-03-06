@@ -1,0 +1,9 @@
+[build]
+watch = ["api/**"]
+builder = "dockerfile"
+dockerfilePath = "api/Dockerfile"
+
+[deploy]
+startCommand = "node api/src/server.js"
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"
