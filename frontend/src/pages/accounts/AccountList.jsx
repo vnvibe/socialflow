@@ -188,6 +188,28 @@ export default function AccountList() {
   )
 }
 
+function parseCookieInput(raw) {
+  const trimmed = raw.trim()
+  // Detect JSON array format (from Cookie Editor extension)
+  if (trimmed.startsWith('[')) {
+    try {
+      const arr = JSON.parse(trimmed)
+      if (Array.isArray(arr) && arr.length > 0 && arr[0].name && arr[0].value) {
+        return arr.map(c => `${c.name}=${c.value}`).join('; ')
+      }
+    } catch {}
+  }
+  // Detect JSON object format (single cookie)
+  if (trimmed.startsWith('{')) {
+    try {
+      const obj = JSON.parse(trimmed)
+      if (obj.name && obj.value) return `${obj.name}=${obj.value}`
+    } catch {}
+  }
+  // Already plain cookie string
+  return trimmed
+}
+
 function AddAccountModal({ onClose, onSuccess }) {
   const [cookieString, setCookieString] = useState('')
   const [browserType, setBrowserType] = useState('chromium')
@@ -200,17 +222,23 @@ function AddAccountModal({ onClose, onSuccess }) {
       return
     }
 
+    const parsed = parseCookieInput(cookieString)
+    if (!parsed) {
+      toast.error('Invalid cookie format')
+      return
+    }
+
     setLoading(true)
     try {
       await api.post('/accounts', {
-        cookie_string: cookieString.trim(),
+        cookie_string: parsed,
         browser_type: browserType,
       })
       toast.success('Account added successfully')
       onSuccess()
     } catch (err) {
       toast.error(
-        err.response?.data?.detail || 'Failed to add account'
+        err.response?.data?.error || err.response?.data?.detail || 'Failed to add account'
       )
     } finally {
       setLoading(false)
@@ -239,7 +267,7 @@ function AddAccountModal({ onClose, onSuccess }) {
               value={cookieString}
               onChange={(e) => setCookieString(e.target.value)}
               rows={5}
-              placeholder="Paste the Facebook cookie string here..."
+              placeholder={"Paste cookie here...\nSupports: JSON array (Cookie Editor), plain string (c_user=xxx; xs=xxx; ...)"}
               className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
             />
           </div>
@@ -289,10 +317,25 @@ function BulkImportModal({ onClose, onSuccess }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    const lines = cookies
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
+    const raw = cookies.trim()
+    let lines
+
+    // Detect if entire input is a single JSON array
+    if (raw.startsWith('[')) {
+      try {
+        const arr = JSON.parse(raw)
+        if (Array.isArray(arr) && arr.length > 0 && arr[0].name) {
+          // Single JSON cookie array → one account
+          lines = [arr.map(c => `${c.name}=${c.value}`).join('; ')]
+        }
+      } catch {
+        // Not valid JSON, treat as multi-line
+      }
+    }
+
+    if (!lines) {
+      lines = raw.split('\n').map((l) => parseCookieInput(l)).filter(Boolean)
+    }
 
     if (lines.length === 0) {
       toast.error('Please enter at least one cookie string')

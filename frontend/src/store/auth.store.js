@@ -7,31 +7,36 @@ const useAuthStore = create((set) => ({
   loading: true,
 
   init: async () => {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.user) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single()
-
-      set({ user: session.user, profile, loading: false })
-    } else {
-      set({ loading: false })
-    }
-
-    supabase.auth.onAuthStateChange(async (event, session) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
         const { data: profile } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
           .single()
-        set({ user: session.user, profile })
+
+        set({ user: session.user, profile, loading: false })
       } else {
-        set({ user: null, profile: null })
+        set({ loading: false })
       }
-    })
+
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single()
+          set({ user: session.user, profile })
+        } else {
+          set({ user: null, profile: null })
+        }
+      })
+    } catch (err) {
+      console.error('Auth init failed:', err)
+      set({ loading: false })
+    }
   },
 
   login: async (email, password) => {
