@@ -1,4 +1,5 @@
 const axios = require('axios')
+const { HttpProxyAgent, HttpsProxyAgent } = require('https-proxy-agent')
 
 module.exports = async (fastify) => {
   const { supabase } = fastify
@@ -80,24 +81,31 @@ module.exports = async (fastify) => {
 
     const start = Date.now()
     try {
-      await axios.get('https://httpbin.org/ip', {
-        proxy: {
-          host: proxy.host,
-          port: proxy.port,
-          ...(proxy.username && { auth: { username: proxy.username, password: proxy.password } })
-        },
+      const proxyUrl = `http://${proxy.username ? `${proxy.username}:${proxy.password}@` : ''}${proxy.host}:${proxy.port}`
+
+      const response = await axios.get('http://ip-api.com/json/', {
+        httpAgent: new HttpProxyAgent(proxyUrl),
+        httpsAgent: new HttpsProxyAgent(proxyUrl),
         timeout: 10000
       })
 
       const speed = Date.now() - start
-      await supabase.from('proxies').update({
-        is_active: true,
-        speed_ms: speed,
-        failure_count: 0,
-        last_checked_at: new Date()
-      }).eq('id', proxy.id)
 
-      return { success: true, speed_ms: speed }
+      if (response.data && response.data.status === 'success') {
+        const country = response.data.countryCode || response.data.country
+
+        await supabase.from('proxies').update({
+          is_active: true,
+          speed_ms: speed,
+          failure_count: 0,
+          country: country,
+          last_checked_at: new Date()
+        }).eq('id', proxy.id)
+
+        return { success: true, speed_ms: speed, country }
+      } else {
+        throw new Error('Invalid response from IP connect')
+      }
     } catch (err) {
       await supabase.from('proxies').update({
         failure_count: (proxy.failure_count || 0) + 1,
@@ -116,17 +124,31 @@ module.exports = async (fastify) => {
       (proxies || []).map(async (proxy) => {
         const start = Date.now()
         try {
-          await axios.get('https://httpbin.org/ip', {
-            proxy: {
-              host: proxy.host,
-              port: proxy.port,
-              ...(proxy.username && { auth: { username: proxy.username, password: proxy.password } })
-            },
+          const proxyUrl = `http://${proxy.username ? `${proxy.username}:${proxy.password}@` : ''}${proxy.host}:${proxy.port}`
+
+          const response = await axios.get('http://ip-api.com/json/', {
+            httpAgent: new HttpProxyAgent(proxyUrl),
+            httpsAgent: new HttpsProxyAgent(proxyUrl),
             timeout: 10000
           })
+
           const speed = Date.now() - start
-          await supabase.from('proxies').update({ speed_ms: speed, failure_count: 0, last_checked_at: new Date() }).eq('id', proxy.id)
-          return { id: proxy.id, success: true, speed_ms: speed }
+
+          if (response.data && response.data.status === 'success') {
+            const country = response.data.countryCode || response.data.country
+
+            await supabase.from('proxies').update({
+              is_active: true,
+              speed_ms: speed,
+              failure_count: 0,
+              country: country,
+              last_checked_at: new Date()
+            }).eq('id', proxy.id)
+
+            return { id: proxy.id, success: true, speed_ms: speed, country }
+          } else {
+            throw new Error('Invalid response from IP connect')
+          }
         } catch (err) {
           await supabase.from('proxies').update({ failure_count: (proxy.failure_count || 0) + 1, last_checked_at: new Date() }).eq('id', proxy.id)
           return { id: proxy.id, success: false, error: err.message }

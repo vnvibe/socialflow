@@ -8,18 +8,19 @@
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
-    "fastify": "^5.2.1",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@aws-sdk/client-s3": "^3.712.0",
     "@fastify/cors": "^10.0.2",
     "@fastify/multipart": "^9.0.3",
-    "@supabase/supabase-js": "^2.49.1",
-    "axios": "^1.7.9",
-    "openai": "^4.77.0",
-    "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.21.0",
-    "@aws-sdk/client-s3": "^3.712.0",
+    "@supabase/supabase-js": "^2.49.1",
+    "axios": "^1.13.6",
+    "crypto-js": "^4.2.0",
     "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
     "fastify-plugin": "^5.0.1",
+    "https-proxy-agent": "^7.0.6",
     "node-cron": "^3.0.3",
-    "crypto-js": "^4.2.0"
+    "openai": "^4.77.0"
   }
 }
