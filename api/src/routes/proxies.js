@@ -30,13 +30,15 @@ module.exports = async (fastify) => {
     return reply.code(201).send(data)
   })
 
-  // POST /proxies/bulk-import - Import from text (ip:port:user:pass per line)
+  // POST /proxies/bulk-import - Import from text (ip:port:user:pass per item)
   fastify.post('/bulk-import', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { text, type } = req.body
-    if (!text) return reply.code(400).send({ error: 'text required' })
+    const { proxies: inputProxies, type } = req.body
 
-    const lines = text.split('\n').filter(l => l.trim())
-    const proxies = lines.map(line => {
+    if (!inputProxies || !Array.isArray(inputProxies)) {
+      return reply.code(400).send({ error: 'proxies array required' })
+    }
+
+    const proxiesToInsert = inputProxies.map(line => {
       const parts = line.trim().split(':')
       return {
         host: parts[0],
@@ -47,9 +49,9 @@ module.exports = async (fastify) => {
       }
     }).filter(p => p.host && p.port)
 
-    if (proxies.length === 0) return reply.code(400).send({ error: 'No valid proxies found' })
+    if (proxiesToInsert.length === 0) return reply.code(400).send({ error: 'No valid proxies found' })
 
-    const { data, error } = await supabase.from('proxies').insert(proxies).select()
+    const { data, error } = await supabase.from('proxies').insert(proxiesToInsert).select()
     if (error) return reply.code(500).send({ error: error.message })
     return { imported: data.length, proxies: data }
   })
