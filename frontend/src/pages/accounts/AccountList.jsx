@@ -21,12 +21,14 @@ export default function AccountList() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showBulkModal, setShowBulkModal] = useState(false)
   const [search, setSearch] = useState('')
+  const [editAccount, setEditAccount] = useState(null)
 
   const queryClient = useQueryClient()
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['accounts'],
     queryFn: () => api.get('/accounts').then((r) => r.data),
+    refetchInterval: 5000,
   })
 
   const filtered = accounts.filter(
@@ -35,15 +37,19 @@ export default function AccountList() {
       a.fb_user_id?.toLowerCase().includes(search.toLowerCase())
   )
 
-  const [editAccount, setEditAccount] = useState(null)
-
   const healthCheckMutation = useMutation({
     mutationFn: (id) => api.post(`/accounts/${id}/check-health`),
     onSuccess: () => {
-      toast.success('Health check started')
+      toast.success('Check queued - agent is processing...')
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
     },
-    onError: () => toast.error('Health check failed'),
+    onError: (err) => {
+      if (err.response?.status === 503) {
+        toast.error('Agent offline! Start the SocialFlow Agent first.')
+      } else {
+        toast.error(err.response?.data?.error || 'Health check failed')
+      }
+    },
   })
 
   const deleteMutation = useMutation({
@@ -63,7 +69,6 @@ export default function AccountList() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Accounts</h1>
         <div className="flex items-center gap-2">
@@ -84,7 +89,6 @@ export default function AccountList() {
         </div>
       </div>
 
-      {/* Search */}
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         <input
@@ -96,7 +100,6 @@ export default function AccountList() {
         />
       </div>
 
-      {/* Table */}
       {isLoading ? (
         <div className="flex items-center justify-center h-64">
           <Loader className="w-6 h-6 animate-spin text-blue-500" />
@@ -111,59 +114,54 @@ export default function AccountList() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">
-                    Username
-                  </th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">
-                    FB User ID
-                  </th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">
-                    Browser
-                  </th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">
-                    Proxy
-                  </th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">
-                    Status
-                  </th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">
-                    Posts Today
-                  </th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">
-                    Actions
-                  </th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Username</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">FB User ID</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Browser</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Proxy</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Posts Today</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((account) => (
                   <tr key={account.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">
-                      {account.username}
+                      <div className="flex items-center gap-2">
+                        {account.avatar_url ? (
+                          <img src={account.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                            {(account.username || '?')[0].toUpperCase()}
+                          </div>
+                        )}
+                        {account.username}
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {account.fb_user_id}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {account.browser_type || 'N/A'}
-                    </td>
+                    <td className="px-4 py-3 text-gray-500">{account.fb_user_id}</td>
+                    <td className="px-4 py-3 text-gray-500">{account.browser_type || 'chromium'}</td>
                     <td className="px-4 py-3">
-                      <ProxyBadge proxy={account.proxy} />
+                      <ProxyBadge proxy={account.proxies} />
                     </td>
                     <td className="px-4 py-3">
                       <HealthBadge status={account.status} />
                     </td>
                     <td className="px-4 py-3 text-gray-500">
-                      {account.posts_today ?? 0}/{account.max_daily_posts ?? '?'}
+                      {account.posts_today ?? 0}/{account.max_daily_posts ?? 10}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={() => healthCheckMutation.mutate(account.id)}
-                          disabled={healthCheckMutation.isPending}
+                          disabled={healthCheckMutation.isPending || account.status === 'checking'}
                           className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                         >
-                          <Activity className="w-3.5 h-3.5" />
-                          Check
+                          {account.status === 'checking' ? (
+                            <Loader className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Activity className="w-3.5 h-3.5" />
+                          )}
+                          {account.status === 'checking' ? 'Checking...' : 'Check'}
                         </button>
                         <button
                           onClick={() => setEditAccount(account)}
@@ -197,7 +195,6 @@ export default function AccountList() {
         </div>
       )}
 
-      {/* Edit Account Modal */}
       {editAccount && (
         <EditAccountModal
           account={editAccount}
@@ -209,7 +206,6 @@ export default function AccountList() {
         />
       )}
 
-      {/* Add Account Modal */}
       {showAddModal && (
         <AddAccountModal
           onClose={() => setShowAddModal(false)}
@@ -220,7 +216,6 @@ export default function AccountList() {
         />
       )}
 
-      {/* Bulk Import Modal */}
       {showBulkModal && (
         <BulkImportModal
           onClose={() => setShowBulkModal(false)}
@@ -234,32 +229,110 @@ export default function AccountList() {
   )
 }
 
+/* ---- Helpers ---- */
+
 function parseCookieInput(raw) {
   const trimmed = raw.trim()
-  // Detect JSON array format (from Cookie Editor extension)
   if (trimmed.startsWith('[')) {
     try {
       const arr = JSON.parse(trimmed)
       if (Array.isArray(arr) && arr.length > 0 && arr[0].name && arr[0].value) {
-        return arr.map(c => `${c.name}=${c.value}`).join('; ')
+        return arr.map((c) => `${c.name}=${c.value}`).join('; ')
       }
     } catch {}
   }
-  // Detect JSON object format (single cookie)
   if (trimmed.startsWith('{')) {
     try {
       const obj = JSON.parse(trimmed)
       if (obj.name && obj.value) return `${obj.name}=${obj.value}`
     } catch {}
   }
-  // Already plain cookie string
   return trimmed
 }
+
+function parseProxyString(str) {
+  if (!str.trim()) return null
+  const parts = str.trim().split(':')
+  if (parts.length < 2) return null
+  return {
+    host: parts[0],
+    port: parseInt(parts[1]),
+    username: parts[2] || null,
+    password: parts[3] || null,
+    type: 'http',
+  }
+}
+
+/* ---- Proxy Input Component ---- */
+
+function ProxyInput({ proxyId, setProxyId, newProxy, setNewProxy, proxies = [] }) {
+  const [mode, setMode] = useState(proxyId ? 'select' : 'none')
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1.5">Proxy</label>
+      <div className="flex items-center gap-2 mb-2">
+        <button
+          type="button"
+          onClick={() => { setMode('none'); setProxyId(''); setNewProxy('') }}
+          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'none' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+        >
+          No Proxy
+        </button>
+        {proxies.length > 0 && (
+          <button
+            type="button"
+            onClick={() => { setMode('select'); setNewProxy('') }}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'select' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+          >
+            Select Existing
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => { setMode('new'); setProxyId('') }}
+          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'new' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+        >
+          + Add New
+        </button>
+      </div>
+
+      {mode === 'select' && (
+        <select
+          value={proxyId}
+          onChange={(e) => setProxyId(e.target.value)}
+          className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        >
+          <option value="">Choose proxy...</option>
+          {proxies.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label || `${p.host}:${p.port}`}
+              {p.country ? ` (${p.country})` : ''}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {mode === 'new' && (
+        <input
+          type="text"
+          value={newProxy}
+          onChange={(e) => setNewProxy(e.target.value)}
+          placeholder="host:port:username:password"
+          className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+        />
+      )}
+    </div>
+  )
+}
+
+/* ---- Add Account Modal ---- */
 
 function AddAccountModal({ onClose, onSuccess }) {
   const [cookieString, setCookieString] = useState('')
   const [browserType, setBrowserType] = useState('chromium')
   const [proxyId, setProxyId] = useState('')
+  const [newProxy, setNewProxy] = useState('')
   const [loading, setLoading] = useState(false)
 
   const { data: proxies = [] } = useQuery({
@@ -269,30 +342,35 @@ function AddAccountModal({ onClose, onSuccess }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!cookieString.trim()) {
-      toast.error('Cookie string is required')
-      return
-    }
+    if (!cookieString.trim()) return toast.error('Cookie string is required')
 
     const parsed = parseCookieInput(cookieString)
-    if (!parsed) {
-      toast.error('Invalid cookie format')
-      return
-    }
+    if (!parsed) return toast.error('Invalid cookie format')
 
     setLoading(true)
     try {
+      let finalProxyId = proxyId || null
+
+      if (newProxy.trim()) {
+        const proxyData = parseProxyString(newProxy)
+        if (!proxyData) {
+          toast.error('Invalid proxy format. Use host:port or host:port:user:pass')
+          setLoading(false)
+          return
+        }
+        const res = await api.post('/proxies', proxyData)
+        finalProxyId = res.data.id
+      }
+
       await api.post('/accounts', {
         cookie_string: parsed,
         browser_type: browserType,
-        proxy_id: proxyId || null,
+        proxy_id: finalProxyId,
       })
-      toast.success('Account added successfully')
+      toast.success('Account added')
       onSuccess()
     } catch (err) {
-      toast.error(
-        err.response?.data?.error || err.response?.data?.detail || 'Failed to add account'
-      )
+      toast.error(err.response?.data?.error || 'Failed to add account')
     } finally {
       setLoading(false)
     }
@@ -300,51 +378,28 @@ function AddAccountModal({ onClose, onSuccess }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Add Account</h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg hover:bg-gray-100 text-gray-500"
-          >
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-500">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Cookie String
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Cookie String</label>
             <textarea
               value={cookieString}
               onChange={(e) => setCookieString(e.target.value)}
               rows={5}
-              placeholder={"Paste cookie here...\nSupports: JSON array (Cookie Editor), plain string (c_user=xxx; xs=xxx; ...)"}
+              placeholder={'Paste cookie here...\nSupports: JSON array (Cookie Editor), plain string (c_user=xxx; xs=xxx; ...)'}
               className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Proxy (Optional)
-            </label>
-            <select
-              value={proxyId}
-              onChange={(e) => setProxyId(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">No Proxy (Direct)</option>
-              {proxies.map(p => (
-                <option key={p.id} value={p.id}>{p.label || `${p.host}:${p.port}`}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Browser Type
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Browser Type</label>
             <select
               value={browserType}
               onChange={(e) => setBrowserType(e.target.value)}
@@ -354,6 +409,14 @@ function AddAccountModal({ onClose, onSuccess }) {
               <option value="camoufox">Camoufox</option>
             </select>
           </div>
+
+          <ProxyInput
+            proxyId={proxyId}
+            setProxyId={setProxyId}
+            newProxy={newProxy}
+            setNewProxy={setNewProxy}
+            proxies={proxies}
+          />
 
           <div className="flex items-center gap-3 pt-2">
             <button
@@ -378,10 +441,13 @@ function AddAccountModal({ onClose, onSuccess }) {
   )
 }
 
+/* ---- Edit Account Modal ---- */
+
 function EditAccountModal({ account, onClose, onSuccess }) {
   const [username, setUsername] = useState(account.username || '')
   const [browserType, setBrowserType] = useState(account.browser_type || 'chromium')
   const [proxyId, setProxyId] = useState(account.proxy_id || '')
+  const [newProxy, setNewProxy] = useState('')
   const [notes, setNotes] = useState(account.notes || '')
   const [isActive, setIsActive] = useState(account.is_active !== false)
   const [cookieString, setCookieString] = useState('')
@@ -396,15 +462,27 @@ function EditAccountModal({ account, onClose, onSuccess }) {
     e.preventDefault()
     setLoading(true)
     try {
+      let finalProxyId = proxyId || null
+
+      if (newProxy.trim()) {
+        const proxyData = parseProxyString(newProxy)
+        if (!proxyData) {
+          toast.error('Invalid proxy format. Use host:port or host:port:user:pass')
+          setLoading(false)
+          return
+        }
+        const res = await api.post('/proxies', proxyData)
+        finalProxyId = res.data.id
+      }
+
       await api.put(`/accounts/${account.id}`, {
         username,
         browser_type: browserType,
-        proxy_id: proxyId || null,
+        proxy_id: finalProxyId,
         notes,
         is_active: isActive,
       })
 
-      // Update cookie if provided
       if (cookieString.trim()) {
         const parsed = parseCookieInput(cookieString)
         await api.post(`/accounts/${account.id}/update-cookie`, {
@@ -454,24 +532,16 @@ function EditAccountModal({ account, onClose, onSuccess }) {
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Proxy</label>
-            <select
-              value={proxyId}
-              onChange={(e) => setProxyId(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">No Proxy (Direct)</option>
-              {proxies.map(p => (
-                <option key={p.id} value={p.id}>{p.label || `${p.host}:${p.port}`}</option>
-              ))}
-            </select>
-          </div>
+          <ProxyInput
+            proxyId={proxyId}
+            setProxyId={setProxyId}
+            newProxy={newProxy}
+            setNewProxy={setNewProxy}
+            proxies={proxies}
+          />
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Update Cookie (optional)
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Update Cookie (optional)</label>
             <textarea
               value={cookieString}
               onChange={(e) => setCookieString(e.target.value)}
@@ -525,6 +595,8 @@ function EditAccountModal({ account, onClose, onSuccess }) {
   )
 }
 
+/* ---- Bulk Import Modal ---- */
+
 function BulkImportModal({ onClose, onSuccess }) {
   const [cookies, setCookies] = useState('')
   const [loading, setLoading] = useState(false)
@@ -534,38 +606,29 @@ function BulkImportModal({ onClose, onSuccess }) {
     const raw = cookies.trim()
     let lines
 
-    // Detect if entire input is a single JSON array
     if (raw.startsWith('[')) {
       try {
         const arr = JSON.parse(raw)
         if (Array.isArray(arr) && arr.length > 0 && arr[0].name) {
-          // Single JSON cookie array → one account
-          lines = [arr.map(c => `${c.name}=${c.value}`).join('; ')]
+          lines = [arr.map((c) => `${c.name}=${c.value}`).join('; ')]
         }
-      } catch {
-        // Not valid JSON, treat as multi-line
-      }
+      } catch {}
     }
 
     if (!lines) {
       lines = raw.split('\n').map((l) => parseCookieInput(l)).filter(Boolean)
     }
 
-    if (lines.length === 0) {
-      toast.error('Please enter at least one cookie string')
-      return
-    }
+    if (lines.length === 0) return toast.error('Please enter at least one cookie string')
 
     setLoading(true)
     try {
       const res = await api.post('/accounts/bulk-import', { cookies: lines })
-      const count = res.data?.imported ?? lines.length
-      toast.success(`Imported ${count} account(s)`)
+      const success = Array.isArray(res.data) ? res.data.filter((r) => r.success).length : lines.length
+      toast.success(`Imported ${success} account(s)`)
       onSuccess()
     } catch (err) {
-      toast.error(
-        err.response?.data?.detail || 'Bulk import failed'
-      )
+      toast.error(err.response?.data?.error || 'Bulk import failed')
     } finally {
       setLoading(false)
     }
@@ -576,10 +639,7 @@ function BulkImportModal({ onClose, onSuccess }) {
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Bulk Import</h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg hover:bg-gray-100 text-gray-500"
-          >
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-500">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -593,12 +653,11 @@ function BulkImportModal({ onClose, onSuccess }) {
               value={cookies}
               onChange={(e) => setCookies(e.target.value)}
               rows={8}
-              placeholder={"Paste cookie strings here, one per line...\ncookie_string_1\ncookie_string_2\ncookie_string_3"}
+              placeholder={'Paste cookie strings here, one per line...\ncookie_string_1\ncookie_string_2'}
               className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
             />
             <p className="text-xs text-gray-500 mt-1">
-              {cookies.split('\n').filter((l) => l.trim()).length} cookie(s)
-              entered
+              {cookies.split('\n').filter((l) => l.trim()).length} cookie(s) entered
             </p>
           </div>
 
