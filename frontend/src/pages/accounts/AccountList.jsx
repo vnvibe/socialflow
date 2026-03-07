@@ -259,7 +259,13 @@ function parseCookieInput(raw) {
 function AddAccountModal({ onClose, onSuccess }) {
   const [cookieString, setCookieString] = useState('')
   const [browserType, setBrowserType] = useState('chromium')
+  const [proxyId, setProxyId] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const { data: proxies = [] } = useQuery({
+    queryKey: ['proxies'],
+    queryFn: () => api.get('/proxies').then((r) => r.data),
+  })
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -279,6 +285,7 @@ function AddAccountModal({ onClose, onSuccess }) {
       await api.post('/accounts', {
         cookie_string: parsed,
         browser_type: browserType,
+        proxy_id: proxyId || null,
       })
       toast.success('Account added successfully')
       onSuccess()
@@ -320,6 +327,22 @@ function AddAccountModal({ onClose, onSuccess }) {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Proxy (Optional)
+            </label>
+            <select
+              value={proxyId}
+              onChange={(e) => setProxyId(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">No Proxy (Direct)</option>
+              {proxies.map(p => (
+                <option key={p.id} value={p.id}>{p.label || `${p.host}:${p.port}`}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Browser Type
             </label>
             <select
@@ -328,9 +351,7 @@ function AddAccountModal({ onClose, onSuccess }) {
               className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="chromium">Chromium</option>
-              <option value="firefox">Firefox</option>
-              <option value="hidemyacc">HideMyAcc</option>
-              <option value="gologin">GoLogin</option>
+              <option value="camoufox">Camoufox</option>
             </select>
           </div>
 
@@ -360,10 +381,16 @@ function AddAccountModal({ onClose, onSuccess }) {
 function EditAccountModal({ account, onClose, onSuccess }) {
   const [username, setUsername] = useState(account.username || '')
   const [browserType, setBrowserType] = useState(account.browser_type || 'chromium')
+  const [proxyId, setProxyId] = useState(account.proxy_id || '')
   const [notes, setNotes] = useState(account.notes || '')
   const [isActive, setIsActive] = useState(account.is_active !== false)
   const [cookieString, setCookieString] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const { data: proxies = [] } = useQuery({
+    queryKey: ['proxies'],
+    queryFn: () => api.get('/proxies').then((r) => r.data),
+  })
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -372,6 +399,7 @@ function EditAccountModal({ account, onClose, onSuccess }) {
       await api.put(`/accounts/${account.id}`, {
         username,
         browser_type: browserType,
+        proxy_id: proxyId || null,
         notes,
         is_active: isActive,
       })
@@ -423,6 +451,20 @@ function EditAccountModal({ account, onClose, onSuccess }) {
             >
               <option value="chromium">Chromium</option>
               <option value="camoufox">Camoufox</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Proxy</label>
+            <select
+              value={proxyId}
+              onChange={(e) => setProxyId(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">No Proxy (Direct)</option>
+              {proxies.map(p => (
+                <option key={p.id} value={p.id}>{p.label || `${p.host}:${p.port}`}</option>
+              ))}
             </select>
           </div>
 
