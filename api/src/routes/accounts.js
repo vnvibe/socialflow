@@ -88,6 +88,30 @@ module.exports = async (fastify) => {
     return { success: true }
   })
 
+  // GET /accounts/:id/fanpages - List fanpages for specific account
+  fastify.get('/:id/fanpages', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data, error } = await supabase
+      .from('fanpages')
+      .select('*')
+      .eq('account_id', req.params.id)
+      .order('created_at', { ascending: false })
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
+  // GET /accounts/:id/groups - List groups for specific account
+  fastify.get('/:id/groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data, error } = await supabase
+      .from('fb_groups')
+      .select('*')
+      .eq('account_id', req.params.id)
+      .order('created_at', { ascending: false })
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
   // POST /accounts/:id/check-health - Create job for agent to validate
   fastify.post('/:id/check-health', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: account } = await supabase
