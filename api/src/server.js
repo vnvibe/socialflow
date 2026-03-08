@@ -37,6 +37,7 @@ app.register(require('./routes/ai'), { prefix: '/ai' })
 app.register(require('./routes/trends'), { prefix: '/trends' })
 app.register(require('./routes/inbox'), { prefix: '/inbox' })
 app.register(require('./routes/analytics'), { prefix: '/analytics' })
+app.register(require('./routes/users'), { prefix: '/users' })
 
 // Health check
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))

@@ -112,6 +112,30 @@ module.exports = async (fastify) => {
     return data || []
   })
 
+  // POST /accounts/:id/fetch-pages - Agent job to scrape fanpages from Facebook
+  fastify.post('/:id/fetch-pages', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id').gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
+    if (!agents?.length) return reply.code(503).send({ error: 'No agent online. Start the SocialFlow Agent first.' })
+
+    const { data: job, error } = await supabase.from('jobs').insert({
+      type: 'fetch_pages', payload: { account_id: req.params.id }, status: 'pending', scheduled_at: new Date().toISOString()
+    }).select().single()
+    if (error) return reply.code(500).send({ error: error.message })
+    return { message: 'Fetch pages queued', job_id: job.id }
+  })
+
+  // POST /accounts/:id/fetch-groups - Agent job to scrape groups from Facebook
+  fastify.post('/:id/fetch-groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id').gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
+    if (!agents?.length) return reply.code(503).send({ error: 'No agent online. Start the SocialFlow Agent first.' })
+
+    const { data: job, error } = await supabase.from('jobs').insert({
+      type: 'fetch_groups', payload: { account_id: req.params.id }, status: 'pending', scheduled_at: new Date().toISOString()
+    }).select().single()
+    if (error) return reply.code(500).send({ error: error.message })
+    return { message: 'Fetch groups queued', job_id: job.id }
+  })
+
   // POST /accounts/:id/check-health - Create job for agent to validate
   fastify.post('/:id/check-health', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: account } = await supabase
