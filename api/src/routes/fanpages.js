@@ -4,6 +4,23 @@ const { fetchPageInbox, replyToMessage } = require('../services/facebook/fb-inbo
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
+  // Helper: verify account belongs to user
+  const verifyAccountOwner = async (accountId, userId) => {
+    const { data } = await supabase.from('accounts').select('id').eq('id', accountId).eq('owner_id', userId).single()
+    return !!data
+  }
+
+  // Helper: verify fanpage belongs to user (via account)
+  const verifyFanpageOwner = async (fanpageId, userId) => {
+    const { data } = await supabase
+      .from('fanpages')
+      .select('id, accounts!inner(owner_id)')
+      .eq('id', fanpageId)
+      .eq('accounts.owner_id', userId)
+      .single()
+    return data
+  }
+
   // GET /fanpages
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data, error } = await supabase
@@ -20,6 +37,10 @@ module.exports = async (fastify) => {
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { account_id, fb_page_id, name, url, category } = req.body
     if (!account_id || !fb_page_id) return reply.code(400).send({ error: 'account_id and fb_page_id required' })
+
+    if (!await verifyAccountOwner(account_id, req.user.id)) {
+      return reply.code(403).send({ error: 'Account not yours' })
+    }
 
     const { data, error } = await supabase.from('fanpages').insert({
       account_id, fb_page_id, name, url, category
@@ -44,6 +65,10 @@ module.exports = async (fastify) => {
 
   // PUT /fanpages/:id
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await verifyFanpageOwner(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your fanpage' })
+    }
+
     const allowed = ['name', 'inbox_enabled', 'inbox_interval_minutes', 'is_active', 'posting_method']
     const updates = {}
     for (const key of allowed) {
@@ -57,6 +82,10 @@ module.exports = async (fastify) => {
 
   // DELETE /fanpages/:id
   fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await verifyFanpageOwner(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your fanpage' })
+    }
+
     const { error } = await supabase.from('fanpages').delete().eq('id', req.params.id)
     if (error) return reply.code(500).send({ error: error.message })
     return { success: true }
@@ -64,6 +93,11 @@ module.exports = async (fastify) => {
 
   // GET /fanpages/:id/inbox - Get inbox messages
   fastify.get('/:id/inbox', { preHandler: fastify.authenticate }, async (req, reply) => {
+    // Verify fanpage belongs to user
+    if (!await verifyFanpageOwner(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your fanpage' })
+    }
+
     const limit = parseInt(req.query.limit) || 50
     const offset = parseInt(req.query.offset) || 0
 
@@ -82,8 +116,9 @@ module.exports = async (fastify) => {
   fastify.post('/:id/fetch-inbox', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: fanpage } = await supabase
       .from('fanpages')
-      .select('*, accounts(*)')
+      .select('*, accounts!inner(*, owner_id)')
       .eq('id', req.params.id)
+      .eq('accounts.owner_id', req.user.id)
       .single()
 
     if (!fanpage) return reply.code(404).send({ error: 'Not found' })
@@ -114,8 +149,9 @@ module.exports = async (fastify) => {
 
     const { data: fanpage } = await supabase
       .from('fanpages')
-      .select('*, accounts(*)')
+      .select('*, accounts!inner(*, owner_id)')
       .eq('id', req.params.id)
+      .eq('accounts.owner_id', req.user.id)
       .single()
 
     if (!fanpage) return reply.code(404).send({ error: 'Not found' })
@@ -135,6 +171,11 @@ module.exports = async (fastify) => {
 
   // POST /fanpages/:id/mark-read - Mark messages as read
   fastify.post('/:id/mark-read', { preHandler: fastify.authenticate }, async (req, reply) => {
+    // Verify fanpage belongs to user
+    if (!await verifyFanpageOwner(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your fanpage' })
+    }
+
     const { message_ids } = req.body
     if (!message_ids?.length) return reply.code(400).send({ error: 'message_ids required' })
 
@@ -142,13 +183,13 @@ module.exports = async (fastify) => {
       .from('inbox_messages')
       .update({ is_read: true })
       .in('id', message_ids)
+      .eq('fanpage_id', req.params.id)
 
     if (error) return reply.code(500).send({ error: error.message })
     return { success: true }
   })
 
   // POST /fanpages/:id/post-direct - Post directly via Graph API without agent/job
-  // Body: { caption, media_url, media_type } where media_type: 'photo' | 'video' | 'text'
   fastify.post('/:id/post-direct', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { caption = '', media_url, media_type = 'text' } = req.body || {}
 

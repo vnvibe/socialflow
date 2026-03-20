@@ -352,7 +352,7 @@ module.exports = async (fastify) => {
 
   // POST /content/:id/generate-hashtags - AI generate hashtags
   fastify.post('/:id/generate-hashtags', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { data: content } = await supabase.from('contents').select('caption').eq('id', req.params.id).single()
+    const { data: content } = await supabase.from('contents').select('caption').eq('id', req.params.id).eq('owner_id', req.user.id).single()
 
     const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
     const result = await orchestrator.call('hashtag_gen', [
@@ -370,7 +370,7 @@ module.exports = async (fastify) => {
   // POST /content/:id/spin-preview - Preview spin variations
   fastify.post('/:id/spin-preview', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { count, mode } = req.body
-    const { data: content } = await supabase.from('contents').select('caption, spin_mode, spin_template').eq('id', req.params.id).single()
+    const { data: content } = await supabase.from('contents').select('caption, spin_mode, spin_template').eq('id', req.params.id).eq('owner_id', req.user.id).single()
     if (!content) return reply.code(404).send({ error: 'Not found' })
 
     const orchestrator = await getOrchestratorForUser(req.user.id, supabase)

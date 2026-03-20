@@ -139,7 +139,7 @@ module.exports = async (fastify) => {
     }
 
     // Delete DB record
-    const { error } = await supabase.from('media').delete().eq('id', req.params.id)
+    const { error } = await supabase.from('media').delete().eq('id', req.params.id).eq('owner_id', req.user.id)
     if (error) return reply.code(500).send({ error: error.message })
     return { success: true }
   })

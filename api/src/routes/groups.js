@@ -1,6 +1,23 @@
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
+  // Helper: verify account belongs to user
+  const verifyAccountOwner = async (accountId, userId) => {
+    const { data } = await supabase.from('accounts').select('id').eq('id', accountId).eq('owner_id', userId).single()
+    return !!data
+  }
+
+  // Helper: verify group belongs to user (via account)
+  const verifyGroupOwner = async (groupId, userId) => {
+    const { data } = await supabase
+      .from('fb_groups')
+      .select('id, accounts!inner(owner_id)')
+      .eq('id', groupId)
+      .eq('accounts.owner_id', userId)
+      .single()
+    return !!data
+  }
+
   // GET /groups
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data, error } = await supabase
@@ -18,6 +35,10 @@ module.exports = async (fastify) => {
     const { account_id, fb_group_id, name, url, group_type, is_admin } = req.body
     if (!account_id || !fb_group_id) return reply.code(400).send({ error: 'account_id and fb_group_id required' })
 
+    if (!await verifyAccountOwner(account_id, req.user.id)) {
+      return reply.code(403).send({ error: 'Account not yours' })
+    }
+
     const { data, error } = await supabase.from('fb_groups').insert({
       account_id, fb_group_id, name, url,
       group_type: group_type || 'public',
@@ -32,6 +53,10 @@ module.exports = async (fastify) => {
   fastify.post('/bulk-add', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { account_id, groups } = req.body
     if (!account_id || !groups?.length) return reply.code(400).send({ error: 'account_id and groups required' })
+
+    if (!await verifyAccountOwner(account_id, req.user.id)) {
+      return reply.code(403).send({ error: 'Account not yours' })
+    }
 
     const rows = groups.map(g => ({
       account_id,
@@ -51,6 +76,10 @@ module.exports = async (fastify) => {
 
   // PUT /groups/:id
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await verifyGroupOwner(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your group' })
+    }
+
     const allowed = ['name', 'group_type', 'is_admin', 'post_approval_required', 'is_active']
     const updates = {}
     for (const key of allowed) {
@@ -64,6 +93,10 @@ module.exports = async (fastify) => {
 
   // DELETE /groups/:id
   fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await verifyGroupOwner(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your group' })
+    }
+
     const { error } = await supabase.from('fb_groups').delete().eq('id', req.params.id)
     if (error) return reply.code(500).send({ error: error.message })
     return { success: true }
@@ -74,20 +107,25 @@ module.exports = async (fastify) => {
     const { account_id, group_ids } = req.body
     if (!account_id || !group_ids?.length) return reply.code(400).send({ error: 'account_id and group_ids required' })
 
-    // Check agent online
-    const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id').gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
-    if (!agents?.length) return reply.code(503).send({ error: 'No agent online. Start the SocialFlow Agent first.' })
+    if (!await verifyAccountOwner(account_id, req.user.id)) {
+      return reply.code(403).send({ error: 'Account not yours' })
+    }
 
-    // Fetch group records
-    const { data: groups } = await supabase.from('fb_groups').select('id, fb_group_id, url').in('id', group_ids)
+    // Fetch group records (only user's groups)
+    const { data: groups } = await supabase
+      .from('fb_groups')
+      .select('id, fb_group_id, url, accounts!inner(owner_id)')
+      .in('id', group_ids)
+      .eq('accounts.owner_id', req.user.id)
     if (!groups?.length) return reply.code(404).send({ error: 'No groups found' })
 
     // Create agent job
     const { data: job, error } = await supabase.from('jobs').insert({
       type: 'check_health',
-      payload: { action: 'resolve_group', account_id, groups },
+      payload: { action: 'resolve_group', account_id, groups: groups.map(g => ({ id: g.id, fb_group_id: g.fb_group_id, url: g.url })) },
       status: 'pending',
-      scheduled_at: new Date().toISOString()
+      scheduled_at: new Date().toISOString(),
+      created_by: req.user.id
     }).select().single()
 
     if (error) return reply.code(500).send({ error: error.message })

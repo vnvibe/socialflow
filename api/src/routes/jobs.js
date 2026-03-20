@@ -20,12 +20,13 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // GET /jobs/:id (authenticated - full data)
+  // GET /jobs/:id (authenticated - full data, user's own jobs only)
   fastify.get('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data, error } = await supabase
       .from('jobs')
       .select('*')
       .eq('id', req.params.id)
+      .eq('created_by', req.user.id)
       .single()
 
     if (error) return reply.code(404).send({ error: 'Not found' })
@@ -92,6 +93,7 @@ module.exports = async (fastify) => {
       .from('jobs')
       .update({ status: 'cancelled' })
       .eq('id', req.params.id)
+      .eq('created_by', req.user.id)
       .in('status', ['pending', 'claimed', 'running'])
       .select()
       .single()
@@ -102,7 +104,7 @@ module.exports = async (fastify) => {
 
   // POST /jobs/:id/retry
   fastify.post('/:id/retry', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { data: job } = await supabase.from('jobs').select('*').eq('id', req.params.id).single()
+    const { data: job } = await supabase.from('jobs').select('*').eq('id', req.params.id).eq('created_by', req.user.id).single()
     if (!job) return reply.code(404).send({ error: 'Not found' })
 
     // Create new job from failed one

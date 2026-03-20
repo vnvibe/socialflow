@@ -32,16 +32,33 @@ module.exports = async (fastify) => {
     return { unread: count || 0 }
   })
 
-  // POST /inbox/mark-all-read
+  // POST /inbox/mark-all-read — only mark user's own messages
   fastify.post('/mark-all-read', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { fanpage_id } = req.body
+
+    // Get user's fanpage IDs to scope the update
+    const { data: userFanpages } = await supabase
+      .from('fanpages')
+      .select('id, accounts!inner(owner_id)')
+      .eq('accounts.owner_id', req.user.id)
+
+    const fanpageIds = (userFanpages || []).map(f => f.id)
+    if (!fanpageIds.length) return { success: true }
 
     let query = supabase
       .from('inbox_messages')
       .update({ is_read: true })
       .eq('is_read', false)
 
-    if (fanpage_id) query = query.eq('fanpage_id', fanpage_id)
+    if (fanpage_id) {
+      // Verify this fanpage belongs to user
+      if (!fanpageIds.includes(fanpage_id)) {
+        return reply.code(403).send({ error: 'Not your fanpage' })
+      }
+      query = query.eq('fanpage_id', fanpage_id)
+    } else {
+      query = query.in('fanpage_id', fanpageIds)
+    }
 
     const { error } = await query
     if (error) return reply.code(500).send({ error: error.message })
