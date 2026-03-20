@@ -9,7 +9,7 @@ module.exports = async (fastify) => {
     const { data: agents } = await supabase
       .from('agent_heartbeats')
       .select('agent_id, last_seen, hostname')
-      .gte('last_seen', new Date(Date.now() - 30000).toISOString())
+      .gte('last_seen', new Date(Date.now() - 15000).toISOString())
       .order('last_seen', { ascending: false })
 
     return {
