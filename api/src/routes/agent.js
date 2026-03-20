@@ -32,9 +32,15 @@ module.exports = async (fastify) => {
 
     const archiver = require('archiver')
 
-    // Agent source dir — adjust path based on deployment
-    const agentDir = process.env.AGENT_DIR || path.resolve(__dirname, '../../../../socialflow-agent')
-    if (!fs.existsSync(agentDir)) {
+    // Agent source dir — check multiple possible locations
+    const possibleDirs = [
+      process.env.AGENT_DIR,
+      path.resolve(__dirname, '../../../../socialflow-agent'),  // local dev
+      path.resolve(__dirname, '../../../socialflow-agent'),      // local dev alt
+      '/app/socialflow-agent',                                   // Railway deployment
+    ].filter(Boolean)
+    const agentDir = possibleDirs.find(d => fs.existsSync(d))
+    if (!agentDir) {
       return reply.code(404).send({ error: 'Agent directory not found. Set AGENT_DIR env variable.' })
     }
 
