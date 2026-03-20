@@ -4,6 +4,7 @@ import useAuthStore from './store/auth.store'
 import Sidebar from './components/layout/Sidebar'
 import TopBar from './components/layout/TopBar'
 import Login from './pages/auth/Login'
+import Register from './pages/auth/Register'
 import Dashboard from './pages/dashboard/Dashboard'
 import AccountList from './pages/accounts/AccountList'
 import AccountDetail from './pages/accounts/AccountDetail'
@@ -66,6 +67,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route path="/oauth-callback" element={<OAuthCallback />} />
         <Route path="/*" element={
           <ProtectedRoute>

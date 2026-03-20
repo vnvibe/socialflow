@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Send, Mail, Lock, Loader } from 'lucide-react'
 import toast from 'react-hot-toast'
 import useAuthStore from '../../store/auth.store'
@@ -110,6 +110,13 @@ export default function Login() {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
+
+          <p className="text-sm text-gray-500 text-center mt-4">
+            Chưa có tài khoản?{' '}
+            <Link to="/register" className="text-blue-600 hover:text-blue-700 font-medium">
+              Đăng ký
+            </Link>
+          </p>
         </div>
       </div>
     </div>

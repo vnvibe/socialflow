@@ -25,6 +25,7 @@ app.register(require('@fastify/multipart'), {
 })
 
 // Routes
+app.register(require('./routes/auth'), { prefix: '/auth' })
 app.register(require('./routes/accounts'), { prefix: '/accounts' })
 app.register(require('./routes/proxies'), { prefix: '/proxies' })
 app.register(require('./routes/fanpages'), { prefix: '/fanpages' })
