@@ -435,55 +435,28 @@ function AgentTab() {
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Tải Agent</h2>
         <div className="bg-white rounded-xl shadow p-6 space-y-4">
           <p className="text-sm text-gray-600">
-            Tải agent để chạy trên máy tính hoặc VPS. Agent xử lý tự động: đăng bài, crawl dữ liệu, bình luận qua trình duyệt.
+            Tải về, giải nén, chạy file <strong>SocialFlow.bat</strong> — mọi thứ tự động.
           </p>
 
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className="flex items-center gap-2 bg-gray-100 text-gray-700 px-5 py-3 rounded-lg hover:bg-gray-200 disabled:opacity-50 font-medium border border-gray-200"
-            >
-              {downloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download size={20} />}
-              {downloading ? 'Đang đóng gói...' : 'Tải ZIP (nhẹ, cần Node.js)'}
-            </button>
-          </div>
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium text-base"
+          >
+            {downloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download size={20} />}
+            {downloading ? 'Đang đóng gói...' : 'Tải Agent'}
+          </button>
 
-          <div className="border-t pt-4 space-y-3">
-            <h3 className="text-sm font-semibold text-gray-800">Cách 1: File EXE (khuyên dùng)</h3>
-            <div className="text-sm text-gray-600 space-y-2">
-              <p>Build exe trên máy admin, gửi cho user:</p>
-              <div className="bg-gray-900 text-gray-100 rounded-lg p-3 font-mono text-xs space-y-1">
-                <div><span className="text-green-400">$</span> cd socialflow-agent</div>
-                <div><span className="text-green-400">$</span> npm run build</div>
-                <div className="text-gray-500"># Output: dist/SocialFlow Agent-win32-x64/</div>
-              </div>
-              <div className="flex gap-2 mt-2">
-                <span className="bg-blue-100 text-blue-700 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">1</span>
-                <span>Gửi folder <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">SocialFlow Agent-win32-x64</code> cho user</span>
-              </div>
-              <div className="flex gap-2">
-                <span className="bg-blue-100 text-blue-700 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">2</span>
-                <span>User double-click <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">SocialFlow Agent.exe</code> — chạy ngay!</span>
-              </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3 mt-2">
-                <p className="text-xs text-green-700">
-                  Credentials nhúng sẵn trong exe. User không cần cài đặt gì — click là chạy. Lần đầu tự tải Chromium.
-                </p>
-              </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
+            <div className="flex items-start gap-3">
+              <span className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">1</span>
+              <span className="text-sm text-gray-700">Giải nén file ZIP</span>
             </div>
-
-            <h3 className="text-sm font-semibold text-gray-800 mt-4">Cách 2: File ZIP (nhẹ hơn)</h3>
-            <div className="text-sm text-gray-600 space-y-2">
-              <div className="flex gap-2">
-                <span className="bg-gray-200 text-gray-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">1</span>
-                <span>Giải nén file ZIP</span>
-              </div>
-              <div className="flex gap-2">
-                <span className="bg-gray-200 text-gray-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0">2</span>
-                <span>Double-click <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">SocialFlow.bat</code> — tự cài Node.js + dependencies</span>
-              </div>
+            <div className="flex items-start gap-3">
+              <span className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">2</span>
+              <span className="text-sm text-gray-700">Mở thư mục, chạy <strong>SocialFlow.bat</strong></span>
             </div>
+            <p className="text-xs text-blue-600 mt-2 pl-9">Lần đầu sẽ tự cài đặt (2-3 phút). Sau đó mở lại là chạy ngay.</p>
           </div>
         </div>
       </div>
