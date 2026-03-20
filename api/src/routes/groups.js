@@ -1,31 +1,38 @@
+const { getAccessibleIds, canAccess } = require('../lib/access-check')
+
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
-  // Helper: verify account belongs to user
-  const verifyAccountOwner = async (accountId, userId) => {
-    const { data } = await supabase.from('accounts').select('id').eq('id', accountId).eq('owner_id', userId).single()
-    return !!data
+  // Helper: verify account access (owner or granted)
+  const verifyAccountAccess = async (accountId, userId) => {
+    return canAccess(supabase, userId, 'account', accountId)
   }
 
-  // Helper: verify group belongs to user (via account)
-  const verifyGroupOwner = async (groupId, userId) => {
-    const { data } = await supabase
-      .from('fb_groups')
-      .select('id, accounts!inner(owner_id)')
-      .eq('id', groupId)
-      .eq('accounts.owner_id', userId)
-      .single()
-    return !!data
+  // Helper: verify group access (via account)
+  const verifyGroupAccess = async (groupId, userId) => {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single()
+    if (profile?.role === 'admin') return true
+
+    const { data: group } = await supabase.from('fb_groups').select('account_id').eq('id', groupId).single()
+    if (!group) return false
+    return canAccess(supabase, userId, 'account', group.account_id)
   }
 
   // GET /groups
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { data, error } = await supabase
-      .from('fb_groups')
-      .select('*, accounts!inner(owner_id, username)')
-      .eq('accounts.owner_id', req.user.id)
-      .order('created_at', { ascending: false })
+    const accountIds = await getAccessibleIds(supabase, req.user.id, 'account')
 
+    let query = supabase.from('fb_groups').select('*, accounts(owner_id, username)').order('created_at', { ascending: false })
+
+    if (accountIds === null) {
+      // admin: all
+    } else if (accountIds.length === 0) {
+      return []
+    } else {
+      query = query.in('account_id', accountIds)
+    }
+
+    const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
     return data
   })
@@ -35,7 +42,7 @@ module.exports = async (fastify) => {
     const { account_id, fb_group_id, name, url, group_type, is_admin } = req.body
     if (!account_id || !fb_group_id) return reply.code(400).send({ error: 'account_id and fb_group_id required' })
 
-    if (!await verifyAccountOwner(account_id, req.user.id)) {
+    if (!await verifyAccountAccess(account_id, req.user.id)) {
       return reply.code(403).send({ error: 'Account not yours' })
     }
 
@@ -54,7 +61,7 @@ module.exports = async (fastify) => {
     const { account_id, groups } = req.body
     if (!account_id || !groups?.length) return reply.code(400).send({ error: 'account_id and groups required' })
 
-    if (!await verifyAccountOwner(account_id, req.user.id)) {
+    if (!await verifyAccountAccess(account_id, req.user.id)) {
       return reply.code(403).send({ error: 'Account not yours' })
     }
 
@@ -76,7 +83,7 @@ module.exports = async (fastify) => {
 
   // PUT /groups/:id
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
-    if (!await verifyGroupOwner(req.params.id, req.user.id)) {
+    if (!await verifyGroupAccess(req.params.id, req.user.id)) {
       return reply.code(403).send({ error: 'Not your group' })
     }
 
@@ -93,7 +100,7 @@ module.exports = async (fastify) => {
 
   // DELETE /groups/:id
   fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
-    if (!await verifyGroupOwner(req.params.id, req.user.id)) {
+    if (!await verifyGroupAccess(req.params.id, req.user.id)) {
       return reply.code(403).send({ error: 'Not your group' })
     }
 
@@ -107,7 +114,7 @@ module.exports = async (fastify) => {
     const { account_id, group_ids } = req.body
     if (!account_id || !group_ids?.length) return reply.code(400).send({ error: 'account_id and group_ids required' })
 
-    if (!await verifyAccountOwner(account_id, req.user.id)) {
+    if (!await verifyAccountAccess(account_id, req.user.id)) {
       return reply.code(403).send({ error: 'Account not yours' })
     }
 

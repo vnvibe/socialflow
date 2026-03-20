@@ -1,34 +1,40 @@
 const axios = require('axios')
 const { fetchPageInbox, replyToMessage } = require('../services/facebook/fb-inbox')
+const { getAccessibleIds, canAccess } = require('../lib/access-check')
 
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
-  // Helper: verify account belongs to user
-  const verifyAccountOwner = async (accountId, userId) => {
-    const { data } = await supabase.from('accounts').select('id').eq('id', accountId).eq('owner_id', userId).single()
-    return !!data
+  // Helper: verify account access (owner or granted)
+  const verifyAccountAccess = async (accountId, userId) => {
+    return canAccess(supabase, userId, 'account', accountId)
   }
 
-  // Helper: verify fanpage belongs to user (via account)
-  const verifyFanpageOwner = async (fanpageId, userId) => {
-    const { data } = await supabase
-      .from('fanpages')
-      .select('id, accounts!inner(owner_id)')
-      .eq('id', fanpageId)
-      .eq('accounts.owner_id', userId)
-      .single()
-    return data
+  // Helper: verify fanpage access (via account)
+  const verifyFanpageAccess = async (fanpageId, userId) => {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single()
+    if (profile?.role === 'admin') return true
+
+    const { data: fp } = await supabase.from('fanpages').select('account_id').eq('id', fanpageId).single()
+    if (!fp) return false
+    return canAccess(supabase, userId, 'account', fp.account_id)
   }
 
   // GET /fanpages
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { data, error } = await supabase
-      .from('fanpages')
-      .select('*, accounts!inner(id, username, owner_id)')
-      .eq('accounts.owner_id', req.user.id)
-      .order('created_at', { ascending: false })
+    const accountIds = await getAccessibleIds(supabase, req.user.id, 'account')
 
+    let query = supabase.from('fanpages').select('*, accounts(id, username, owner_id)').order('created_at', { ascending: false })
+
+    if (accountIds === null) {
+      // admin: all
+    } else if (accountIds.length === 0) {
+      return []
+    } else {
+      query = query.in('account_id', accountIds)
+    }
+
+    const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
     return data
   })
@@ -38,7 +44,7 @@ module.exports = async (fastify) => {
     const { account_id, fb_page_id, name, url, category } = req.body
     if (!account_id || !fb_page_id) return reply.code(400).send({ error: 'account_id and fb_page_id required' })
 
-    if (!await verifyAccountOwner(account_id, req.user.id)) {
+    if (!await verifyAccountAccess(account_id, req.user.id)) {
       return reply.code(403).send({ error: 'Account not yours' })
     }
 
@@ -65,7 +71,7 @@ module.exports = async (fastify) => {
 
   // PUT /fanpages/:id
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
-    if (!await verifyFanpageOwner(req.params.id, req.user.id)) {
+    if (!await verifyFanpageAccess(req.params.id, req.user.id)) {
       return reply.code(403).send({ error: 'Not your fanpage' })
     }
 
@@ -82,7 +88,7 @@ module.exports = async (fastify) => {
 
   // DELETE /fanpages/:id
   fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
-    if (!await verifyFanpageOwner(req.params.id, req.user.id)) {
+    if (!await verifyFanpageAccess(req.params.id, req.user.id)) {
       return reply.code(403).send({ error: 'Not your fanpage' })
     }
 
@@ -94,7 +100,7 @@ module.exports = async (fastify) => {
   // GET /fanpages/:id/inbox - Get inbox messages
   fastify.get('/:id/inbox', { preHandler: fastify.authenticate }, async (req, reply) => {
     // Verify fanpage belongs to user
-    if (!await verifyFanpageOwner(req.params.id, req.user.id)) {
+    if (!await verifyFanpageAccess(req.params.id, req.user.id)) {
       return reply.code(403).send({ error: 'Not your fanpage' })
     }
 
@@ -172,7 +178,7 @@ module.exports = async (fastify) => {
   // POST /fanpages/:id/mark-read - Mark messages as read
   fastify.post('/:id/mark-read', { preHandler: fastify.authenticate }, async (req, reply) => {
     // Verify fanpage belongs to user
-    if (!await verifyFanpageOwner(req.params.id, req.user.id)) {
+    if (!await verifyFanpageAccess(req.params.id, req.user.id)) {
       return reply.code(403).send({ error: 'Not your fanpage' })
     }
 

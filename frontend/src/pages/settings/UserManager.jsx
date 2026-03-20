@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Shield, UserCheck, UserX, Network, Clock } from 'lucide-react'
+import { Plus, Shield, UserCheck, UserX, Network, Clock, Key } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
@@ -16,6 +16,7 @@ export default function UserManager() {
   const [form, setForm] = useState({ email: '', password: '', role: 'user' })
   const [proxyModal, setProxyModal] = useState(null)
   const [selectedProxyIds, setSelectedProxyIds] = useState([])
+  const [permModal, setPermModal] = useState(null) // { userId, userName }
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ['users'],
@@ -177,6 +178,12 @@ export default function UserManager() {
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button
+                        onClick={() => setPermModal({ userId: user.id, userName: user.username || user.display_name || user.email })}
+                        className="text-sm px-3 py-1 rounded-lg border text-purple-600 border-purple-200 hover:bg-purple-50 flex items-center gap-1"
+                      >
+                        <Key size={12} /> Phân quyền
+                      </button>
+                      <button
                         onClick={() => openProxyModal(user)}
                         className="text-sm px-3 py-1 rounded-lg border text-blue-600 border-blue-200 hover:bg-blue-50 flex items-center gap-1"
                       >
@@ -259,6 +266,9 @@ export default function UserManager() {
         </div>
       )}
 
+      {/* Permissions Modal */}
+      {permModal && <PermissionsModal userId={permModal.userId} userName={permModal.userName} onClose={() => setPermModal(null)} />}
+
       {/* Add User Modal */}
       {showAdd && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowAdd(false)}>
@@ -312,6 +322,158 @@ export default function UserManager() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function PermissionsModal({ userId, userName, onClose }) {
+  const [selected, setSelected] = useState({ account: [], fanpage: [], group: [] })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  // Load all available resources + current permissions
+  const { data: resources } = useQuery({
+    queryKey: ['all-resources'],
+    queryFn: () => api.get('/permissions/resources/all').then(r => r.data),
+  })
+
+  useEffect(() => {
+    api.get(`/permissions/${userId}`).then(res => {
+      const perms = res.data || []
+      const grouped = { account: [], fanpage: [], group: [] }
+      perms.forEach(p => {
+        if (grouped[p.resource_type]) {
+          grouped[p.resource_type].push(p.resource_id)
+        }
+      })
+      setSelected(grouped)
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }, [userId])
+
+  const toggle = (type, id) => {
+    setSelected(prev => ({
+      ...prev,
+      [type]: prev[type].includes(id)
+        ? prev[type].filter(x => x !== id)
+        : [...prev[type], id]
+    }))
+  }
+
+  const selectAll = (type, ids) => {
+    setSelected(prev => ({
+      ...prev,
+      [type]: prev[type].length === ids.length ? [] : ids
+    }))
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const permissions = [
+        ...selected.account.map(id => ({ resource_type: 'account', resource_id: id })),
+        ...selected.fanpage.map(id => ({ resource_type: 'fanpage', resource_id: id })),
+        ...selected.group.map(id => ({ resource_type: 'group', resource_id: id })),
+      ]
+      await api.put(`/permissions/${userId}`, { permissions })
+      toast.success('Đã lưu phân quyền')
+      onClose()
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Lỗi lưu phân quyền')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const accounts = resources?.accounts || []
+  const fanpages = resources?.fanpages || []
+  const groups = resources?.groups || []
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-bold mb-1">Phân quyền: {userName}</h2>
+        <p className="text-sm text-gray-500 mb-4">Chọn tài khoản, fanpage, nhóm mà user được phép sử dụng.</p>
+
+        {loading ? (
+          <div className="flex justify-center py-8"><div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" /></div>
+        ) : (
+          <div className="space-y-5">
+            {/* Accounts */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700">Tài khoản Facebook ({selected.account.length}/{accounts.length})</h3>
+                <button onClick={() => selectAll('account', accounts.map(a => a.id))} className="text-xs text-blue-600 hover:underline">
+                  {selected.account.length === accounts.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {accounts.map(a => (
+                  <label key={a.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.account.includes(a.id) ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                    <input type="checkbox" checked={selected.account.includes(a.id)} onChange={() => toggle('account', a.id)} className="w-3.5 h-3.5 rounded" />
+                    <span className="truncate">{a.username || a.fb_user_id}</span>
+                  </label>
+                ))}
+                {accounts.length === 0 && <p className="text-xs text-gray-400 col-span-2">Chưa có tài khoản nào</p>}
+              </div>
+            </div>
+
+            {/* Fanpages */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700">Fanpage ({selected.fanpage.length}/{fanpages.length})</h3>
+                <button onClick={() => selectAll('fanpage', fanpages.map(f => f.id))} className="text-xs text-blue-600 hover:underline">
+                  {selected.fanpage.length === fanpages.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {fanpages.map(f => (
+                  <label key={f.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.fanpage.includes(f.id) ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                    <input type="checkbox" checked={selected.fanpage.includes(f.id)} onChange={() => toggle('fanpage', f.id)} className="w-3.5 h-3.5 rounded" />
+                    <span className="truncate">{f.name || f.fb_page_id}</span>
+                  </label>
+                ))}
+                {fanpages.length === 0 && <p className="text-xs text-gray-400 col-span-2">Chưa có fanpage nào</p>}
+              </div>
+            </div>
+
+            {/* Groups */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700">Nhóm ({selected.group.length}/{groups.length})</h3>
+                <button onClick={() => selectAll('group', groups.map(g => g.id))} className="text-xs text-blue-600 hover:underline">
+                  {selected.group.length === groups.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                {groups.map(g => (
+                  <label key={g.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.group.includes(g.id) ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                    <input type="checkbox" checked={selected.group.includes(g.id)} onChange={() => toggle('group', g.id)} className="w-3.5 h-3.5 rounded" />
+                    <span className="truncate">{g.name || g.fb_group_id}</span>
+                  </label>
+                ))}
+                {groups.length === 0 && <p className="text-xs text-gray-400 col-span-2">Chưa có nhóm nào</p>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-between items-center mt-6 pt-4 border-t">
+          <p className="text-xs text-gray-400">
+            Tổng: {selected.account.length + selected.fanpage.length + selected.group.length} quyền
+          </p>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Hủy</button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+            >
+              {saving ? 'Đang lưu...' : 'Lưu phân quyền'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

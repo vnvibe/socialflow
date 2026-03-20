@@ -1,4 +1,5 @@
 const { extractCUserId, generateFingerprint } = require('../services/facebook/fb-auth')
+const { getAccessibleIds, canAccess } = require('../lib/access-check')
 
 module.exports = async (fastify) => {
   const { supabase } = fastify
@@ -12,25 +13,39 @@ module.exports = async (fastify) => {
     return req.user.id
   }
 
-  // GET /accounts - List all accounts for current user
+  // GET /accounts - List accounts user owns + accounts granted by admin
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { data, error } = await supabase
-      .from('accounts')
-      .select('*, proxies(*)')
-      .eq('owner_id', getOwnerId(req))
-      .order('created_at', { ascending: false })
+    const accessibleIds = await getAccessibleIds(supabase, req.user.id, 'account')
 
+    let query = supabase.from('accounts').select('*, proxies(*)').order('created_at', { ascending: false })
+
+    if (accessibleIds === null) {
+      // Admin: show all (or filtered by as_user)
+      const ownerId = getOwnerId(req)
+      if (ownerId !== req.user.id) {
+        query = query.eq('owner_id', ownerId)
+      }
+    } else if (accessibleIds.length === 0) {
+      return []
+    } else {
+      query = query.in('id', accessibleIds)
+    }
+
+    const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
     return data
   })
 
-  // GET /accounts/:id - Get single account
+  // GET /accounts/:id - Get single account (owner or granted)
   fastify.get('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {
+      return reply.code(403).send({ error: 'No access to this account' })
+    }
+
     const { data, error } = await supabase
       .from('accounts')
       .select('*, proxies(*), fanpages(*), fb_groups(*)')
       .eq('id', req.params.id)
-      .eq('owner_id', req.user.id)
       .single()
 
     if (error) return reply.code(404).send({ error: 'Not found' })
