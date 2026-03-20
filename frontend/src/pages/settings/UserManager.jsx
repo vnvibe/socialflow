@@ -84,9 +84,9 @@ export default function UserManager() {
     onError: (err) => toast.error(err.response?.data?.error || 'Không thể xóa user')
   })
 
-  // Separate pending users from active users
-  const pendingUsers = users.filter(u => !u.is_active)
-  const activeUsers = users.filter(u => u.is_active)
+  // Separate pending users from active users (admin always active)
+  const pendingUsers = users.filter(u => !u.is_active && u.role !== 'admin')
+  const activeUsers = users.filter(u => u.is_active || u.role === 'admin')
 
   if (isLoading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
 
