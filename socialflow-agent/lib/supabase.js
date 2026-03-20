@@ -1,9 +1,21 @@
 const { createClient } = require('@supabase/supabase-js')
 
-// Agent needs service_role key to bypass RLS (no auth.uid() context)
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-)
+// Priority: env vars > embedded config (from build)
+let config = {}
+try {
+  config = require('./config')
+} catch {
+  // config.js doesn't exist in dev mode — use .env only
+}
 
-module.exports = { supabase }
+const SUPABASE_URL = process.env.SUPABASE_URL || config.SUPABASE_URL
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || config.SUPABASE_SERVICE_ROLE_KEY
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('[ERROR] Missing Supabase credentials. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env')
+  process.exit(1)
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+
+module.exports = { supabase, config }

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron')
 const path = require('path')
-const { fork } = require('child_process')
+const { fork, execSync, spawn } = require('child_process')
+const fs = require('fs')
 
 let mainWindow = null
 let tray = null
@@ -8,6 +9,12 @@ let agentProcess = null
 let isQuitting = false
 let logs = []
 const MAX_LOGS = 500
+
+// Paths
+const isPackaged = !process.defaultApp
+const appRoot = isPackaged
+  ? path.join(process.resourcesPath, 'app')
+  : path.join(__dirname, '..')
 
 function addLog(line, type = 'info') {
   const entry = { time: new Date().toISOString(), text: line, type }
@@ -18,26 +25,79 @@ function addLog(line, type = 'info') {
   }
 }
 
+// Check if Playwright Chromium is installed
+async function ensurePlaywright() {
+  addLog('Checking Playwright Chromium...', 'info')
+  try {
+    // Try to get browser path
+    const pw = require(path.join(appRoot, 'node_modules', 'playwright'))
+    const chromium = pw.chromium
+    const browserPath = chromium.executablePath()
+    if (fs.existsSync(browserPath)) {
+      addLog('Playwright Chromium ready', 'success')
+      return true
+    }
+  } catch {}
+
+  // Need to install
+  addLog('Installing Playwright Chromium (first run, ~150MB)...', 'warn')
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('setup-progress', 'Installing Chromium browser...')
+  }
+
+  return new Promise((resolve) => {
+    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+    const child = spawn(npx, ['playwright', 'install', 'chromium'], {
+      cwd: appRoot,
+      env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: path.join(appRoot, '.browsers') },
+      shell: true,
+    })
+
+    child.stdout.on('data', (d) => addLog(d.toString().trim(), 'info'))
+    child.stderr.on('data', (d) => {
+      const msg = d.toString().trim()
+      if (msg) addLog(msg, 'warn')
+    })
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        addLog('Chromium installed successfully', 'success')
+        resolve(true)
+      } else {
+        addLog('Chromium install failed — agent may not work', 'error')
+        resolve(false)
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('setup-progress', null)
+      }
+    })
+  })
+}
+
 function startAgent() {
   if (agentProcess) return
 
-  const isPackaged = app.isPackaged
-  const appRoot = isPackaged
-    ? path.dirname(process.execPath)
-    : path.join(__dirname, '..')
   const agentPath = path.join(appRoot, 'agent.js')
-  const envPath = isPackaged
-    ? path.join(process.resourcesPath, '.env')
-    : path.join(appRoot, '.env')
 
-  // Load .env manually for the forked process
-  const dotenv = require('dotenv')
-  const envConfig = dotenv.config({ path: envPath })
-  const env = { ...process.env, ...(envConfig.parsed || {}) }
+  if (!fs.existsSync(agentPath)) {
+    addLog(`agent.js not found at: ${agentPath}`, 'error')
+    return
+  }
+
+  // Load .env if exists (optional — config.js has embedded credentials from build)
+  const envVars = {}
+  const envPath = path.join(appRoot, '.env')
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, 'utf8').split('\n')
+    for (const line of lines) {
+      const match = line.match(/^\s*([^#=]+?)\s*=\s*(.*)$/)
+      if (match) envVars[match[1]] = match[2].trim()
+    }
+  }
 
   agentProcess = fork(agentPath, [], {
     cwd: appRoot,
-    env,
+    env: { ...process.env, ...envVars },
     silent: true,
   })
 
@@ -130,8 +190,9 @@ function updateTray() {
     {
       label: 'Quit',
       click: () => {
+        isQuitting = true
         stopAgent()
-        setTimeout(() => app.quit(), 1000)
+        setTimeout(() => app.quit(), 1500)
       }
     },
   ])
@@ -140,18 +201,14 @@ function updateTray() {
 }
 
 function createTray() {
-  // Create a simple colored icon
   const iconPath = path.join(__dirname, 'icon.png')
-  const fs = require('fs')
-
   let icon
   if (fs.existsSync(iconPath)) {
     icon = nativeImage.createFromPath(iconPath)
+    icon = icon.resize({ width: 16, height: 16 })
   } else {
-    // Fallback: create a simple 16x16 icon
     icon = nativeImage.createEmpty()
   }
-
   tray = new Tray(icon)
   tray.on('double-click', createWindow)
   updateTray()
@@ -160,20 +217,26 @@ function createTray() {
 // IPC handlers
 ipcMain.handle('get-status', () => ({ running: !!agentProcess }))
 ipcMain.handle('get-logs', () => logs)
-ipcMain.handle('start-agent', () => { startAgent(); return true })
+ipcMain.handle('start-agent', async () => {
+  await ensurePlaywright()
+  startAgent()
+  return true
+})
 ipcMain.handle('stop-agent', () => { stopAgent(); return true })
 ipcMain.handle('clear-logs', () => { logs = []; return true })
 
 // App lifecycle
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createTray()
   createWindow()
-  // Auto-start agent
+
+  // Auto-setup and start
+  await ensurePlaywright()
   startAgent()
 })
 
 app.on('window-all-closed', () => {
-  // Never quit automatically — always stay in tray
+  // Stay in tray
 })
 
 app.on('activate', createWindow)

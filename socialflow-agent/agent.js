@@ -42,7 +42,8 @@ async function main() {
   console.log('[OK] Supabase connected')
 
   // Start heartbeat
-  const AGENT_ID = process.env.AGENT_ID || `${os.hostname()}-${process.pid}`
+  const { config } = require('./lib/supabase')
+  const AGENT_ID = process.env.AGENT_ID || config.AGENT_ID || `${os.hostname()}-${process.pid}`
   let heartbeatFails = 0
   async function heartbeat() {
     try {

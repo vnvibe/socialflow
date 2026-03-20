@@ -12,4 +12,7 @@ contextBridge.exposeInMainWorld('agent', {
   onStatus: (callback) => {
     ipcRenderer.on('status', (_, status) => callback(status))
   },
+  onSetup: (callback) => {
+    ipcRenderer.on('setup-progress', (_, msg) => callback(msg))
+  },
 })

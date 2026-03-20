@@ -13,9 +13,7 @@
     "launch": "node launcher.js",
     "electron": "electron .",
     "electron:dev": "electron . --dev",
-    "build": "electron-builder --win",
-    "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux"
+    "build": "node scripts/build.js"
   },
   "build": {
     "appId": "com.socialflow.agent",
@@ -24,24 +22,35 @@
       "output": "dist"
     },
     "files": [
-      "**/*",
-      "!dist/**",
-      "!debug/**",
-      "!.env",
-      "!nul"
+      "agent.js",
+      "electron/**/*",
+      "browser/**/*",
+      "jobs/**/*",
+      "lib/**/*",
+      "video/**/*",
+      "package.json"
     ],
-    "extraResources": [
+    "extraFiles": [
       {
         "from": ".env",
-        "to": ".env",
-        "filter": ["**/*"]
+        "to": "."
       }
+    ],
+    "asarUnpack": [
+      "agent.js",
+      "browser/**/*",
+      "jobs/**/*",
+      "lib/**/*",
+      "video/**/*",
+      "node_modules/**/*"
     ],
     "win": {
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "electron/icon.png"
@@ -68,7 +77,8 @@
     "playwright": "^1.49.1"
   },
   "devDependencies": {
-    "electron": "^41.0.3",
-    "electron-builder": "^26.8.1"
+    "@electron/packager": "^19.1.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
   }
 }

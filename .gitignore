@@ -8,3 +8,4 @@ build
 nul
 debug
 package-lock.json
+socialflow-agent/lib/config.js

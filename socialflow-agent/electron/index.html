@@ -303,6 +303,13 @@
 
       window.agent.onLog(addLogEntry)
       window.agent.onStatus((s) => updateUI(s.running))
+      window.agent.onSetup((msg) => {
+        const el = document.getElementById('statusText')
+        if (msg) {
+          el.textContent = msg
+          el.style.color = '#fbbf24'
+        }
+      })
     }
 
     init()
