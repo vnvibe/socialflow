@@ -3,15 +3,14 @@ module.exports = async (fastify) => {
 
   // GET /users - List all users (admin only)
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    // Check admin
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', req.user.id).single()
     if (profile?.role !== 'admin') return reply.code(403).send({ error: 'Admin only' })
 
     const { data: { users }, error } = await supabase.auth.admin.listUsers()
     if (error) return reply.code(500).send({ error: error.message })
 
-    // Enrich with profile data
-    const { data: profiles } = await supabase.from('profiles').select('id, username, display_name, role')
+    // Enrich with profile data (include is_active)
+    const { data: profiles } = await supabase.from('profiles').select('id, username, display_name, role, is_active')
     const profileMap = new Map((profiles || []).map(p => [p.id, p]))
 
     return users.map(u => ({
@@ -20,13 +19,13 @@ module.exports = async (fastify) => {
       username: profileMap.get(u.id)?.username || null,
       display_name: profileMap.get(u.id)?.display_name || null,
       role: profileMap.get(u.id)?.role || 'user',
-      disabled: u.banned_until ? true : false,
+      is_active: profileMap.get(u.id)?.is_active ?? false,
       created_at: u.created_at,
       last_sign_in_at: u.last_sign_in_at,
     }))
   })
 
-  // POST /users - Create new user (admin only)
+  // POST /users - Create new user (admin only, auto-approved)
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', req.user.id).single()
     if (profile?.role !== 'admin') return reply.code(403).send({ error: 'Admin only' })
@@ -34,7 +33,6 @@ module.exports = async (fastify) => {
     const { email, password, role } = req.body
     if (!email || !password) return reply.code(400).send({ error: 'Email and password required' })
 
-    // Create auth user
     const { data: { user }, error } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -42,11 +40,12 @@ module.exports = async (fastify) => {
     })
     if (error) return reply.code(400).send({ error: error.message })
 
-    // Create/update profile with role
+    // Admin-created users are auto-approved (is_active: true)
     await supabase.from('profiles').upsert({
       id: user.id,
       username: email.split('@')[0],
       role: role || 'user',
+      is_active: true,
     }, { onConflict: 'id' })
 
     return reply.code(201).send({ id: user.id, email, role: role || 'user' })
@@ -57,11 +56,13 @@ module.exports = async (fastify) => {
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', req.user.id).single()
     if (profile?.role !== 'admin') return reply.code(403).send({ error: 'Admin only' })
 
-    const { disabled, role } = req.body
+    const { is_active, role } = req.body
 
-    // Toggle ban status
-    if (disabled !== undefined) {
-      if (disabled) {
+    // Toggle active status in profiles
+    if (is_active !== undefined) {
+      await supabase.from('profiles').update({ is_active }).eq('id', req.params.id)
+      // Also ban/unban in Supabase auth
+      if (!is_active) {
         await supabase.auth.admin.updateUserById(req.params.id, { banned_until: '2099-01-01T00:00:00Z' })
       } else {
         await supabase.auth.admin.updateUserById(req.params.id, { banned_until: null })
@@ -72,6 +73,26 @@ module.exports = async (fastify) => {
     if (role) {
       await supabase.from('profiles').update({ role }).eq('id', req.params.id)
     }
+
+    return { success: true }
+  })
+
+  // DELETE /users/:id - Delete user (admin only)
+  fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', req.user.id).single()
+    if (profile?.role !== 'admin') return reply.code(403).send({ error: 'Admin only' })
+
+    // Prevent deleting yourself
+    if (req.params.id === req.user.id) {
+      return reply.code(400).send({ error: 'Không thể xóa chính mình' })
+    }
+
+    // Delete profile first (FK cascade may handle this)
+    await supabase.from('profiles').delete().eq('id', req.params.id)
+
+    // Delete auth user
+    const { error } = await supabase.auth.admin.deleteUser(req.params.id)
+    if (error) return reply.code(400).send({ error: error.message })
 
     return { success: true }
   })
