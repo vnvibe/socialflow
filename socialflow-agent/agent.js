@@ -1,4 +1,8 @@
-require('dotenv').config() // .env optional — lib/config.js is fallback
+// Load config: config.env > .env > lib/config.js
+const path = require('path')
+const fs = require('fs')
+const envFile = fs.existsSync(path.join(__dirname, 'config.env')) ? 'config.env' : '.env'
+require('dotenv').config({ path: path.join(__dirname, envFile) })
 const { startPoller, getStopPoller } = require('./jobs/poller')
 const { checkFFmpeg } = require('./video/processor')
 const os = require('os')
