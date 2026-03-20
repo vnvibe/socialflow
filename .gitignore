@@ -5,3 +5,6 @@ build
 .env.local
 .DS_Store
 *.log
+nul
+debug
+package-lock.json
