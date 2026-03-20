@@ -18,17 +18,8 @@ module.exports = async (fastify) => {
     }
   })
 
-  // GET /agent/download - Download agent as ZIP (admin only)
+  // GET /agent/download - Download agent as ZIP (any authenticated user)
   fastify.get('/download', { preHandler: fastify.authenticate }, async (req, reply) => {
-    // Admin only
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', req.user.id)
-      .single()
-    if (profile?.role !== 'admin') {
-      return reply.code(403).send({ error: 'Admin only' })
-    }
 
     const archiver = require('archiver')
 
