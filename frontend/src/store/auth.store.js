@@ -56,13 +56,14 @@ const useAuthStore = create((set) => ({
 
     // Check if account is approved
     if (data.user) {
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('is_active')
         .eq('id', data.user.id)
         .single()
 
-      if (profile && !profile.is_active) {
+      // No profile found or profile inactive = not approved
+      if (profileError || !profile || !profile.is_active) {
         await supabase.auth.signOut()
         throw new Error('Tài khoản chưa được phê duyệt. Vui lòng chờ admin duyệt.')
       }
