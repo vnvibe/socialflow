@@ -28,7 +28,7 @@ export default function QuickPost({ accountId, target, onClose }) {
     return 'cookie'
   })
   const fileInputRef = useRef(null)
-  const { requireAgent } = useAgentGuard()
+  // Jobs queue to DB, agent picks up when online - no need to check agent status
 
   const { data: mediaList = [] } = useQuery({
     queryKey: ['media-quick'],
@@ -57,7 +57,7 @@ export default function QuickPost({ accountId, target, onClose }) {
       onClose()
     },
     onError: (err) => {
-      if (err.response?.status === 503) toast.error('Agent chua chay!')
+      if (err.response?.status === 503) toast.error('Da them vao hang doi — Agent se xu ly khi online.')
       else toast.error(err.response?.data?.error || 'Khong the dang bai')
     },
   })
@@ -87,9 +87,7 @@ export default function QuickPost({ accountId, target, onClose }) {
         scheduled_at: showSchedule && scheduledAt ? new Date(scheduledAt).toISOString() : null,
       })
     }
-    // Graph API doesn't need agent
-    if (postMethod === 'graph') doPost()
-    else requireAgent(doPost)
+    doPost()
   }
 
   // === AI Handlers ===

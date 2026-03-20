@@ -23,7 +23,7 @@ const tabs = [
 export default function Monitor() {
   const [activeTab, setActiveTab] = useState('wall')
   const [filterAccountId, setFilterAccountId] = useState(() => localStorage.getItem('monitor_account') || '')
-  const [useCookie, setUseCookie] = useState(() => localStorage.getItem('monitor_cookie') === '1')
+  const [useCookie, setUseCookie] = useState(() => localStorage.getItem('monitor_cookie') !== '0')
   const { requireAgent, isAgentOnline } = useAgentGuard()
 
   // Fetch FB accounts for filter dropdown
@@ -49,10 +49,6 @@ export default function Monitor() {
             onClick={async () => {
               if (!useCookie && !filterAccountId) {
                 toast.error('Chon tai khoan truoc khi bat Cookie mode')
-                return
-              }
-              if (!useCookie && !isAgentOnline()) {
-                toast.error('Agent chua chay! Khoi dong agent truoc khi dung Cookie mode.')
                 return
               }
               const next = !useCookie
@@ -313,11 +309,6 @@ function WallTab({ filterAccountId, fetchMethod, requireAgent }) {
 
   // Fetch posts for a source → save to localStorage
   const fetchSource = async (sourceId) => {
-    // Cookie mode requires agent online
-    if (fetchMethod === 'cookie') {
-      const ok = requireAgent(() => true)
-      if (!ok) return
-    }
     setFetchingSourceId(sourceId)
     try {
       const body = { method: fetchMethod }

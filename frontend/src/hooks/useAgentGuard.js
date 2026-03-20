@@ -1,26 +1,18 @@
 import { useQueryClient } from '@tanstack/react-query'
-import toast from 'react-hot-toast'
 
 /**
- * Hook to check if agent is online before performing agent-dependent actions.
- * Reads from the cached ['agent-status'] query (polled by AgentStatus component).
+ * Hook to check agent status. Does NOT block actions — jobs queue to DB,
+ * agent picks up when online.
  *
  * Usage:
- *   const { requireAgent } = useAgentGuard()
- *   const handleClick = () => requireAgent(() => { mutation.mutate(...) })
+ *   const { requireAgent, isAgentOnline } = useAgentGuard()
+ *   requireAgent(() => { mutation.mutate(...) }) // always runs callback
  */
 export default function useAgentGuard() {
   const queryClient = useQueryClient()
 
+  // Always execute callback — jobs are queued to DB, agent processes when online
   const requireAgent = (callback) => {
-    const status = queryClient.getQueryData(['agent-status'])
-    if (!status?.online) {
-      toast.error('Agent chưa chạy! Khởi động agent trước khi thực hiện.', {
-        duration: 5000,
-        id: 'agent-offline-guard',
-      })
-      return false
-    }
     return callback()
   }
 
