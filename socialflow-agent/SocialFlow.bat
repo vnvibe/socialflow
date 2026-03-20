@@ -66,6 +66,15 @@ if not exist "node_modules" (
     echo.
 )
 
+:: Check .env exists
+if not exist ".env" (
+    echo [!] Khong tim thay file .env
+    echo     Tai lai agent tu trang Cai dat de co file cau hinh.
+    echo.
+    pause
+    exit /b
+)
+
 :: Start agent
 echo ========================================
 echo   SocialFlow Agent - Dang chay...
@@ -73,4 +82,8 @@ echo   Nhan Ctrl+C de dung
 echo ========================================
 echo.
 "%NODE%" agent.js
+if %errorlevel% neq 0 (
+    echo.
+    echo [!] Agent da dung do loi. Xem thong bao o tren.
+)
 pause
