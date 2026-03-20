@@ -8,10 +8,22 @@ if (baseURL && !baseURL.startsWith('http')) {
 
 const api = axios.create({ baseURL })
 
+// Cache token từ auth state — tránh gọi getSession() mỗi request
+let _cachedToken = null
+supabase.auth.getSession().then(({ data: { session } }) => {
+  _cachedToken = session?.access_token || null
+})
+supabase.auth.onAuthStateChange((_event, session) => {
+  _cachedToken = session?.access_token || null
+})
+
 api.interceptors.request.use(async (config) => {
-  const { data: { session } } = await supabase.auth.getSession()
-  if (session?.access_token) {
-    config.headers.Authorization = `Bearer ${session.access_token}`
+  if (!_cachedToken) {
+    const { data: { session } } = await supabase.auth.getSession()
+    _cachedToken = session?.access_token || null
+  }
+  if (_cachedToken) {
+    config.headers.Authorization = `Bearer ${_cachedToken}`
   }
   return config
 })

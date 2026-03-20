@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -15,11 +15,19 @@ import {
   Download,
   Trash2,
   X,
+  RefreshCw,
+  Send,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  ExternalLink,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
+import useAgentGuard from '../../hooks/useAgentGuard'
 import HealthBadge from '../../components/accounts/HealthBadge'
 import ProxyBadge from '../../components/shared/ProxyBadge'
+import QuickPost from '../../components/accounts/QuickPost'
 
 const TABS = [
   { key: 'config', label: 'Config', icon: Settings },
@@ -39,10 +47,27 @@ function formatDate(dateStr) {
   })
 }
 
+// Fetch job status labels
+const FETCH_STATUS = {
+  pending: { label: 'Queued...', color: 'text-yellow-600', bg: 'bg-yellow-50 border-yellow-200', icon: Clock },
+  claimed: { label: 'Starting...', color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200', icon: Loader },
+  running: { label: 'Scanning...', color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200', icon: Loader },
+  done: { label: 'Complete!', color: 'text-green-600', bg: 'bg-green-50 border-green-200', icon: CheckCircle2 },
+  failed: { label: 'Failed', color: 'text-red-600', bg: 'bg-red-50 border-red-200', icon: XCircle },
+}
+
 export default function AccountDetail() {
   const { id } = useParams()
   const [activeTab, setActiveTab] = useState('config')
+  const [quickPostTarget, setQuickPostTarget] = useState(null)
+  const [fetchJobId, setFetchJobId] = useState(null)
+  const [fetchStatus, setFetchStatus] = useState(null) // null | pending | claimed | running | done | failed
+  const [fetchResult, setFetchResult] = useState(null) // { pages_found, pages_saved, groups_found, groups_saved }
+  const [fetchError, setFetchError] = useState(null)
+  const [fetchElapsed, setFetchElapsed] = useState(0)
+  const pollRef = useRef(null)
   const queryClient = useQueryClient()
+  const { requireAgent } = useAgentGuard()
 
   const {
     data: account,
@@ -52,6 +77,126 @@ export default function AccountDetail() {
     queryKey: ['account', id],
     queryFn: () => api.get(`/accounts/${id}`).then((r) => r.data),
   })
+
+  // Poll job status khi có fetchJobId
+  const pollStartRef = useRef(null)
+  const pollFailCountRef = useRef(0)
+  const pollBusyRef = useRef(false) // Chặn concurrent polls
+  const pollCountRef = useRef(0)
+
+  const POLL_TIMEOUT_MS = 10 * 60 * 1000
+  const MAX_POLL_FAILURES = 10
+
+  const stopPolling = useCallback((reason) => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    pollStartRef.current = null
+    pollFailCountRef.current = 0
+    pollBusyRef.current = false
+    pollCountRef.current = 0
+    if (reason) console.log(`[Fetch] Polling stopped: ${reason}`)
+  }, [])
+
+  const pollJobStatus = useCallback(async () => {
+    if (!fetchJobId) return
+    if (pollBusyRef.current) return // Chặn concurrent — poll trước chưa xong thì skip
+    pollBusyRef.current = true
+    pollCountRef.current++
+
+    try {
+      // Timeout safety
+      if (pollStartRef.current && Date.now() - pollStartRef.current > POLL_TIMEOUT_MS) {
+        setFetchStatus('failed')
+        setFetchError('Timeout — job took too long. Check agent logs.')
+        stopPolling('timeout')
+        toast.error('Fetch timed out. Check if agent is running.')
+        return
+      }
+
+      // Poll job status — fetch() trực tiếp, không qua axios interceptor
+      const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${baseURL}/jobs/${fetchJobId}/status`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const job = await res.json()
+      pollFailCountRef.current = 0
+
+      const elapsed = pollStartRef.current ? Math.round((Date.now() - pollStartRef.current) / 1000) : 0
+      setFetchElapsed(elapsed)
+      console.log(`[Fetch] Poll: status=${job.status}, elapsed=${elapsed}s`)
+
+      setFetchStatus(job.status)
+
+      if (job.status === 'done') {
+        setFetchResult(job.result)
+        setFetchError(null)
+        queryClient.invalidateQueries({ queryKey: ['account-fanpages', id] })
+        queryClient.invalidateQueries({ queryKey: ['account-groups', id] })
+        queryClient.invalidateQueries({ queryKey: ['fanpages'] })
+        queryClient.invalidateQueries({ queryKey: ['groups'] })
+        stopPolling('done')
+        toast.success(`Found ${job.result?.pages_found || 0} pages, ${job.result?.groups_found || 0} groups!`)
+      } else if (job.status === 'failed') {
+        setFetchError(job.error_message || 'Unknown error')
+        setFetchResult(null)
+        stopPolling('failed')
+        toast.error(`Fetch failed: ${job.error_message || 'Unknown error'}`)
+      }
+    } catch (err) {
+      pollFailCountRef.current++
+      console.log(`[Fetch] Poll error #${pollFailCountRef.current}: ${err.message}`)
+      if (pollFailCountRef.current >= MAX_POLL_FAILURES) {
+        setFetchStatus('failed')
+        setFetchError('Lost connection to API — check if API server is running')
+        stopPolling('too many API errors')
+        toast.error('Lost connection to API. Refresh the page.')
+      }
+    } finally {
+      pollBusyRef.current = false
+    }
+  }, [fetchJobId, id, queryClient, stopPolling])
+
+  // Start/stop polling
+  useEffect(() => {
+    if (fetchJobId && fetchStatus !== 'done' && fetchStatus !== 'failed') {
+      pollStartRef.current = Date.now()
+      pollFailCountRef.current = 0
+      pollRef.current = setInterval(pollJobStatus, 3000)
+      return () => { if (pollRef.current) clearInterval(pollRef.current) }
+    }
+  }, [fetchJobId, fetchStatus, pollJobStatus])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [])
+
+  const handleFetchAll = () => requireAgent(async () => {
+    // Reset state
+    setFetchStatus('pending')
+    setFetchResult(null)
+    setFetchError(null)
+    setFetchJobId(null)
+    stopPolling()
+
+    try {
+      const res = await api.post(`/accounts/${id}/fetch-all`, {})
+      const jobId = res.data?.job_id
+      if (jobId) {
+        setFetchJobId(jobId)
+        toast.success('Fetch started! Running in background...')
+      } else {
+        setFetchStatus(null)
+        toast.error('No job_id returned')
+      }
+    } catch (err) {
+      setFetchStatus(null)
+      if (err.response?.status === 503) toast.error('Agent offline! Start the SocialFlow Agent first.')
+      else toast.error(err.response?.data?.error || 'Failed to queue fetch job')
+    }
+  })
+
+  const isFetching = fetchStatus && fetchStatus !== 'done' && fetchStatus !== 'failed'
+  const fetchDone = fetchStatus === 'done'
+  const fetchFailed = fetchStatus === 'failed'
 
   if (isLoading) {
     return (
@@ -100,12 +245,30 @@ export default function AccountDetail() {
               FB User ID: {account.fb_user_id}
             </p>
           </div>
-          <div className="text-right space-y-1">
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <Monitor className="w-4 h-4" />
-              {account.browser_type || 'N/A'}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleFetchAll}
+              disabled={isFetching}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-colors ${
+                isFetching
+                  ? 'bg-blue-100 text-blue-700 cursor-not-allowed'
+                  : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              {isFetching ? (
+                <Loader className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              {isFetching ? 'Scanning...' : 'Fetch Pages & Groups'}
+            </button>
+            <div className="text-right space-y-1">
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <Monitor className="w-4 h-4" />
+                {account.browser_type || 'N/A'}
+              </div>
+              <ProxyBadge proxy={account.proxy} />
             </div>
-            <ProxyBadge proxy={account.proxy} />
           </div>
         </div>
         <div className="flex items-center gap-6 mt-4 pt-4 border-t border-gray-100 text-sm text-gray-500">
@@ -118,6 +281,64 @@ export default function AccountDetail() {
           </span>
         </div>
       </div>
+
+      {/* Fetch Status Banner */}
+      {fetchStatus && (
+        <div className={`rounded-xl border p-4 ${FETCH_STATUS[fetchStatus]?.bg || 'bg-gray-50 border-gray-200'}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {(() => {
+                const StatusIcon = FETCH_STATUS[fetchStatus]?.icon || Loader
+                const isAnimated = fetchStatus === 'claimed' || fetchStatus === 'running' || fetchStatus === 'pending'
+                return <StatusIcon className={`w-5 h-5 ${FETCH_STATUS[fetchStatus]?.color} ${isAnimated ? 'animate-spin' : ''}`} />
+              })()}
+              <div>
+                <p className={`text-sm font-semibold ${FETCH_STATUS[fetchStatus]?.color}`}>
+                  {FETCH_STATUS[fetchStatus]?.label}
+                  {fetchStatus === 'running' && ' Agent is scanning pages & groups in browser'}
+                  {fetchStatus === 'pending' && ' Waiting for agent to pick up...'}
+                  {fetchStatus === 'claimed' && ' Agent picked up, launching browser...'}
+                  {fetchElapsed > 0 && isFetching && (
+                    <span className="ml-2 font-normal text-gray-500">
+                      ({Math.floor(fetchElapsed / 60)}:{String(fetchElapsed % 60).padStart(2, '0')})
+                    </span>
+                  )}
+                </p>
+                {fetchResult && (
+                  <p className="text-xs text-green-700 mt-0.5">
+                    Found {fetchResult.pages_found || 0} pages ({fetchResult.pages_saved || 0} saved), {fetchResult.groups_found || 0} groups ({fetchResult.groups_saved || 0} saved)
+                    {fetchResult.status && fetchResult.status !== 'ok' && (
+                      <span className="ml-2 text-amber-600">Account status: {fetchResult.status}</span>
+                    )}
+                  </p>
+                )}
+                {fetchError && (
+                  <p className="text-xs text-red-600 mt-0.5">{fetchError}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {(fetchDone || fetchFailed) && (
+                <button
+                  onClick={() => { setFetchStatus(null); setFetchJobId(null); setFetchResult(null); setFetchError(null) }}
+                  className="p-1 rounded-lg hover:bg-white/50 transition-colors"
+                >
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              )}
+              {fetchFailed && (
+                <button
+                  onClick={handleFetchAll}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Retry
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
@@ -144,18 +365,41 @@ export default function AccountDetail() {
         {activeTab === 'config' && (
           <ConfigTab account={account} queryClient={queryClient} />
         )}
-        {activeTab === 'fanpages' && <FanpagesTab accountId={id} />}
-        {activeTab === 'groups' && <GroupsTab accountId={id} />}
+        {activeTab === 'fanpages' && <FanpagesTab accountId={id} onQuickPost={setQuickPostTarget} />}
+        {activeTab === 'groups' && <GroupsTab accountId={id} onQuickPost={setQuickPostTarget} />}
         {activeTab === 'history' && <HistoryTab accountId={id} />}
       </div>
+
+      {/* Quick Post Modal */}
+      {quickPostTarget && (
+        <QuickPost
+          accountId={id}
+          target={quickPostTarget}
+          onClose={() => setQuickPostTarget(null)}
+        />
+      )}
     </div>
   )
 }
 
 function ConfigTab({ account, queryClient }) {
+  // Normalize time values to HH:mm format (DB may store "8", "22", "8:00", etc.)
+  const normalizeTime = (val, fallback) => {
+    if (!val) return fallback
+    const str = String(val).trim()
+    // Already in HH:mm format
+    if (/^\d{2}:\d{2}$/.test(str)) return str
+    // Just a number like "8" or "22" → pad to "08:00" or "22:00"
+    if (/^\d{1,2}$/.test(str)) return str.padStart(2, '0') + ':00'
+    // Format like "8:00" or "8:30" → pad hours
+    const m = str.match(/^(\d{1,2}):(\d{2})$/)
+    if (m) return m[1].padStart(2, '0') + ':' + m[2]
+    return fallback
+  }
+
   const [form, setForm] = useState({
-    active_hours_start: account.active_hours_start ?? '08:00',
-    active_hours_end: account.active_hours_end ?? '22:00',
+    active_hours_start: normalizeTime(account.active_hours_start, '08:00'),
+    active_hours_end: normalizeTime(account.active_hours_end, '22:00'),
     active_days: account.active_days ?? [1, 2, 3, 4, 5],
     max_daily_posts: account.max_daily_posts ?? 10,
     min_delay_minutes: account.min_delay_minutes ?? 15,
@@ -315,11 +559,12 @@ function ConfigTab({ account, queryClient }) {
   )
 }
 
-function FanpagesTab({ accountId }) {
+function FanpagesTab({ accountId, onQuickPost }) {
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState({ fb_page_id: '', name: '', url: '', category: '' })
   const [addLoading, setAddLoading] = useState(false)
   const queryClient = useQueryClient()
+  const { requireAgent } = useAgentGuard()
 
   const { data: fanpages = [], isLoading } = useQuery({
     queryKey: ['account-fanpages', accountId],
@@ -328,10 +573,11 @@ function FanpagesTab({ accountId }) {
   })
 
   const fetchMutation = useMutation({
-    mutationFn: () => api.post(`/accounts/${accountId}/fetch-pages`),
+    mutationFn: () => api.post(`/accounts/${accountId}/fetch-pages`, {}),
     onSuccess: () => {
       toast.success('Fetching pages from Facebook... Agent is processing.')
       queryClient.invalidateQueries({ queryKey: ['account-fanpages', accountId] })
+      queryClient.invalidateQueries({ queryKey: ['fanpages'] })
     },
     onError: (err) => {
       if (err.response?.status === 503) toast.error('Agent offline! Start the SocialFlow Agent first.')
@@ -344,6 +590,7 @@ function FanpagesTab({ accountId }) {
     onSuccess: () => {
       toast.success('Fanpage removed')
       queryClient.invalidateQueries({ queryKey: ['account-fanpages', accountId] })
+      queryClient.invalidateQueries({ queryKey: ['fanpages'] })
     },
     onError: () => toast.error('Delete failed'),
   })
@@ -363,6 +610,7 @@ function FanpagesTab({ accountId }) {
       setShowAdd(false)
       setAddForm({ fb_page_id: '', name: '', url: '', category: '' })
       queryClient.invalidateQueries({ queryKey: ['account-fanpages', accountId] })
+      queryClient.invalidateQueries({ queryKey: ['fanpages'] })
     } catch (err) {
       toast.error(err.response?.data?.error || 'Add failed')
     } finally { setAddLoading(false) }
@@ -371,7 +619,7 @@ function FanpagesTab({ accountId }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <button onClick={() => fetchMutation.mutate()} disabled={fetchMutation.isPending}
+        <button onClick={() => requireAgent(() => fetchMutation.mutate())} disabled={fetchMutation.isPending}
           className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors">
           {fetchMutation.isPending ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
           Fetch from Facebook
@@ -427,10 +675,18 @@ function FanpagesTab({ accountId }) {
                   <td className="px-4 py-3 font-medium text-gray-900">{page.name}</td>
                   <td className="px-4 py-3 text-gray-500">{page.fb_page_id}</td>
                   <td className="px-4 py-3 text-gray-500">{page.category || '-'}</td>
-                  <td className="px-4 py-3 text-gray-500">{page.followers_count ?? '-'}</td>
+                  <td className="px-4 py-3 text-gray-500">{page.fan_count ? page.fan_count.toLocaleString() : '-'}</td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => { if (window.confirm(`Remove "${page.name}"?`)) deleteMutation.mutate(page.id) }}
-                      className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
+                    <div className="flex items-center gap-2 justify-end">
+                      <button
+                        onClick={() => onQuickPost({ type: 'page', id: page.id, name: page.name, postingMethod: page.posting_method || 'auto' })}
+                        className="text-blue-500 hover:text-blue-700" title="Quick Post"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => { if (window.confirm(`Remove "${page.name}"?`)) deleteMutation.mutate(page.id) }}
+                        className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -442,11 +698,12 @@ function FanpagesTab({ accountId }) {
   )
 }
 
-function GroupsTab({ accountId }) {
+function GroupsTab({ accountId, onQuickPost }) {
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState({ fb_group_id: '', name: '', url: '' })
   const [addLoading, setAddLoading] = useState(false)
   const queryClient = useQueryClient()
+  const { requireAgent } = useAgentGuard()
 
   const { data: groups = [], isLoading } = useQuery({
     queryKey: ['account-groups', accountId],
@@ -455,10 +712,11 @@ function GroupsTab({ accountId }) {
   })
 
   const fetchMutation = useMutation({
-    mutationFn: () => api.post(`/accounts/${accountId}/fetch-groups`),
+    mutationFn: () => api.post(`/accounts/${accountId}/fetch-groups`, {}),
     onSuccess: () => {
       toast.success('Fetching groups from Facebook... Agent is processing.')
       queryClient.invalidateQueries({ queryKey: ['account-groups', accountId] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
     },
     onError: (err) => {
       if (err.response?.status === 503) toast.error('Agent offline! Start the SocialFlow Agent first.')
@@ -471,6 +729,7 @@ function GroupsTab({ accountId }) {
     onSuccess: () => {
       toast.success('Group removed')
       queryClient.invalidateQueries({ queryKey: ['account-groups', accountId] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
     },
     onError: () => toast.error('Delete failed'),
   })
@@ -490,6 +749,7 @@ function GroupsTab({ accountId }) {
       setShowAdd(false)
       setAddForm({ fb_group_id: '', name: '', url: '' })
       queryClient.invalidateQueries({ queryKey: ['account-groups', accountId] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
     } catch (err) {
       toast.error(err.response?.data?.error || 'Add failed')
     } finally { setAddLoading(false) }
@@ -498,7 +758,7 @@ function GroupsTab({ accountId }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <button onClick={() => fetchMutation.mutate()} disabled={fetchMutation.isPending}
+        <button onClick={() => requireAgent(() => fetchMutation.mutate())} disabled={fetchMutation.isPending}
           className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors">
           {fetchMutation.isPending ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
           Fetch from Facebook
@@ -543,6 +803,7 @@ function GroupsTab({ accountId }) {
               <tr className="border-b border-gray-200 bg-gray-50">
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Group Name</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Group ID</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Type</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Members</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Role</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
@@ -551,13 +812,35 @@ function GroupsTab({ accountId }) {
             <tbody className="divide-y divide-gray-100">
               {groups.map((group) => (
                 <tr key={group.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{group.name}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    <a href={group.url || `https://www.facebook.com/groups/${group.fb_group_id}`} target="_blank" rel="noopener noreferrer"
+                      className="hover:text-blue-600 hover:underline inline-flex items-center gap-1">
+                      {group.name} <ExternalLink className="w-3 h-3 text-gray-400" />
+                    </a>
+                  </td>
                   <td className="px-4 py-3 text-gray-500">{group.fb_group_id}</td>
-                  <td className="px-4 py-3 text-gray-500">{group.member_count ?? '-'}</td>
+                  <td className="px-4 py-3">
+                    {group.group_type ? (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        group.group_type === 'public' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {group.group_type === 'public' ? 'Public' : group.group_type === 'closed' ? 'Private' : group.group_type}
+                      </span>
+                    ) : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">{group.member_count ? group.member_count.toLocaleString() : '-'}</td>
                   <td className="px-4 py-3 text-gray-500">{group.is_admin ? 'Admin' : 'Member'}</td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => { if (window.confirm(`Remove "${group.name}"?`)) deleteMutation.mutate(group.id) }}
-                      className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
+                    <div className="flex items-center gap-2 justify-end">
+                      <button
+                        onClick={() => onQuickPost({ type: 'group', id: group.id, name: group.name })}
+                        className="text-blue-500 hover:text-blue-700" title="Quick Post"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => { if (window.confirm(`Remove "${group.name}"?`)) deleteMutation.mutate(group.id) }}
+                        className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </td>
                 </tr>
               ))}

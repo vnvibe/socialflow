@@ -4,23 +4,37 @@ import {
   Eye, Search, Plus, Trash2, Play, Pause, RefreshCw, Heart,
   MessageCircle, Share2, Users, ExternalLink, Clock, Loader,
   X, Check, Star, TrendingUp, BarChart3, Filter, Rss, Globe,
-  ToggleLeft, ToggleRight,
+  ToggleLeft, ToggleRight, Reply, CheckCircle, XCircle, Timer,
+  UserCircle, Cookie,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { vi } from 'date-fns/locale'
+import ReplyModal from '../../components/monitor/ReplyModal'
+import useAgentGuard from '../../hooks/useAgentGuard'
 
 const tabs = [
   { key: 'wall', label: 'Nguon tin', icon: Rss },
-  { key: 'keywords', label: 'Tu khoa', icon: Search },
   { key: 'posts', label: 'Bai viet', icon: MessageCircle },
-  { key: 'groups', label: 'Nhom moi', icon: Users },
   { key: 'engagement', label: 'Tuong tac', icon: TrendingUp },
 ]
 
 export default function Monitor() {
   const [activeTab, setActiveTab] = useState('wall')
+  const [filterAccountId, setFilterAccountId] = useState(() => localStorage.getItem('monitor_account') || '')
+  const [useCookie, setUseCookie] = useState(() => localStorage.getItem('monitor_cookie') === '1')
+  const { requireAgent, isAgentOnline } = useAgentGuard()
+
+  // Fetch FB accounts for filter dropdown
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: () => api.get('/accounts').then(r => r.data),
+  })
+
+  const selectedAccount = filterAccountId ? accounts.find(a => a.id === filterAccountId) : null
+  // Cookie mode requires an account selected
+  const fetchMethod = useCookie && filterAccountId ? 'cookie' : 'apify'
 
   return (
     <div>
@@ -28,6 +42,63 @@ export default function Monitor() {
         <div className="flex items-center gap-3">
           <Eye size={24} className="text-blue-600" />
           <h1 className="text-2xl font-bold text-gray-900">Theo doi</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Cookie/Apify iOS-style toggle */}
+          <div
+            onClick={async () => {
+              if (!useCookie && !filterAccountId) {
+                toast.error('Chon tai khoan truoc khi bat Cookie mode')
+                return
+              }
+              if (!useCookie && !isAgentOnline()) {
+                toast.error('Agent chua chay! Khoi dong agent truoc khi dung Cookie mode.')
+                return
+              }
+              const next = !useCookie
+              setUseCookie(next)
+              localStorage.setItem('monitor_cookie', next ? '1' : '0')
+              // Persist to DB for all active sources
+              try {
+                const method = next ? 'cookie' : 'apify'
+                const accountId = next ? filterAccountId : null
+                await api.put('/monitoring/fetch-method', { fetch_method: method, fetch_account_id: accountId })
+              } catch {}
+            }}
+            className="flex items-center gap-2 cursor-pointer select-none"
+            title={useCookie ? 'Dang dung Cookie — click de chuyen sang Apify' : 'Dang dung Apify — click de chuyen sang Cookie'}
+          >
+            <span className={`text-xs font-medium ${!useCookie || !filterAccountId ? 'text-blue-600' : 'text-gray-400'}`}>Apify</span>
+            <div className={`relative w-11 h-6 rounded-full transition-colors ${useCookie && filterAccountId ? 'bg-orange-500' : 'bg-gray-300'}`}>
+              <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${useCookie && filterAccountId ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+            </div>
+            <span className={`text-xs font-medium ${useCookie && filterAccountId ? 'text-orange-600' : 'text-gray-400'}`}>Cookie</span>
+          </div>
+          {/* FB account selector */}
+          {accounts.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <UserCircle size={16} className="text-gray-400" />
+              <select
+                value={filterAccountId}
+                onChange={e => {
+                  setFilterAccountId(e.target.value)
+                  localStorage.setItem('monitor_account', e.target.value)
+                  if (!e.target.value) {
+                    setUseCookie(false)
+                    localStorage.setItem('monitor_cookie', '0')
+                  }
+                }}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Tat ca tai khoan</option>
+                {accounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.username || a.fb_user_id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -51,11 +122,11 @@ export default function Monitor() {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'wall' && <WallTab />}
-      {activeTab === 'keywords' && <KeywordsTab />}
-      {activeTab === 'posts' && <PostsTab />}
-      {activeTab === 'groups' && <GroupsTab />}
-      {activeTab === 'engagement' && <EngagementTab />}
+      {activeTab === 'wall' && <WallTab filterAccountId={filterAccountId} fetchMethod={fetchMethod} requireAgent={requireAgent} />}
+      {activeTab === 'keywords' && <KeywordsTab filterAccountId={filterAccountId} />}
+      {activeTab === 'posts' && <PostsTab filterAccountId={filterAccountId} />}
+      {activeTab === 'groups' && <GroupsTab filterAccountId={filterAccountId} />}
+      {activeTab === 'engagement' && <EngagementTab filterAccountId={filterAccountId} />}
     </div>
   )
 }
@@ -106,6 +177,16 @@ function setCachedPosts(sourceId, newPosts) {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)) } catch { /* quota exceeded */ }
 }
 
+function replaceCachedPosts(sourceId, newPosts) {
+  const cache = getCachedPosts()
+  const sorted = [...newPosts].sort((a, b) => {
+    if (a.posted_at && b.posted_at) return new Date(b.posted_at) - new Date(a.posted_at)
+    return 0
+  })
+  cache[sourceId] = { posts: sorted, fetchedAt: Date.now() }
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)) } catch {}
+}
+
 function isCacheFresh(sourceId) {
   const cache = getCachedPosts()
   if (!cache[sourceId]) return false
@@ -137,18 +218,81 @@ function removeCachedSource(sourceId) {
 // ==========================================
 // TAB 0: WALL (MONITORED SOURCES + POSTS)
 // ==========================================
-function WallTab() {
+function WallTab({ filterAccountId, fetchMethod, requireAgent }) {
   const queryClient = useQueryClient()
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedSourceId, setSelectedSourceId] = useState(null) // null = show all
   const [searchText, setSearchText] = useState('')
   const [cachedPosts, setCachedPostsState] = useState(() => getAllCachedPosts())
   const [fetchingSourceId, setFetchingSourceId] = useState(null)
+  const [replyPost, setReplyPost] = useState(null)
+  const [expandedPosts, setExpandedPosts] = useState({})
+  const [lightboxImg, setLightboxImg] = useState(null)
 
   // Sources
   const { data: sources = [] } = useQuery({
     queryKey: ['monitoring-sources'],
     queryFn: () => api.get('/monitoring/sources').then(r => r.data),
+  })
+
+  // Comment logs — track which posts have been replied to (persisted in DB)
+  const cmtLogsUrl = filterAccountId
+    ? `/monitoring/comment-logs?limit=200&account_id=${filterAccountId}`
+    : '/monitoring/comment-logs?limit=200'
+  const { data: commentLogs = [] } = useQuery({
+    queryKey: ['comment-logs', filterAccountId],
+    queryFn: () => api.get(cmtLogsUrl).then(r => r.data),
+    refetchInterval: 15000, // poll every 15s for status updates
+  })
+
+  // Map fb_post_id → latest comment log
+  const commentLogMap = {}
+  for (const log of commentLogs) {
+    const pid = log.fb_post_id
+    if (!pid) continue
+    if (!commentLogMap[pid] || new Date(log.created_at) > new Date(commentLogMap[pid].created_at)) {
+      commentLogMap[pid] = log
+    }
+  }
+
+  // Retry a failed comment job
+  const retryCommentMut = useMutation({
+    mutationFn: async (log) => {
+      // Create new job with same payload
+      await api.post('/jobs', {
+        type: 'comment_post',
+        payload: {
+          account_id: log.account_id,
+          post_url: log.post_url,
+          fb_post_id: log.fb_post_id,
+          comment_text: log.comment_text,
+          source_name: log.source_name,
+        },
+      })
+      // Reset log status to pending
+      await api.put(`/monitoring/comment-logs/${log.id}`, { status: 'pending' })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['comment-logs'] })
+      toast.success('Da tao lai job comment')
+    },
+    onError: () => toast.error('Loi retry'),
+  })
+
+  // Dismiss/cancel a comment log
+  const dismissCommentMut = useMutation({
+    mutationFn: async (logId) => {
+      const log = commentLogs.find(l => l.id === logId)
+      // If job is still pending, cancel it too
+      if (log?.job_id && log.status === 'pending') {
+        await api.post(`/jobs/${log.job_id}/cancel`).catch(() => {})
+      }
+      await api.put(`/monitoring/comment-logs/${logId}`, { status: 'dismissed' })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['comment-logs'] })
+      toast.success('Da huy comment')
+    },
   })
 
   const deleteMut = useMutation({
@@ -169,15 +313,32 @@ function WallTab() {
 
   // Fetch posts for a source → save to localStorage
   const fetchSource = async (sourceId) => {
+    // Cookie mode requires agent online
+    if (fetchMethod === 'cookie') {
+      const ok = requireAgent(() => true)
+      if (!ok) return
+    }
     setFetchingSourceId(sourceId)
     try {
-      const res = await api.post(`/monitoring/sources/${sourceId}/fetch-now`)
+      const body = { method: fetchMethod }
+      if (fetchMethod === 'cookie' && filterAccountId) {
+        body.account_id = filterAccountId
+      }
+      const res = await api.post(`/monitoring/sources/${sourceId}/fetch-now`, body)
       const posts = res.data.posts || []
-      setCachedPosts(sourceId, posts)
-      setCachedPostsState(getAllCachedPosts())
-      // Refresh sources list to pick up auto-detected name
+      console.log('[MONITOR] Fetch response:', { sourceId, method: fetchMethod, postCount: posts.length, sample: posts[0] })
+      // Cookie mode: replace all posts (IDs differ from Apify, avoid stale duplicates)
+      // Apify mode: merge with existing (keeps historical posts)
+      if (fetchMethod === 'cookie') {
+        replaceCachedPosts(sourceId, posts)
+      } else {
+        setCachedPosts(sourceId, posts)
+      }
+      const allCached = getAllCachedPosts()
+      console.log('[MONITOR] Cache after merge:', { total: allCached.length, sources: Object.keys(getCachedPosts()).length })
+      setCachedPostsState(allCached)
       queryClient.invalidateQueries({ queryKey: ['monitoring-sources'] })
-      toast.success(`Da fetch ${posts.length} bai viet`)
+      toast.success(`Da fetch ${posts.length} bai viet (${fetchMethod === 'cookie' ? 'Cookie' : 'Apify'})`)
     } catch (err) {
       toast.error(err.response?.data?.error || 'Loi fetch')
     } finally {
@@ -197,6 +358,11 @@ function WallTab() {
     }
   }
 
+  // Track which posts are saved/starred
+  const [starredPosts, setStarredPosts] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('starred_posts') || '{}') } catch { return {} }
+  })
+
   // Save post to DB on user interaction (click link)
   const savePostOnInteraction = async (post) => {
     try {
@@ -213,6 +379,26 @@ function WallTab() {
         posted_at: post.posted_at,
       })
     } catch { /* silent — best effort */ }
+  }
+
+  // Star/unstar a post — saves to DB + tracks locally
+  const toggleStarPost = async (post) => {
+    const isStarred = starredPosts[post.fb_post_id]
+    if (isStarred) {
+      // Unstar — just remove from local tracking (post stays in DB)
+      const next = { ...starredPosts }
+      delete next[post.fb_post_id]
+      setStarredPosts(next)
+      localStorage.setItem('starred_posts', JSON.stringify(next))
+      toast.success('Da bo theo doi')
+    } else {
+      // Star — save to DB
+      await savePostOnInteraction(post)
+      const next = { ...starredPosts, [post.fb_post_id]: true }
+      setStarredPosts(next)
+      localStorage.setItem('starred_posts', JSON.stringify(next))
+      toast.success('Da luu bai viet')
+    }
   }
 
   // --- Filtering logic ---
@@ -394,11 +580,27 @@ function WallTab() {
                   )}
                 </div>
               </div>
-              {/* Content */}
-              <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed line-clamp-3 flex-1">{post.content_text}</p>
-              {/* Image */}
+              {/* Content — expandable */}
+              <div className="flex-1">
+                <p className={`text-sm text-gray-800 whitespace-pre-line leading-relaxed ${expandedPosts[post.fb_post_id] ? '' : 'line-clamp-3'}`}>{post.content_text}</p>
+                {post.content_text?.length > 200 && (
+                  <button
+                    onClick={() => setExpandedPosts(prev => ({ ...prev, [post.fb_post_id]: !prev[post.fb_post_id] }))}
+                    className="text-xs text-blue-600 hover:underline mt-0.5"
+                  >
+                    {expandedPosts[post.fb_post_id] ? 'Thu gon' : 'Xem them'}
+                  </button>
+                )}
+              </div>
+              {/* Image — clickable lightbox */}
               {post.image_url && (
-                <img src={post.image_url} className="mt-2 rounded-lg max-h-52 object-cover w-full" loading="lazy" alt="" />
+                <img
+                  src={post.image_url}
+                  className="mt-2 rounded-lg max-h-52 object-cover w-full cursor-pointer hover:opacity-90 transition-opacity"
+                  loading="lazy"
+                  alt=""
+                  onClick={() => setLightboxImg(post.image_url)}
+                />
               )}
               {/* Engagement — formatted */}
               <div className="flex items-center gap-4 mt-2 pt-2 border-t border-gray-100">
@@ -411,6 +613,50 @@ function WallTab() {
                 <span className="flex items-center gap-1 text-xs text-gray-500" title={`${post.shares || 0} shares`}>
                   <Share2 size={12} className="text-green-400" /> {fmtNum(post.shares)}
                 </span>
+                {(() => {
+                  const log = commentLogMap[post.fb_post_id]
+                  if (!log || log.status === 'dismissed') return null
+                  const s = log.status
+                  if (s === 'failed') {
+                    return (
+                      <span className="flex items-center gap-1 text-xs">
+                        <XCircle size={12} className="text-red-500" />
+                        <span className="text-red-500 font-medium" title={log.error_message || 'That bai'}>Loi</span>
+                        <button onClick={() => retryCommentMut.mutate(log)} className="text-blue-600 hover:underline ml-0.5" title="Thu lai">Retry</button>
+                        <button onClick={() => dismissCommentMut.mutate(log.id)} className="text-gray-400 hover:text-gray-600" title="Bo qua"><X size={10} /></button>
+                      </span>
+                    )
+                  }
+                  if (s === 'done') {
+                    return (
+                      <span className="flex items-center gap-1 text-xs font-medium text-green-600" title="Da comment thanh cong">
+                        <CheckCircle size={12} /> Da cmt
+                      </span>
+                    )
+                  }
+                  // pending
+                  return (
+                    <span className="flex items-center gap-1 text-xs">
+                      <Timer size={12} className="text-yellow-600 animate-pulse" />
+                      <span className="text-yellow-600 font-medium">Cho...</span>
+                      <button onClick={() => dismissCommentMut.mutate(log.id)} className="text-gray-400 hover:text-red-500 ml-0.5" title="Huy comment"><X size={10} /></button>
+                    </span>
+                  )
+                })()}
+                <button
+                  onClick={() => toggleStarPost(post)}
+                  className={`flex items-center gap-1 text-xs ml-auto transition-colors ${starredPosts[post.fb_post_id] ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
+                  title={starredPosts[post.fb_post_id] ? 'Bo theo doi' : 'Theo doi bai viet'}
+                >
+                  <Star size={12} fill={starredPosts[post.fb_post_id] ? 'currentColor' : 'none'} />
+                </button>
+                <button
+                  onClick={() => setReplyPost(post)}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition-colors"
+                  title="Tra loi bai viet"
+                >
+                  <Reply size={12} /> Tra loi
+                </button>
               </div>
             </div>
           ))}
@@ -422,6 +668,17 @@ function WallTab() {
 
       {/* Add source modal */}
       {showAddModal && <AddSourceModal onClose={() => setShowAddModal(false)} onCreated={(id) => fetchSource(id)} />}
+
+      {/* Reply modal */}
+      {replyPost && <ReplyModal post={replyPost} onClose={() => setReplyPost(null)} />}
+
+      {/* Image lightbox */}
+      {lightboxImg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={() => setLightboxImg(null)}>
+          <button onClick={() => setLightboxImg(null)} className="absolute top-4 right-4 text-white/80 hover:text-white"><X size={24} /></button>
+          <img src={lightboxImg} className="max-w-[90vw] max-h-[90vh] rounded-lg object-contain" alt="" />
+        </div>
+      )}
     </div>
   )
 }
@@ -524,15 +781,20 @@ function AddSourceModal({ onClose, onCreated }) {
 // ==========================================
 // TAB 1: KEYWORDS MANAGEMENT
 // ==========================================
-function KeywordsTab() {
+function KeywordsTab({ filterAccountId }) {
   const queryClient = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   const [newKeyword, setNewKeyword] = useState({ keyword: '', scan_type: 'group_posts', account_id: '', cron_expression: '0 */6 * * *', time_window_hours: 24, topics: '' })
 
-  const { data: keywords = [], isLoading } = useQuery({
+  const { data: allKeywords = [], isLoading } = useQuery({
     queryKey: ['monitor-keywords'],
     queryFn: () => api.get('/monitor/keywords').then(r => r.data),
   })
+
+  // Filter by selected account
+  const keywords = filterAccountId
+    ? allKeywords.filter(kw => kw.account_id === filterAccountId)
+    : allKeywords
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -734,40 +996,22 @@ function KeywordsTab() {
 // ==========================================
 // TAB 2: DISCOVERED POSTS
 // ==========================================
-function PostsTab() {
+function PostsTab({ filterAccountId }) {
   const queryClient = useQueryClient()
   const [searchText, setSearchText] = useState('')
-  const [filterKeywordId, setFilterKeywordId] = useState('')
-  const [followingOnly, setFollowingOnly] = useState(false)
-  const [minScore, setMinScore] = useState('')
-  const [sortBy, setSortBy] = useState('discovered_at')
-
-  const { data: keywords = [] } = useQuery({
-    queryKey: ['monitor-keywords'],
-    queryFn: () => api.get('/monitor/keywords').then(r => r.data),
-  })
 
   const queryParams = new URLSearchParams()
   if (searchText) queryParams.set('search', searchText)
-  if (filterKeywordId) queryParams.set('keyword_id', filterKeywordId)
-  if (followingOnly) queryParams.set('following_only', 'true')
-  if (minScore) queryParams.set('min_score', minScore)
-  if (sortBy !== 'discovered_at') queryParams.set('sort_by', sortBy)
   queryParams.set('limit', '100')
 
   const { data: postsData = { data: [] }, isLoading } = useQuery({
-    queryKey: ['monitor-posts', searchText, filterKeywordId, followingOnly, minScore, sortBy],
-    queryFn: () => api.get(`/monitor/posts?${queryParams.toString()}`).then(r => r.data),
-  })
-
-  const followMutation = useMutation({
-    mutationFn: (id) => api.post(`/monitor/posts/${id}/follow`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['monitor-posts'] }),
+    queryKey: ['saved-posts', searchText],
+    queryFn: () => api.get(`/monitoring/saved?${queryParams.toString()}`).then(r => r.data),
   })
 
   const deletePostMutation = useMutation({
-    mutationFn: (id) => api.delete(`/monitor/posts/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['monitor-posts'] }); toast.success('Da xoa') },
+    mutationFn: (id) => api.delete(`/monitoring/saved/${id}`),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['saved-posts'] }); toast.success('Da xoa') },
   })
 
   const posts = postsData.data || postsData || []
@@ -784,44 +1028,21 @@ function PostsTab() {
             <input
               value={searchText}
               onChange={e => setSearchText(e.target.value)}
-              placeholder="Tim kiem noi dung..."
+              placeholder="Tim kiem bai viet da luu..."
               className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm"
             />
           </div>
         </div>
-        <select
-          value={filterKeywordId}
-          onChange={e => setFilterKeywordId(e.target.value)}
-          className="border rounded-lg px-3 py-2 text-sm"
-        >
-          <option value="">Tat ca tu khoa</option>
-          {keywords.map(kw => <option key={kw.id} value={kw.id}>{kw.keyword}</option>)}
-        </select>
-        <select
-          value={minScore}
-          onChange={e => setMinScore(e.target.value)}
-          className="border rounded-lg px-3 py-2 text-sm"
-        >
-          <option value="">Moi diem</option>
-          <option value="3">⭐ 3+</option>
-          <option value="4">⭐ 4+</option>
-          <option value="5">⭐ 5</option>
-        </select>
-        <select
-          value={sortBy}
-          onChange={e => setSortBy(e.target.value)}
-          className="border rounded-lg px-3 py-2 text-sm"
-        >
-          <option value="discovered_at">Moi nhat</option>
-          <option value="relevance">Lien quan nhat</option>
-        </select>
-        <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-          <input type="checkbox" checked={followingOnly} onChange={e => setFollowingOnly(e.target.checked)} className="rounded text-blue-600" />
-          <Star size={14} className="text-yellow-500" />
-          Theo doi
-        </label>
-        <span className="text-sm text-gray-500">{posts.length} bai</span>
+        <span className="text-sm text-gray-500">{posts.length} bai da luu</span>
       </div>
+
+      {posts.length === 0 && (
+        <div className="text-center py-12 text-gray-400">
+          <Star size={32} className="mx-auto mb-3 text-gray-300" />
+          <p className="text-sm">Chua co bai viet nao duoc luu</p>
+          <p className="text-xs mt-1">Bam ngoi sao tren bai viet o tab Nguon tin de luu</p>
+        </div>
+      )}
 
       {/* Posts feed */}
       <div className="space-y-3">
@@ -831,32 +1052,16 @@ function PostsTab() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="font-medium text-sm text-gray-900">{post.author_name || 'Unknown'}</span>
-                  {post.group_name && (
-                    <span className="text-xs text-gray-500">trong <span className="font-medium">{post.group_name}</span></span>
-                  )}
-                  {post.relevance_score != null && (
-                    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-                      post.relevance_score >= 5 ? 'bg-green-100 text-green-700' :
-                      post.relevance_score >= 4 ? 'bg-blue-100 text-blue-700' :
-                      post.relevance_score >= 3 ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-gray-100 text-gray-500'
-                    }`}>
-                      ⭐ {post.relevance_score}/5
-                    </span>
+                  {post.monitored_sources?.name && (
+                    <span className="text-xs text-gray-500">trong <span className="font-medium">{post.monitored_sources.name}</span></span>
                   )}
                 </div>
                 <p className="text-sm text-gray-700 line-clamp-3 mb-1">{post.content_text}</p>
-                {post.ai_summary && (
-                  <p className="text-xs text-purple-600 italic mb-1">AI: {post.ai_summary}</p>
-                )}
                 <div className="flex items-center gap-4 text-xs text-gray-500">
                   <span className="flex items-center gap-1"><Heart size={12} /> {post.reactions || 0}</span>
                   <span className="flex items-center gap-1"><MessageCircle size={12} /> {post.comments || 0}</span>
                   <span className="flex items-center gap-1"><Share2 size={12} /> {post.shares || 0}</span>
                   {post.posted_at && <span className="flex items-center gap-1"><Clock size={12} /> {new Date(post.posted_at).toLocaleString('vi')}</span>}
-                  {post.scan_keywords?.keyword && (
-                    <span className="bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">{post.scan_keywords.keyword}</span>
-                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1 ml-3">
@@ -865,13 +1070,6 @@ function PostsTab() {
                     <ExternalLink size={14} />
                   </a>
                 )}
-                <button
-                  onClick={() => followMutation.mutate(post.id)}
-                  className={`p-1.5 rounded hover:bg-yellow-50 ${post.is_following ? 'text-yellow-500' : 'text-gray-400'}`}
-                  title={post.is_following ? 'Bo theo doi' : 'Theo doi'}
-                >
-                  <Star size={14} fill={post.is_following ? 'currentColor' : 'none'} />
-                </button>
                 <button
                   onClick={() => deletePostMutation.mutate(post.id)}
                   className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"
@@ -882,12 +1080,6 @@ function PostsTab() {
             </div>
           </div>
         ))}
-        {posts.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
-            <MessageCircle size={40} className="mx-auto mb-3 opacity-50" />
-            <p>Chua co bai viet nao. Them tu khoa va quet de tim bai.</p>
-          </div>
-        )}
       </div>
     </div>
   )
@@ -896,7 +1088,7 @@ function PostsTab() {
 // ==========================================
 // TAB 3: DISCOVERED GROUPS
 // ==========================================
-function GroupsTab() {
+function GroupsTab({ filterAccountId }) {
   const queryClient = useQueryClient()
   const [filterKeywordId, setFilterKeywordId] = useState('')
 
@@ -990,14 +1182,50 @@ function GroupsTab() {
 // ==========================================
 // TAB 4: ENGAGEMENT
 // ==========================================
-function EngagementTab() {
+function EngagementTab({ filterAccountId }) {
+  const queryClient = useQueryClient()
   const [sourceType, setSourceType] = useState('')
   const [days, setDays] = useState(7)
+  const [cmtFilter, setCmtFilter] = useState('')
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
     queryFn: () => api.get('/accounts').then(r => r.data),
   })
+
+  // Comment logs from DB — filter by account if selected
+  const cmtLogsUrl = filterAccountId
+    ? `/monitoring/comment-logs?limit=200&account_id=${filterAccountId}`
+    : '/monitoring/comment-logs?limit=200'
+  const { data: commentLogs = [] } = useQuery({
+    queryKey: ['comment-logs', filterAccountId],
+    queryFn: () => api.get(cmtLogsUrl).then(r => r.data),
+  })
+
+  // Huy comment pending/failed
+  const cancelLogMut = useMutation({
+    mutationFn: async (logId) => {
+      const log = commentLogs.find(l => l.id === logId)
+      if (log?.job_id && log.status === 'pending') {
+        await api.post(`/jobs/${log.job_id}/cancel`).catch(() => {})
+      }
+      await api.put(`/monitoring/comment-logs/${logId}`, { status: 'dismissed' })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['comment-logs'] })
+      toast.success('Da huy')
+    },
+  })
+
+  // Exclude dismissed from display
+  const activeLogs = commentLogs.filter(l => l.status !== 'dismissed')
+  const filteredLogs = cmtFilter ? activeLogs.filter(l => l.status === cmtFilter) : activeLogs
+  const cmtStats = {
+    total: activeLogs.length,
+    done: activeLogs.filter(l => l.status === 'done').length,
+    failed: activeLogs.filter(l => l.status === 'failed').length,
+    pending: activeLogs.filter(l => l.status === 'pending').length,
+  }
 
   const { data: summary, isLoading } = useQuery({
     queryKey: ['engagement-summary', sourceType, days],
@@ -1104,6 +1332,84 @@ function EngagementTab() {
           )}
         </>
       )}
+
+      {/* Comment logs — persistent history */}
+      <div className="bg-white rounded-xl shadow mt-6">
+        <div className="px-4 py-3 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h3 className="font-semibold text-sm text-gray-900">Lich su comment</h3>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+              <span>{cmtStats.total} tong</span>
+              {cmtStats.done > 0 && <span className="text-green-600">· {cmtStats.done} TC</span>}
+              {cmtStats.failed > 0 && <span className="text-red-500">· {cmtStats.failed} loi</span>}
+              {cmtStats.pending > 0 && <span className="text-yellow-600">· {cmtStats.pending} cho</span>}
+            </div>
+          </div>
+          <div className="flex gap-1">
+            {['', 'done', 'failed', 'pending'].map(f => (
+              <button
+                key={f}
+                onClick={() => setCmtFilter(f)}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                  cmtFilter === f ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'
+                }`}
+              >
+                {f === '' ? 'Tat ca' : f === 'done' ? 'Thanh cong' : f === 'failed' ? 'Loi' : 'Cho'}
+              </button>
+            ))}
+          </div>
+        </div>
+        {filteredLogs.length === 0 ? (
+          <div className="px-4 py-8 text-center text-gray-400 text-sm">
+            {commentLogs.length === 0 ? 'Chua co comment nao. Dung "Tra loi" tren bai viet de bat dau.' : 'Khong co comment nao voi bo loc nay.'}
+          </div>
+        ) : (
+          <div className="divide-y max-h-96 overflow-y-auto">
+            {filteredLogs.map(log => (
+              <div key={log.id} className="px-4 py-3 flex items-start gap-3">
+                <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                  (log.status === 'done' && !log.error_message) ? 'bg-green-500' : (log.status === 'failed' || log.error_message) ? 'bg-red-500' : 'bg-yellow-500'
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-xs font-medium text-gray-700 truncate">{log.source_name || 'Facebook'}</span>
+                    <span className="text-xs text-gray-400">·</span>
+                    <span className="text-xs text-gray-400">{log.accounts?.username || '—'}</span>
+                    {log.post_url && (
+                      <a href={log.post_url} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-500 shrink-0">
+                        <ExternalLink size={10} />
+                      </a>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-800 line-clamp-2">{log.comment_text}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    {(() => {
+                      // If has error_message, treat as failed regardless of DB status
+                      const isFailed = log.status === 'failed' || log.error_message
+                      const isDone = log.status === 'done' && !log.error_message
+                      const isPending = !isDone && !isFailed
+                      return (
+                        <>
+                          <span className={`text-xs font-medium ${isDone ? 'text-green-600' : isFailed ? 'text-red-500' : 'text-yellow-600'}`}>
+                            {isDone ? 'Thanh cong' : isFailed ? 'That bai' : 'Dang cho...'}
+                          </span>
+                          {log.error_message && <span className="text-xs text-red-400 truncate max-w-[200px]" title={log.error_message}>{log.error_message}</span>}
+                          {!isDone && (
+                            <button onClick={() => cancelLogMut.mutate(log.id)} className="text-xs text-gray-400 hover:text-red-500">Huy</button>
+                          )}
+                        </>
+                      )
+                    })()}
+                    <span className="text-xs text-gray-400 ml-auto shrink-0">
+                      {new Date(log.created_at).toLocaleString('vi')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1134,3 +1440,4 @@ function LoadingSpinner() {
     </div>
   )
 }
+

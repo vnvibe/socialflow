@@ -1,8 +1,21 @@
 const axios = require('axios')
+const { XMLParser } = require('fast-xml-parser')
 
 const CACHE_TTL = 30 * 60 * 1000 // 30 minutes
 
-async function getTrends(region = 'VN', supabase) {
+const RSS_FEEDS = [
+  { url: 'https://vnexpress.net/rss/khoa-hoc-cong-nghe.rss', source: 'vnexpress', category: 'tech' },
+  { url: 'https://vnexpress.net/rss/kinh-doanh.rss', source: 'vnexpress', category: 'business' },
+  { url: 'https://vnexpress.net/rss/tin-noi-bat.rss', source: 'vnexpress', category: 'hot' },
+  { url: 'https://voz.vn/f/-/index.rss', source: 'voz', category: 'forum' },
+  { url: 'http://feeds.feedburner.com/tinhte', source: 'tinhte', category: 'tech' },
+]
+
+const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' })
+
+async function getTrends(region = 'VN', supabase, options = {}) {
+  const { sources: filterSources } = options
+
   // Check cache first
   const cutoff = new Date(Date.now() - CACHE_TTL).toISOString()
   const { data: cached } = await supabase
@@ -11,19 +24,26 @@ async function getTrends(region = 'VN', supabase) {
     .eq('region', region)
     .gte('cached_at', cutoff)
     .order('score', { ascending: false })
-    .limit(50)
+    .limit(80)
 
-  if (cached?.length > 0) return cached
+  if (cached?.length > 0) {
+    if (filterSources?.length) {
+      return cached.filter(t => t.sources?.some(s => filterSources.includes(s)))
+    }
+    return cached
+  }
 
   // Fetch fresh data in parallel
-  const [youtube, reddit] = await Promise.allSettled([
+  const [youtube, reddit, ...rssResults] = await Promise.allSettled([
     fetchYoutubeTrends(region),
-    fetchRedditTrends()
+    fetchRedditTrends(),
+    ...RSS_FEEDS.map(feed => fetchRSS(feed)),
   ])
 
   const all = [
     ...(youtube.status === 'fulfilled' ? youtube.value : []),
-    ...(reddit.status === 'fulfilled' ? reddit.value : [])
+    ...(reddit.status === 'fulfilled' ? reddit.value : []),
+    ...rssResults.flatMap(r => r.status === 'fulfilled' ? r.value : []),
   ]
 
   const merged = mergeTrends(all)
@@ -35,6 +55,9 @@ async function getTrends(region = 'VN', supabase) {
     )
   }
 
+  if (filterSources?.length) {
+    return merged.filter(t => t.sources?.some(s => filterSources.includes(s)))
+  }
   return merged
 }
 
@@ -86,6 +109,94 @@ async function fetchRedditTrends() {
   }
 }
 
+/**
+ * Fetch and parse RSS feed, score by recency (newer = higher score)
+ */
+async function fetchRSS(feed) {
+  try {
+    const { data: xml } = await axios.get(feed.url, {
+      timeout: 15000,
+      headers: { 'User-Agent': 'SocialFlow/1.0', 'Accept': 'application/rss+xml, application/xml, text/xml' },
+      responseType: 'text',
+    })
+
+    const parsed = xmlParser.parse(xml)
+
+    // Handle both RSS 2.0 and Atom formats
+    let items = parsed?.rss?.channel?.item || parsed?.feed?.entry || []
+    if (!Array.isArray(items)) items = [items]
+
+    const now = Date.now()
+    const results = []
+
+    for (const item of items.slice(0, 25)) {
+      const title = item.title?.['#text'] || item.title || ''
+      const link = item.link?.['@_href'] || item.link || ''
+      const pubDate = item.pubDate || item.published || item.updated || ''
+      const description = item.description?.['#text'] || item.description || item.summary || ''
+
+      // Extract thumbnail: enclosure (VnExpress), image tag (Tinhte), or img in description
+      const thumbnail = item.enclosure?.['@_url']
+        || item.image?.['#text'] || item.image
+        || item['media:thumbnail']?.['@_url']
+        || item['media:content']?.['@_url']
+        || extractImgFromHtml(description)
+        || null
+
+      if (!title) continue
+
+      // Score by recency: articles from last 6 hours get highest score
+      const age = pubDate ? (now - new Date(pubDate).getTime()) / (1000 * 60 * 60) : 24
+      const recencyScore = Math.max(0, (24 - age) / 24) * 5 // 0-5 score based on recency
+
+      // Boost score for hot indicators in title
+      const hotBoost = /nóng|hot|breaking|sốc|viral|bùng nổ/i.test(title) ? 2 : 0
+
+      results.push({
+        keyword: cleanTitle(title),
+        score: recencyScore + hotBoost,
+        sources: [feed.source],
+        url: link,
+        thumbnail_url: thumbnail,
+        category: feed.category,
+        description: stripHtml(description).substring(0, 200),
+        published_at: pubDate || null,
+      })
+    }
+
+    return results
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Clean title: remove [tags], extra whitespace
+ */
+function cleanTitle(title) {
+  return title
+    .replace(/\[.*?\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Extract first img src from HTML string
+ */
+function extractImgFromHtml(html) {
+  if (!html) return null
+  const match = html.match(/<img[^>]+src=["']([^"']+)["']/)
+  return match ? match[1] : null
+}
+
+/**
+ * Strip HTML tags from description
+ */
+function stripHtml(html) {
+  if (!html) return ''
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 function mergeTrends(items) {
   const map = new Map()
   for (const item of items) {
@@ -101,4 +212,4 @@ function mergeTrends(items) {
   return Array.from(map.values()).sort((a, b) => b.score - a.score)
 }
 
-module.exports = { getTrends }
+module.exports = { getTrends, RSS_FEEDS }

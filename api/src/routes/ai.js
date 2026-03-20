@@ -3,8 +3,8 @@ const { getOrchestratorForUser } = require('../services/ai/orchestrator')
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
-  // GET /ai/settings - Get user AI settings
-  fastify.get('/settings', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // GET /ai/settings - Get AI settings (admin only)
+  fastify.get('/settings', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const { data, error } = await supabase
       .from('ai_settings')
       .select('*')
@@ -35,8 +35,8 @@ module.exports = async (fastify) => {
     return masked
   })
 
-  // PUT /ai/settings - Update AI settings
-  fastify.put('/settings', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // PUT /ai/settings - Update AI settings (admin only)
+  fastify.put('/settings', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const { providers, defaults, token_budgets, fallback_chain } = req.body
 
     const { data, error } = await supabase
@@ -56,8 +56,8 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // POST /ai/test - Test a provider
-  fastify.post('/test', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // POST /ai/test - Test a provider (admin only)
+  fastify.post('/test', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const { provider, api_key, model } = req.body
     if (!provider || !api_key) return reply.code(400).send({ error: 'provider and api_key required' })
 
@@ -99,20 +99,229 @@ module.exports = async (fastify) => {
     }
   })
 
-  // POST /ai/caption - Generate caption for content
+  // POST /ai/caption - Generate caption for content (enhanced)
   fastify.post('/caption', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { topic, style, language, keywords } = req.body
+    const {
+      topic, style, language, keywords, niche,
+      include_cta, include_emoji, reference_caption, max_length,
+      input_brief, reference_url
+    } = req.body
 
-    const prompt = `Write a compelling Facebook caption about: ${topic || 'general content'}.
-Style: ${style || 'engaging and friendly'}.
-Language: ${language || 'Vietnamese'}.
-${keywords ? `Include these keywords: ${keywords.join(', ')}` : ''}
-Keep it concise (1-3 sentences). Include appropriate emojis.`
+    const styleGuides = {
+      professional: 'Chuyên nghiệp, uy tín, dùng số liệu/thống kê nếu phù hợp. Tránh emoji quá nhiều.',
+      casual: 'Thân thiện, gần gũi, như đang nói chuyện với bạn bè. Dùng emoji tự nhiên.',
+      viral: `Viết bài Facebook dễ viral, PHẢI tuân thủ:
+
+HOOK (câu đầu tiên):
+- Phải gây SỐC, TÒ MÒ, hoặc TRANH CÃI nhẹ
+- Ví dụ: "Mình vừa phát hiện 1 thứ mà 99% người dùng không biết..." hoặc "Nếu bạn chưa biết [CHỦ ĐỀ], bạn đang bỏ lỡ thứ sẽ thay đổi cách bạn làm việc"
+- PHẢI nhắc đến TÊN chủ đề/sản phẩm/keyword chính ngay trong hook
+
+THÂN BÀI:
+- Mỗi ý 1-2 dòng, XUỐNG DÒNG NHIỀU, tạo khoảng trống giữa các đoạn
+- Câu ngắn, dễ đọc trên điện thoại
+- Nêu rõ: nó là gì, tại sao đặc biệt, ai nên dùng/biết
+- Dùng so sánh bất ngờ hoặc số liệu gây ấn tượng
+- KHÔNG dùng emoji (hoặc tối đa 1-2 nếu thật sự cần)
+- KHÔNG dùng hashtag
+- KHÔNG viết kiểu liệt kê khô khan — phải có cảm xúc, quan điểm cá nhân
+
+KẾT BÀI:
+- Câu hỏi kích thích tranh luận HOẶC CTA mạnh (tag bạn bè, share, save)
+- Ví dụ: "Bạn đã thử chưa? Comment cho mình biết!" hoặc "Tag ngay 1 người cần biết điều này"
+
+TONE: Tự nhiên như đang kể cho bạn bè nghe, KHÔNG giống marketing hay báo chí`,
+      educational: 'Chia sẻ kiến thức, tips hữu ích, dạng "Bạn biết chưa?" hoặc listicle ngắn.',
+      story: 'Kể chuyện cá nhân, trải nghiệm thực tế, tạo cảm xúc kết nối.',
+      promotional: 'Quảng bá sản phẩm/dịch vụ, highlight lợi ích, có CTA rõ ràng.',
+    }
+
+    const styleDesc = styleGuides[style] || styleGuides.casual
+    const lang = language === 'en' ? 'English' : 'Vietnamese'
+
+    const rewriteBlock = reference_caption
+      ? reference_caption.length > 500
+        ? `=== BÀI VIẾT GỐC (đọc kỹ, lấy ý chính) ===
+"""${reference_caption.substring(0, 3000)}"""
+
+NHIỆM VỤ: Viết lại thành bài Facebook HOÀN TOÀN MỚI từ bài gốc trên.
+- Giữ nguyên TÊN RIÊNG, SỐ LIỆU, KEYWORD CHÍNH
+- KHÔNG copy câu gốc — diễn đạt lại bằng giọng riêng
+- Thêm góc nhìn cá nhân, cảm xúc, hoặc trải nghiệm liên quan
+- Mở bài bằng 1 câu khiến người ta PHẢI đọc tiếp`
+        : `Caption cần viết lại: "${reference_caption}"
+Giữ ý chính, viết lại hấp dẫn và tự nhiên hơn nhiều.`
+      : ''
+
+    const briefBlock = input_brief
+      ? `=== THÔNG TIN ĐẦU VÀO (dùng làm nội dung chính) ===
+"""${input_brief.substring(0, 3000)}"""
+${reference_url ? `\nLINK THAM KHẢO: ${reference_url}` : ''}
+
+NHIỆM VỤ: Dựa trên thông tin trên, viết bài Facebook hoàn chỉnh, chuyên nghiệp.
+- Giữ nguyên tên riêng, số liệu, thông tin quan trọng từ đầu vào
+- Biến thông tin khô khan thành bài viết hấp dẫn, có cảm xúc
+- Thêm góc nhìn cá nhân, insight, hoặc lời khuyên liên quan`
+      : ''
+
+    let prompt = `Bạn là chuyên gia Content Marketing với 10 năm kinh nghiệm chuyên viết content Facebook. Bạn đã từng làm cho các agency lớn, hiểu sâu về tâm lý người đọc, biết cách biến thông tin khô khan nhất thành nội dung hấp dẫn đánh đúng tệp khách hàng mục tiêu.
+
+BẮT BUỘC viết tiếng Việt CÓ DẤU đầy đủ. Viết ${lang}.
+
+${briefBlock || `CHỦ ĐỀ: ${topic || 'general content'}`}
+PHONG CÁCH: ${styleDesc}
+${niche ? `LĨNH VỰC: ${niche}` : ''}
+${keywords?.length ? `KEYWORDS BẮT BUỘC PHẢI CÓ: ${keywords.join(', ')}` : ''}
+
+${rewriteBlock}
+
+=== TƯ DUY CỦA BẠN KHI VIẾT ===
+1. PHÂN TÍCH: Đọc kỹ thông tin đầu vào → xác định TỆP KHÁCH HÀNG mục tiêu (ai sẽ đọc bài này?)
+2. GÓC TIẾP CẬN: Chọn góc nhìn độc đáo nhất — không viết giống mọi người, tìm insight bất ngờ từ dữ liệu cơ bản
+3. CẤU TRÚC: Hook → Story/Value → CTA (mỗi phần phải có lý do tồn tại)
+
+=== QUY TẮC VIẾT ===
+1. HOOK (câu đầu): Phải khiến người đọc DỪNG SCROLL — dùng số liệu gây sốc, câu hỏi đánh vào pain point, hoặc statement ngược trend
+2. THÂN BÀI: Mỗi ý 1-2 dòng, XUỐNG DÒNG tạo khoảng trống, tối ưu cho đọc trên điện thoại
+3. GIỌNG VĂN: Như người có kinh nghiệm thực tế đang chia sẻ, có quan điểm rõ ràng, KHÔNG generic
+4. GIÁ TRỊ: Mỗi câu phải có VALUE — kiến thức actionable, số liệu cụ thể, hoặc góc nhìn mới
+5. CẢM XÚC: Kết nối cảm xúc với người đọc — đồng cảm, tò mò, hứng khởi, hoặc urgency
+${include_cta !== false ? '6. KẾT: Câu hỏi kích thích TRANH LUẬN hoặc CTA cụ thể (tag ai, save bài, share cho ai)' : ''}
+${include_emoji !== false ? '7. Emoji tự nhiên, vừa đủ (2-4 cái), đặt đúng chỗ nhấn mạnh — KHÔNG spam emoji' : '7. KHÔNG dùng emoji'}
+${max_length ? `8. Giới hạn ${max_length} ký tự` : '8. Tối đa 500 ký tự'}
+
+=== TUYỆT ĐỐI KHÔNG ===
+- KHÔNG viết kiểu liệt kê bullet points khô khan
+- KHÔNG mở bài bằng "Xin chào", "Hôm nay mình muốn chia sẻ", "Bạn có biết"
+- KHÔNG kết bằng "Cảm ơn đã đọc", "Chúc các bạn", "Hy vọng bài viết hữu ích"
+- KHÔNG dùng câu sáo rỗng: "Trong thời đại số", "Không thể phủ nhận", "Ai cũng biết"
+- KHÔNG dùng hashtag trong caption (hashtag riêng bên dưới)
+- KHÔNG viết giọng AI/robot — phải có cá tính, quan điểm, trải nghiệm cá nhân
+
+=== FORMAT TRẢ VỀ ===
+Trả về ĐÚNG format sau, không giải thích:
+
+[CAPTION]
+(nội dung caption ở đây)
+
+[HASHTAGS]
+(3-5 hashtag LỚN NHẤT của chủ đề, tiếng Việt có dấu, định dạng Facebook: mỗi hashtag viết liền không dấu cách, có dấu #)
+VD: #CloudHosting #VPS #DịchVụWeb #HostingGiáRẻ`
 
     try {
       const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
       const result = await orchestrator.call('caption_gen', [{ role: 'user', content: prompt }])
-      return { caption: result.text }
+      const text = result.text.trim().replace(/^["']|["']$/g, '')
+
+      // Parse caption + hashtags from response
+      let captionText = text
+      let hashtagsArr = []
+      const captionMatch = text.match(/\[CAPTION\]\s*\n([\s\S]*?)(?:\[HASHTAGS\]|$)/i)
+      const hashtagMatch = text.match(/\[HASHTAGS\]\s*\n([\s\S]*?)$/i)
+      if (captionMatch) {
+        captionText = captionMatch[1].trim()
+      }
+      if (hashtagMatch) {
+        // Extract hashtags — keep # prefix for FB format
+        const raw = hashtagMatch[1].trim()
+        const tags = raw.match(/#[\w\u00C0-\u024F\u1E00-\u1EFF]+/g)
+        if (tags?.length) {
+          hashtagsArr = tags.map(h => h.trim()).slice(0, 5)
+        } else {
+          // Fallback: split by space, add # if missing
+          hashtagsArr = raw.split(/[\s,]+/)
+            .map(h => h.trim().replace(/^#/, ''))
+            .filter(h => h.length > 0)
+            .map(h => '#' + h)
+            .slice(0, 5)
+        }
+      }
+
+      const response = { caption: captionText }
+      if (hashtagsArr.length > 0) response.hashtags = hashtagsArr
+      return response
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // POST /ai/suggest-schedule - AI schedule suggestion
+  fastify.post('/suggest-schedule', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { target_type, target_id, count, timezone } = req.body
+    const tz = timezone || 'Asia/Ho_Chi_Minh'
+    const slotCount = count || 7
+
+    // Default optimal times for Vietnamese Facebook users
+    const defaultSchedule = {
+      page: [
+        { time: '07:00', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], reason: 'Người dùng check Facebook buổi sáng' },
+        { time: '12:00', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], reason: 'Giờ nghỉ trưa - traffic cao' },
+        { time: '17:30', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], reason: 'Tan làm - scroll Facebook nhiều' },
+        { time: '20:00', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], reason: 'Prime time - engagement cao nhất' },
+        { time: '09:00', days: ['Sat', 'Sun'], reason: 'Cuối tuần thư giãn' },
+        { time: '15:00', days: ['Sat', 'Sun'], reason: 'Chiều cuối tuần - traffic ổn định' },
+      ],
+      group: [
+        { time: '08:00', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], reason: 'Sáng sớm - bài lên top group' },
+        { time: '12:30', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], reason: 'Giờ nghỉ trưa' },
+        { time: '19:00', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], reason: 'Tối - thời gian vàng cho groups' },
+        { time: '21:00', days: ['Mon', 'Wed', 'Fri'], reason: 'Late night engagement' },
+        { time: '10:00', days: ['Sat', 'Sun'], reason: 'Cuối tuần rảnh rỗi' },
+      ],
+    }
+
+    try {
+      // Try to get engagement data from publish_history
+      let query = supabase.from('publish_history')
+        .select('published_at, reach, reactions, comments, shares')
+        .eq('status', 'success')
+        .not('published_at', 'is', null)
+        .order('published_at', { ascending: false })
+        .limit(100)
+
+      if (target_id) {
+        if (target_type === 'page') {
+          const { data: page } = await supabase.from('fanpages').select('fb_page_id').eq('id', target_id).single()
+          if (page) query = query.eq('target_fb_id', page.fb_page_id)
+        } else {
+          const { data: group } = await supabase.from('fb_groups').select('fb_group_id').eq('id', target_id).single()
+          if (group) query = query.eq('target_fb_id', group.fb_group_id)
+        }
+      }
+
+      const { data: history } = await query
+
+      // If we have engagement data, use AI to analyze
+      if (history?.length >= 10) {
+        const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
+        const historyStr = history.map(h => {
+          const d = new Date(h.published_at)
+          return `${d.toLocaleDateString('en', { weekday: 'short' })} ${d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false })} - reach:${h.reach||0} reactions:${h.reactions||0} comments:${h.comments||0} shares:${h.shares||0}`
+        }).join('\n')
+
+        const result = await orchestrator.call('content_ideas', [{
+          role: 'user',
+          content: `Phân tích dữ liệu engagement từ Facebook ${target_type || 'page'} và gợi ý ${slotCount} thời điểm đăng bài tốt nhất (timezone ${tz}).
+
+Data:
+${historyStr}
+
+Return JSON array: [{ "time": "HH:MM", "days": ["Mon","Tue",...], "reason": "..." }]
+Chỉ trả về JSON, không giải thích.`
+        }])
+
+        try {
+          const jsonMatch = result.text.match(/\[[\s\S]*\]/)
+          if (jsonMatch) {
+            return { schedule: JSON.parse(jsonMatch[0]), source: 'ai_analyzed', data_points: history.length }
+          }
+        } catch {}
+      }
+
+      // Fallback to default schedule
+      const schedule = (defaultSchedule[target_type] || defaultSchedule.page).slice(0, slotCount)
+      return { schedule, source: 'default', data_points: history?.length || 0 }
+
     } catch (err) {
       return reply.code(500).send({ error: err.message })
     }
@@ -123,7 +332,13 @@ Keep it concise (1-3 sentences). Include appropriate emojis.`
     const { caption, count } = req.body
     if (!caption) return reply.code(400).send({ error: 'caption required' })
 
-    const prompt = `Generate ${count || 15} relevant hashtags for this Facebook post: "${caption}". Return as JSON array of strings (without # prefix).`
+    const prompt = `Generate ${count || 15} relevant hashtags for this Facebook post: "${caption}".
+    
+CRITICAL RULES:
+1. Return ONLY a valid JSON array of strings (e.g. ["hashtag1", "hashtag2"]).
+2. Do NOT include the '#' symbol in the strings.
+3. Do NOT wrap the output in markdown code blocks (no \`\`\`json or \`\`\`).
+4. Just output the raw array and nothing else.`
 
     try {
       const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
@@ -161,6 +376,247 @@ Return as JSON array: [{ "title": "...", "description": "...", "best_time": "...
       } catch {
         return { ideas: result.text }
       }
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // POST /ai/image-prompt - Extract keywords from caption & generate image prompt
+  fastify.post('/image-prompt', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { caption } = req.body
+    if (!caption) return reply.code(400).send({ error: 'caption required' })
+
+    // Truncate caption for prompt generation (avoid sending 15k chars to AI)
+    const captionForPrompt = caption.length > 1000 ? caption.substring(0, 1000) : caption
+
+    const prompt = `You are a world-class creative director and marketing design expert who specializes in scroll-stopping social media visuals. You think like the top 1% of designers at agencies like Ogilvy, Dentsu, and Wieden+Kennedy.
+
+Your mission: Read this Facebook post and craft a prompt that generates an image so compelling it STOPS people from scrolling.
+
+Facebook post:
+"""
+${captionForPrompt}
+"""
+
+=== YOUR CREATIVE PROCESS ===
+
+1. EXTRACT THE HERO ELEMENT:
+   - What is the ONE thing this post is about? (product, concept, emotion, event)
+   - This becomes the HERO — the dominant visual that takes 70%+ of the frame
+
+2. CHOOSE THE VISUAL STRATEGY (pick the best fit):
+   - PRODUCT HERO: Dramatic product shot with studio lighting, floating in space, cinematic angles
+   - CONCEPT METAPHOR: Powerful visual metaphor that makes abstract ideas tangible and emotional
+   - EMOTION TRIGGER: Scene that evokes the core feeling (excitement, urgency, curiosity, aspiration)
+   - DATA VISUALIZATION: For stats/numbers — turn data into stunning 3D infographic-style visuals
+
+3. APPLY MARKETING DESIGN PRINCIPLES:
+   - Color psychology: warm = urgency/passion, cool = trust/tech, contrast = attention
+   - Composition: rule of thirds, leading lines, negative space for impact
+   - Lighting: dramatic rim light, volumetric fog, golden hour, neon accents
+   - Depth: bokeh background, layered elements, atmospheric perspective
+
+=== ABSOLUTE RULES ===
+- NO generic stock-photo vibes (people shaking hands, team at desk, person on laptop)
+- NO text, words, logos, watermarks, UI mockups with readable text
+- The image alone must communicate the post's core message — viewer gets it in 0.5 seconds
+- Style: photorealistic, 3D cinematic render, or high-end editorial photography
+- English ONLY
+- Output ONLY the raw prompt, 60-100 words. NO intro, NO explanation, NO quotes.
+
+=== EXAMPLE ===
+Post about "cloud hosting with 99.9% uptime":
+A colossal glass server tower floating in the sky above clouds, bathed in warm golden sunset light, glowing fiber optic cables streaming upward like aurora borealis, tiny city skyline below for scale, volumetric god rays piercing through cloud layers, hyperrealistic 3D render, shallow depth of field, teal and amber color palette`
+
+    try {
+      const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
+      const result = await orchestrator.call('caption_gen', [{ role: 'user', content: prompt }])
+      return { prompt: result.text.trim().replace(/^["']|["']$/g, '') }
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // POST /ai/generate-image - Generate image using fal.ai
+  fastify.post('/generate-image', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { prompt, model, image_size, negative_prompt } = req.body
+    if (!prompt) return reply.code(400).send({ error: 'prompt required' })
+
+    try {
+      // Step 1: Generate image via fal.ai
+      let orchestrator
+      try {
+        orchestrator = await getOrchestratorForUser(req.user.id, supabase)
+      } catch (err) {
+        req.log.error({ err }, 'generate-image: failed to get orchestrator (DB/auth issue)')
+        return reply.code(503).send({ error: 'Không thể kết nối database. Thử lại sau.' })
+      }
+
+      let result
+      try {
+        result = await orchestrator.generateImage(prompt, { model, image_size, negative_prompt })
+      } catch (err) {
+        let msg = err.message
+        if (err.detail) msg = err.detail // Catch the detail exposed by fal.js
+        else if (err.response && err.response.data) {
+          msg = err.response.data.detail || JSON.stringify(err.response.data)
+        }
+        req.log.error({ err, msg, model, prompt: prompt.substring(0, 100) }, 'generate-image: fal.ai call failed')
+        return reply.code(502).send({ error: `Fal.ai từ chối: ${msg}` })
+      }
+
+      // Step 2: Get URL from result
+      const imageUrl = result.images?.[0]?.url
+      if (!imageUrl) {
+        req.log.error({ result }, 'generate-image: no image URL in response')
+        return reply.code(502).send({ error: 'fal.ai không trả về ảnh. Thử model khác.' })
+      }
+
+      // Step 3: Download & upload to R2
+      const axios = require('axios')
+      const https = require('https')
+      const dns = require('dns').promises
+      const { v4: uuid } = require('uuid')
+      let buffer
+      try {
+        if (imageUrl.startsWith('data:image/')) {
+          const base64Data = imageUrl.split(',')[1]
+          buffer = Buffer.from(base64Data, 'base64')
+        } else {
+          // Normal HTTP URL
+          let targetUrl = imageUrl
+          let headers = {}
+          
+          try {
+            // First try to resolve it via DNS-over-HTTPS to bypass completely broken Windows local DNS caching
+            const parsedUrl = new URL(imageUrl)
+            
+            req.log.info({ host: parsedUrl.hostname }, 'Attempting DNS-over-HTTPS resolution')
+            const dnsResp = await axios.get(`https://cloudflare-dns.com/dns-query?name=${parsedUrl.hostname}&type=A`, {
+              headers: { 'accept': 'application/dns-json' },
+              timeout: 5000
+            })
+            
+            if (dnsResp.data?.Answer?.[0]?.data) {
+              const address = dnsResp.data.Answer[0].data
+              targetUrl = imageUrl.replace(parsedUrl.hostname, address)
+              headers['Host'] = parsedUrl.hostname
+              req.log.info({ host: parsedUrl.hostname, ip: address }, 'Resolved fal.media DNS via Cloudflare DoH')
+            } else {
+              throw new Error('No A record found in DoH response')
+            }
+          } catch (dnsErr) {
+            req.log.warn({ err: dnsErr.message }, 'DoH lookup failed, falling back to default Axios routing')
+          }
+
+          const agent = new https.Agent({ rejectUnauthorized: false }) // IP cert will mismatch hostname
+          const imgResp = await axios.get(targetUrl, { 
+            headers,
+            responseType: 'arraybuffer', 
+            timeout: 30000,
+            httpsAgent: agent
+          })
+          buffer = Buffer.from(imgResp.data)
+        }
+      } catch (err) {
+        req.log.error({ err, imageUrl }, 'generate-image: failed to download from fal.ai')
+        return reply.code(502).send({ error: 'Không thể tải ảnh từ fal.ai do lỗi mạng' })
+      }
+
+      const mediaId = uuid()
+      const r2Key = `images/generated/${req.user.id}/${mediaId}.png`
+      let publicUrl = r2Key
+      try {
+        publicUrl = await fastify.uploadToR2(r2Key, buffer, 'image/png')
+      } catch (err) {
+        if (err.message === 'R2 storage not configured') {
+          req.log.warn('R2 storage not configured, falling back to base64 Data URI')
+          publicUrl = `data:image/png;base64,${buffer.toString('base64')}`
+        } else {
+          req.log.error({ err }, 'generate-image: R2 upload failed')
+          return reply.code(502).send({ error: 'Không thể upload ảnh lên storage' })
+        }
+      }
+
+      // Step 4: Save to media table
+      await supabase.from('media').insert({
+        id: mediaId,
+        owner_id: req.user.id,
+        type: 'image',
+        source_type: 'generated',
+        original_path: publicUrl,
+        title: `AI: ${prompt.substring(0, 80)}`,
+        file_size_bytes: buffer.length,
+        processing_status: 'done',
+      })
+
+      return {
+        id: mediaId,
+        url: publicUrl,
+        title: `AI: ${prompt.substring(0, 80)}`,
+        prompt,
+        model: model || 'fal-ai/flux/schnell',
+      }
+    } catch (err) {
+      req.log.error({ err }, 'generate-image: unexpected error')
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  async function getHashtagPresets(userId) {
+    const { data } = await supabase.from('ai_settings').select('defaults').eq('id', userId).single()
+    return data?.defaults?.hashtag_presets || []
+  }
+
+  async function saveHashtagPresets(userId, presets) {
+    // Read current defaults, merge hashtag_presets in
+    const { data } = await supabase.from('ai_settings').select('defaults').eq('id', userId).single()
+    const currentDefaults = data?.defaults || {}
+    await supabase.from('ai_settings').upsert({
+      id: userId,
+      defaults: { ...currentDefaults, hashtag_presets: presets },
+      updated_at: new Date().toISOString(),
+    })
+  }
+
+  // GET /ai/hashtag-presets - List saved presets
+  fastify.get('/hashtag-presets', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      return await getHashtagPresets(req.user.id)
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // POST /ai/hashtag-presets - Save a new preset
+  fastify.post('/hashtag-presets', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { name, tags } = req.body
+    if (!name || !tags?.length) return reply.code(400).send({ error: 'name and tags required' })
+
+    try {
+      const presets = await getHashtagPresets(req.user.id)
+      const newPreset = {
+        id: Date.now().toString(),
+        name: name.trim(),
+        tags: tags.map(t => t.replace(/^#/, '').trim()).filter(Boolean),
+        createdAt: new Date().toISOString(),
+      }
+      presets.unshift(newPreset)
+      await saveHashtagPresets(req.user.id, presets)
+      return newPreset
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // DELETE /ai/hashtag-presets/:id - Delete a preset
+  fastify.delete('/hashtag-presets/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const presets = await getHashtagPresets(req.user.id)
+      const filtered = presets.filter(p => p.id !== req.params.id)
+      if (filtered.length === presets.length) return reply.code(404).send({ error: 'Not found' })
+      await saveHashtagPresets(req.user.id, filtered)
+      return { success: true }
     } catch (err) {
       return reply.code(500).send({ error: err.message })
     }

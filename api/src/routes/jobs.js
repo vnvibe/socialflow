@@ -20,11 +20,24 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // GET /jobs/:id
+  // GET /jobs/:id (authenticated - full data)
   fastify.get('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data, error } = await supabase
       .from('jobs')
       .select('*')
+      .eq('id', req.params.id)
+      .single()
+
+    if (error) return reply.code(404).send({ error: 'Not found' })
+    return data
+  })
+
+  // GET /jobs/:id/status (public - lightweight polling endpoint, no auth needed)
+  // Job ID is UUID so not guessable. Only returns status fields.
+  fastify.get('/:id/status', async (req, reply) => {
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('id, status, result, error_message, started_at, finished_at')
       .eq('id', req.params.id)
       .single()
 
@@ -37,8 +50,32 @@ module.exports = async (fastify) => {
     const { type, payload, scheduled_at } = req.body
     if (!type || !payload) return reply.code(400).send({ error: 'type and payload required' })
 
+    // Chọn job type dựa trên posting_method của fanpage
+    let jobType = type
+    if (type === 'post_page' && payload?.target_id) {
+      const { data: fanpages, error: fanpageErr } = await supabase
+        .from('fanpages')
+        .select('id, access_token, posting_method')
+        .eq('id', payload.target_id)
+        .limit(1)
+
+      if (fanpageErr) {
+        fastify.log.error({ fanpageErr, target_id: payload.target_id }, '[JOBS] Fanpage lookup failed')
+      }
+
+      const fanpage = fanpages?.[0]
+      const method = fanpage?.posting_method || 'auto'
+      if (method === 'access_token' && fanpage?.access_token) {
+        jobType = 'post_page_graph'
+      } else if (method === 'auto' && fanpage?.access_token) {
+        jobType = 'post_page_graph'
+      }
+      // method === 'cookie' → giữ post_page (browser)
+      fastify.log.info({ target_id: payload.target_id, method, jobType }, '[JOBS] Job type resolved')
+    }
+
     const { data, error } = await supabase.from('jobs').insert({
-      type,
+      type: jobType,
       payload,
       scheduled_at: scheduled_at || new Date().toISOString(),
       created_by: req.user.id
@@ -50,11 +87,12 @@ module.exports = async (fastify) => {
 
   // POST /jobs/:id/cancel
   fastify.post('/:id/cancel', { preHandler: fastify.authenticate }, async (req, reply) => {
+    // Allow cancel even when agent already picked up (claimed/running)
     const { data, error } = await supabase
       .from('jobs')
       .update({ status: 'cancelled' })
       .eq('id', req.params.id)
-      .in('status', ['pending', 'claimed'])
+      .in('status', ['pending', 'claimed', 'running'])
       .select()
       .single()
 
@@ -77,6 +115,67 @@ module.exports = async (fastify) => {
 
     if (error) return reply.code(500).send({ error: error.message })
     return reply.code(201).send(data)
+  })
+
+  // PUT /jobs/:id/target - Change where this job will post to (only if pending or failed)
+  fastify.put('/:id/target', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { type, account_id, target_id } = req.body
+    if (!type || !account_id) return reply.code(400).send({ error: 'type and account_id required' })
+    if (type !== 'post_profile' && !target_id) return reply.code(400).send({ error: 'target_id required for page/group' })
+
+    // Build new payload chunk
+    const newTargetData = { account_id }
+    if (target_id) newTargetData.target_id = target_id
+
+    // Fetch existing job to verify ownership and status
+    const { data: job, error: fetchErr } = await supabase
+      .from('jobs')
+      .select('id, status, payload')
+      .eq('id', req.params.id)
+      .eq('created_by', req.user.id)
+      .single()
+
+    if (fetchErr || !job) return reply.code(404).send({ error: 'Job not found' })
+    if (!['pending', 'failed'].includes(job.status)) {
+      return reply.code(400).send({ error: 'Only pending or failed jobs can be repointed' })
+    }
+
+    const updatedPayload = { ...job.payload, ...newTargetData }
+    const updatedStatus = job.status === 'failed' ? 'pending' : job.status
+
+    const { data, error } = await supabase
+      .from('jobs')
+      .update({ type, payload: updatedPayload, status: updatedStatus })
+      .eq('id', req.params.id)
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
+  })
+
+  // DELETE /jobs/:id
+  fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { error } = await supabase.from('jobs').delete().eq('id', req.params.id).eq('created_by', req.user.id)
+    if (error) return reply.code(500).send({ error: error.message })
+    return { success: true }
+  })
+
+  // PUT /jobs/:id
+  fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { scheduled_at } = req.body
+    if (!scheduled_at) return reply.code(400).send({ error: 'scheduled_at required' })
+
+    const { data, error } = await supabase
+      .from('jobs')
+      .update({ scheduled_at })
+      .eq('id', req.params.id)
+      .eq('created_by', req.user.id)
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
   })
 
   // GET /jobs/stats - Job stats

@@ -4,19 +4,41 @@ const { HttpProxyAgent, HttpsProxyAgent } = require('https-proxy-agent')
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
-  // GET /proxies
+  // GET /proxies — admin sees all, user sees only assigned proxies
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const isAdmin = req.user.role === 'admin'
+
+    if (isAdmin) {
+      const { data, error } = await supabase
+        .from('proxies')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (error) return reply.code(500).send({ error: error.message })
+      return data
+    }
+
+    // Non-admin: only see proxies assigned to them
+    const { data: settings } = await supabase
+      .from('user_settings')
+      .select('proxy_ids')
+      .eq('user_id', req.user.id)
+      .single()
+
+    const proxyIds = settings?.proxy_ids || []
+    if (!proxyIds.length) return []
+
     const { data, error } = await supabase
       .from('proxies')
       .select('*')
+      .in('id', proxyIds)
       .order('created_at', { ascending: false })
 
     if (error) return reply.code(500).send({ error: error.message })
     return data
   })
 
-  // POST /proxies - Add single proxy
-  fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // POST /proxies - Add single proxy (admin only)
+  fastify.post('/', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const { host, port, username, password, type, label, country } = req.body
     if (!host || !port) return reply.code(400).send({ error: 'host and port required' })
 
@@ -30,8 +52,8 @@ module.exports = async (fastify) => {
     return reply.code(201).send(data)
   })
 
-  // POST /proxies/bulk-import - Import from text (ip:port:user:pass per item)
-  fastify.post('/bulk-import', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // POST /proxies/bulk-import - Import from text (admin only)
+  fastify.post('/bulk-import', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const { proxies: inputProxies, type } = req.body
 
     if (!inputProxies || !Array.isArray(inputProxies)) {
@@ -56,8 +78,8 @@ module.exports = async (fastify) => {
     return { imported: data.length, proxies: data }
   })
 
-  // PUT /proxies/:id
-  fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // PUT /proxies/:id (admin only)
+  fastify.put('/:id', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const allowed = ['label', 'host', 'port', 'username', 'password', 'type', 'country', 'is_active']
     const updates = {}
     for (const key of allowed) {
@@ -69,15 +91,15 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // DELETE /proxies/:id
-  fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // DELETE /proxies/:id (admin only)
+  fastify.delete('/:id', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const { error } = await supabase.from('proxies').delete().eq('id', req.params.id)
     if (error) return reply.code(500).send({ error: error.message })
     return { success: true }
   })
 
-  // POST /proxies/:id/test - Test proxy connectivity
-  fastify.post('/:id/test', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // POST /proxies/:id/test - Test proxy (admin only)
+  fastify.post('/:id/test', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const { data: proxy } = await supabase.from('proxies').select('*').eq('id', req.params.id).single()
     if (!proxy) return reply.code(404).send({ error: 'Not found' })
 
@@ -118,8 +140,8 @@ module.exports = async (fastify) => {
     }
   })
 
-  // POST /proxies/test-all - Test all proxies
-  fastify.post('/test-all', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // POST /proxies/test-all - Test all proxies (admin only)
+  fastify.post('/test-all', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const { data: proxies } = await supabase.from('proxies').select('*').eq('is_active', true)
 
     const results = await Promise.allSettled(

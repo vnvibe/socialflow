@@ -20,12 +20,13 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // GET /inbox/unread-count
+  // GET /inbox/unread-count — only count user's own unread messages
   fastify.get('/unread-count', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { count, error } = await supabase
       .from('inbox_messages')
-      .select('id', { count: 'exact' })
+      .select('id, fanpages!inner(*, accounts!inner(owner_id))', { count: 'exact' })
       .eq('is_read', false)
+      .eq('fanpages.accounts.owner_id', req.user.id)
 
     if (error) return reply.code(500).send({ error: error.message })
     return { unread: count || 0 }

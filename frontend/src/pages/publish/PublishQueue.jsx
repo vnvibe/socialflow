@@ -1,23 +1,37 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { XCircle, RotateCcw, Clock, Loader2, CheckCircle, AlertCircle, Ban } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { XCircle, RotateCcw, Clock, Loader2, CheckCircle, AlertCircle, Ban, PenSquare, Megaphone, Send, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
 const statusTabs = [
-  { key: 'all', label: 'All' },
-  { key: 'pending', label: 'Pending' },
-  { key: 'running', label: 'Running' },
-  { key: 'done', label: 'Done' },
-  { key: 'failed', label: 'Failed' }
+  { key: 'all', label: 'Tất cả' },
+  { key: 'pending', label: 'Chờ xử lý' },
+  { key: 'running', label: 'Đang chạy' },
+  { key: 'done', label: 'Hoàn thành' },
+  { key: 'failed', label: 'Thất bại' }
 ]
 
 const statusConfig = {
-  pending: { icon: Clock, label: 'Pending', cls: 'bg-yellow-100 text-yellow-700' },
-  running: { icon: Loader2, label: 'Running', cls: 'bg-blue-100 text-blue-700' },
-  done: { icon: CheckCircle, label: 'Done', cls: 'bg-green-100 text-green-700' },
-  failed: { icon: AlertCircle, label: 'Failed', cls: 'bg-red-100 text-red-700' },
-  cancelled: { icon: Ban, label: 'Cancelled', cls: 'bg-gray-100 text-gray-600' }
+  pending: { icon: Clock, label: 'Chờ xử lý', cls: 'bg-yellow-100 text-yellow-700' },
+  claimed: { icon: Loader2, label: 'Đang xử lý', cls: 'bg-blue-100 text-blue-700' },
+  running: { icon: Loader2, label: 'Đang chạy', cls: 'bg-blue-100 text-blue-700' },
+  done: { icon: CheckCircle, label: 'Hoàn thành', cls: 'bg-green-100 text-green-700' },
+  failed: { icon: AlertCircle, label: 'Thất bại', cls: 'bg-red-100 text-red-700' },
+  cancelled: { icon: Ban, label: 'Đã huỷ', cls: 'bg-gray-100 text-gray-600' }
+}
+
+const typeLabels = {
+  post_page: 'Đăng trang',
+  post_group: 'Đăng nhóm',
+  post_profile: 'Đăng cá nhân',
+  process_video: 'Xử lý video',
+  fetch_inbox: 'Tải hộp thư',
+  check_health: 'Kiểm tra',
+  fetch_pages: 'Tải trang',
+  fetch_groups: 'Tải nhóm',
+  fetch_all: 'Tải tất cả',
 }
 
 function JobStatusBadge({ status }) {
@@ -25,7 +39,7 @@ function JobStatusBadge({ status }) {
   const Icon = config.icon
   return (
     <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${config.cls}`}>
-      <Icon size={12} className={status === 'running' ? 'animate-spin' : ''} />
+      <Icon size={12} className={status === 'running' || status === 'claimed' ? 'animate-spin' : ''} />
       {config.label}
     </span>
   )
@@ -34,6 +48,7 @@ function JobStatusBadge({ status }) {
 export default function PublishQueue() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState('all')
+  const [pendingAction, setPendingAction] = useState({ id: null, type: null })
 
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ['jobs'],
@@ -43,14 +58,18 @@ export default function PublishQueue() {
 
   const cancelMutation = useMutation({
     mutationFn: (id) => api.post(`/jobs/${id}/cancel`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['jobs'] }); toast.success('Job cancelled') },
-    onError: () => toast.error('Failed to cancel')
+    onMutate: (id) => setPendingAction({ id, type: 'cancel' }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['jobs'] }); toast.success('Đã huỷ') },
+    onError: () => toast.error('Không thể huỷ'),
+    onSettled: () => setPendingAction({ id: null, type: null }),
   })
 
   const retryMutation = useMutation({
     mutationFn: (id) => api.post(`/jobs/${id}/retry`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['jobs'] }); toast.success('Job retried') },
-    onError: () => toast.error('Failed to retry')
+    onMutate: (id) => setPendingAction({ id, type: 'retry' }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['jobs'] }); toast.success('Đã thêm lại') },
+    onError: () => toast.error('Không thể thử lại'),
+    onSettled: () => setPendingAction({ id: null, type: null }),
   })
 
   const filtered = activeTab === 'all' ? jobs : jobs.filter(j => j.status === activeTab)
@@ -58,7 +77,7 @@ export default function PublishQueue() {
   const tabCounts = {
     all: jobs.length,
     pending: jobs.filter(j => j.status === 'pending').length,
-    running: jobs.filter(j => j.status === 'running').length,
+    running: jobs.filter(j => j.status === 'running' || j.status === 'claimed').length,
     done: jobs.filter(j => j.status === 'done').length,
     failed: jobs.filter(j => j.status === 'failed').length
   }
@@ -68,7 +87,15 @@ export default function PublishQueue() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Publish Queue</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Hàng đợi đăng bài</h1>
+        <div className="flex gap-2">
+          <Link to="/content/new" className="flex items-center gap-2 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">
+            <PenSquare size={16} /> Tạo nội dung mới
+          </Link>
+          <Link to="/campaigns" className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+            <Megaphone size={16} /> Chiến dịch
+          </Link>
+        </div>
       </div>
 
       {/* Status Tabs */}
@@ -93,20 +120,22 @@ export default function PublishQueue() {
         <table className="w-full">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Type</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Target</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Account</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Caption</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Scheduled At</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Status</th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Actions</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Loại</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Nơi đăng</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Tài khoản</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Nội dung</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Lịch đăng</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Trạng thái</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Thao tác</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {filtered.map(job => (
               <tr key={job.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{job.job_type || job.type || '—'}</span>
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                    {typeLabels[job.job_type || job.type] || job.job_type || job.type || '—'}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {job.target_name || job.fanpage?.name || job.group?.name || '—'}
@@ -120,34 +149,48 @@ export default function PublishQueue() {
                   <JobStatusBadge status={job.status} />
                 </td>
                 <td className="px-4 py-3 text-right space-x-2">
-                  {job.status === 'pending' && (
+                  {(job.status === 'pending' || job.status === 'claimed') && (
                     <button
                       onClick={() => cancelMutation.mutate(job.id)}
-                      disabled={cancelMutation.isPending}
+                      disabled={pendingAction.id === job.id}
                       className="text-gray-400 hover:text-red-600 inline-flex items-center gap-1 text-sm"
-                      title="Cancel"
+                      title="Huỷ bài đăng"
                     >
-                      <XCircle size={14} /> Cancel
+                      {pendingAction.id === job.id && pendingAction.type === 'cancel' ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />} Huỷ
                     </button>
                   )}
                   {job.status === 'failed' && (
                     <button
                       onClick={() => retryMutation.mutate(job.id)}
-                      disabled={retryMutation.isPending}
+                      disabled={pendingAction.id === job.id}
                       className="text-gray-400 hover:text-blue-600 inline-flex items-center gap-1 text-sm"
-                      title="Retry"
+                      title="Thử lại"
                     >
-                      <RotateCcw size={14} /> Retry
+                      {pendingAction.id === job.id && pendingAction.type === 'retry' ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />} Thử lại
                     </button>
                   )}
                   {job.error_message && (
-                    <span className="text-xs text-red-500" title={job.error_message}>Error info</span>
+                    <span className="text-xs text-red-500 cursor-help" title={job.error_message}>Xem lỗi</span>
                   )}
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No jobs in queue</td></tr>
+              <tr>
+                <td colSpan={7} className="px-4 py-12 text-center">
+                  <Send size={40} className="mx-auto mb-3 text-gray-300" />
+                  <p className="text-gray-500 mb-2">Chưa có bài đăng nào trong hàng đợi</p>
+                  <p className="text-sm text-gray-400 mb-4">Tạo nội dung hoặc chiến dịch để bắt đầu đăng bài tự động</p>
+                  <div className="flex items-center justify-center gap-3">
+                    <Link to="/content/new" className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                      <Plus size={16} /> Tạo nội dung
+                    </Link>
+                    <Link to="/campaigns" className="inline-flex items-center gap-2 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">
+                      <Megaphone size={16} /> Tạo chiến dịch
+                    </Link>
+                  </div>
+                </td>
+              </tr>
             )}
           </tbody>
         </table>

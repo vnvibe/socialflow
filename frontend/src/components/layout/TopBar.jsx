@@ -1,5 +1,6 @@
-import { LogOut, User } from 'lucide-react'
+import { LogOut, User, Menu } from 'lucide-react'
 import useAuthStore from '../../store/auth.store'
+import AgentStatus from './AgentStatus'
 
 const roleBadgeColors = {
   admin: 'bg-red-100 text-red-700',
@@ -7,7 +8,7 @@ const roleBadgeColors = {
   user: 'bg-gray-100 text-gray-700',
 }
 
-export default function TopBar() {
+export default function TopBar({ onMenuToggle }) {
   const { profile, logout } = useAuthStore()
 
   const handleLogout = async () => {
@@ -15,8 +16,13 @@ export default function TopBar() {
   }
 
   return (
-    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0">
-      <div />
+    <header className="h-14 sm:h-16 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-6 shrink-0">
+      <div className="flex items-center gap-2">
+        <button onClick={onMenuToggle} className="md:hidden p-2 -ml-1 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100">
+          <Menu size={20} />
+        </button>
+        <AgentStatus />
+      </div>
 
       <div className="flex items-center gap-4">
         {/* User info */}

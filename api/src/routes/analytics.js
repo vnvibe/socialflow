@@ -9,21 +9,33 @@ module.exports = async (fastify) => {
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
+    // Get user's account IDs for filtering publish_history
+    const { data: userAccounts } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('owner_id', req.user.id)
+    const userAccountIds = (userAccounts || []).map(a => a.id)
+
     const [accounts, postsToday, jobsPending, unreadInbox, recentPosts] = await Promise.all([
       // Total active accounts
       supabase.from('accounts').select('id', { count: 'exact' }).eq('owner_id', req.user.id).eq('is_active', true),
-      // Posts today
-      supabase.from('publish_history').select('id', { count: 'exact' }).eq('status', 'success').gte('published_at', todayISO),
+      // Posts today — only user's accounts
+      userAccountIds.length > 0
+        ? supabase.from('publish_history').select('id', { count: 'exact' }).eq('status', 'success').gte('published_at', todayISO).in('account_id', userAccountIds)
+        : { count: 0 },
       // Pending jobs
       supabase.from('jobs').select('id', { count: 'exact' }).eq('status', 'pending').eq('created_by', req.user.id),
-      // Unread inbox
-      supabase.from('inbox_messages').select('id', { count: 'exact' }).eq('is_read', false),
-      // Posts last 7 days (for chart)
-      supabase.from('publish_history')
-        .select('published_at, status')
-        .gte('published_at', sevenDaysAgo)
-        .eq('status', 'success')
-        .order('published_at', { ascending: true })
+      // Unread inbox — only user's fanpages
+      supabase.from('inbox_messages').select('id, fanpages!inner(*, accounts!inner(owner_id))', { count: 'exact' }).eq('is_read', false).eq('fanpages.accounts.owner_id', req.user.id),
+      // Posts last 7 days (for chart) — only user's accounts
+      userAccountIds.length > 0
+        ? supabase.from('publish_history')
+            .select('published_at, status')
+            .gte('published_at', sevenDaysAgo)
+            .eq('status', 'success')
+            .in('account_id', userAccountIds)
+            .order('published_at', { ascending: true })
+        : { data: [] },
     ])
 
     // Group posts by day for chart
@@ -61,13 +73,23 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // GET /analytics/history - Publish history
+  // GET /analytics/history - Publish history (filtered by user's accounts)
   fastify.get('/history', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { limit = 50, offset = 0, status } = req.query
+
+    // Get user's account IDs
+    const { data: userAccounts } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('owner_id', req.user.id)
+    const userAccountIds = (userAccounts || []).map(a => a.id)
+
+    if (!userAccountIds.length) return []
 
     let query = supabase
       .from('publish_history')
       .select('*')
+      .in('account_id', userAccountIds)
       .order('published_at', { ascending: false })
       .range(offset, offset + parseInt(limit) - 1)
 

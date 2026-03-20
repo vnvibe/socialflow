@@ -1,3 +1,4 @@
+const axios = require('axios')
 const { fetchPageInbox, replyToMessage } = require('../services/facebook/fb-inbox')
 
 module.exports = async (fastify) => {
@@ -7,7 +8,7 @@ module.exports = async (fastify) => {
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data, error } = await supabase
       .from('fanpages')
-      .select('*, accounts!inner(owner_id)')
+      .select('*, accounts!inner(id, username, owner_id)')
       .eq('accounts.owner_id', req.user.id)
       .order('created_at', { ascending: false })
 
@@ -28,9 +29,22 @@ module.exports = async (fastify) => {
     return reply.code(201).send(data)
   })
 
+  // GET /fanpages/:id
+  fastify.get('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data, error } = await supabase
+      .from('fanpages')
+      .select('*, accounts!inner(id, username, owner_id)')
+      .eq('id', req.params.id)
+      .eq('accounts.owner_id', req.user.id)
+      .single()
+
+    if (error) return reply.code(404).send({ error: 'Fanpage not found' })
+    return data
+  })
+
   // PUT /fanpages/:id
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const allowed = ['name', 'inbox_enabled', 'inbox_interval_minutes', 'is_active']
+    const allowed = ['name', 'inbox_enabled', 'inbox_interval_minutes', 'is_active', 'posting_method']
     const updates = {}
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key]
@@ -131,5 +145,59 @@ module.exports = async (fastify) => {
 
     if (error) return reply.code(500).send({ error: error.message })
     return { success: true }
+  })
+
+  // POST /fanpages/:id/post-direct - Post directly via Graph API without agent/job
+  // Body: { caption, media_url, media_type } where media_type: 'photo' | 'video' | 'text'
+  fastify.post('/:id/post-direct', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { caption = '', media_url, media_type = 'text' } = req.body || {}
+
+    // Load fanpage with token and fb_page_id
+    const { data: fanpage } = await supabase
+      .from('fanpages')
+      .select('id, fb_page_id, access_token, posting_method, accounts!inner(owner_id)')
+      .eq('id', req.params.id)
+      .single()
+
+    if (!fanpage) return reply.code(404).send({ error: 'Fanpage not found' })
+    if (fanpage.accounts?.owner_id !== req.user.id) return reply.code(403).send({ error: 'Forbidden' })
+    if (!fanpage.access_token) return reply.code(400).send({ error: 'Fanpage missing access_token' })
+    if (fanpage.posting_method === 'cookie') return reply.code(400).send({ error: 'Fanpage is set to cookie-only posting. Use agent/job instead.' })
+
+    const pageId = fanpage.fb_page_id
+    const token = fanpage.access_token
+    const graphBase = `https://graph.facebook.com/v21.0/${pageId}`
+
+    try {
+      let res
+      if (media_type === 'photo' && media_url) {
+        res = await axios.post(`${graphBase}/photos`, {
+          url: media_url,
+          caption,
+          access_token: token,
+        })
+        return { success: true, fb_post_id: res.data?.post_id || res.data?.id, type: 'photo' }
+      }
+
+      if (media_type === 'video' && media_url) {
+        res = await axios.post(`${graphBase}/videos`, {
+          file_url: media_url,
+          description: caption,
+          access_token: token,
+        })
+        return { success: true, fb_post_id: res.data?.id, type: 'video' }
+      }
+
+      // default: text/link post
+      res = await axios.post(`${graphBase}/feed`, {
+        message: caption,
+        access_token: token,
+      })
+      return { success: true, fb_post_id: res.data?.id, type: 'text' }
+    } catch (err) {
+      const fbErr = err.response?.data?.error
+      fastify.log.error({ err: fbErr || err.message }, '[POST-DIRECT] Graph post failed')
+      return reply.code(500).send({ error: fbErr?.message || err.message })
+    }
   })
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -11,9 +11,14 @@ import {
   Eye,
   Pencil,
   Trash2,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  ScanSearch,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
+import useAgentGuard from '../../hooks/useAgentGuard'
 import HealthBadge from '../../components/accounts/HealthBadge'
 import ProxyBadge from '../../components/shared/ProxyBadge'
 
@@ -23,7 +28,13 @@ export default function AccountList() {
   const [search, setSearch] = useState('')
   const [editAccount, setEditAccount] = useState(null)
 
+  // Fetch All state: { accountId: { jobId, status, error } }
+  const [fetchJobs, setFetchJobs] = useState({})
+  const [fetchingAll, setFetchingAll] = useState(false)
+  const pollRef = useRef(null)
+
   const queryClient = useQueryClient()
+  const { requireAgent } = useAgentGuard()
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['accounts'],
@@ -67,11 +78,95 @@ export default function AccountList() {
     }
   }
 
+  // --- Fetch All Accounts ---
+  const activeFetchCount = Object.values(fetchJobs).filter(j => ['pending', 'claimed', 'running'].includes(j.status)).length
+  const doneFetchCount = Object.values(fetchJobs).filter(j => j.status === 'done').length
+  const failedFetchCount = Object.values(fetchJobs).filter(j => j.status === 'failed').length
+  const totalFetchCount = Object.keys(fetchJobs).length
+
+  const pollFetchJobs = useCallback(async () => {
+    setFetchJobs(prev => {
+      const activeJobs = Object.entries(prev).filter(([, j]) => ['pending', 'claimed', 'running'].includes(j.status))
+      if (activeJobs.length === 0) {
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+        setFetchingAll(false)
+        return prev
+      }
+      // Poll each active job
+      Promise.all(activeJobs.map(([accId, j]) =>
+        api.get(`/jobs/${j.jobId}`).then(r => ({ accId, data: r.data })).catch(() => null)
+      )).then(results => {
+        setFetchJobs(current => {
+          const next = { ...current }
+          let anyDone = false
+          for (const r of results) {
+            if (!r) continue
+            next[r.accId] = { ...next[r.accId], status: r.data.status, error: r.data.error_message }
+            if (r.data.status === 'done' || r.data.status === 'failed') anyDone = true
+          }
+          // Check if all done
+          const stillActive = Object.values(next).some(j => ['pending', 'claimed', 'running'].includes(j.status))
+          if (!stillActive) {
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+            setFetchingAll(false)
+            queryClient.invalidateQueries({ queryKey: ['accounts'] })
+            queryClient.invalidateQueries({ queryKey: ['fanpages'] })
+            queryClient.invalidateQueries({ queryKey: ['groups'] })
+          }
+          return next
+        })
+      })
+      return prev
+    })
+  }, [queryClient])
+
+  useEffect(() => { return () => { if (pollRef.current) clearInterval(pollRef.current) } }, [])
+
+  const handleFetchAll = () => requireAgent(async () => {
+    const activeAccounts = accounts.filter(a => a.is_active !== false)
+    if (activeAccounts.length === 0) return toast.error('No active accounts')
+
+    setFetchingAll(true)
+    const jobs = {}
+
+    for (const account of activeAccounts) {
+      try {
+        const res = await api.post(`/accounts/${account.id}/fetch-all`)
+        jobs[account.id] = { jobId: res.data.job_id, status: 'pending', error: null }
+      } catch (err) {
+        jobs[account.id] = { jobId: null, status: 'failed', error: err.response?.data?.error || err.message }
+      }
+    }
+
+    setFetchJobs(jobs)
+    toast.success(`Queued fetch for ${Object.values(jobs).filter(j => j.jobId).length}/${activeAccounts.length} accounts`)
+
+    // Start polling
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(pollFetchJobs, 3000)
+  })
+
+  const getFetchStatus = (accountId) => fetchJobs[accountId] || null
+
+  const dismissFetchAll = () => {
+    setFetchJobs({})
+    setFetchingAll(false)
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Accounts</h1>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleFetchAll}
+            disabled={fetchingAll || accounts.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 transition-colors"
+          >
+            {fetchingAll ? <Loader className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
+            {fetchingAll ? 'Fetching...' : 'Fetch All'}
+          </button>
           <button
             onClick={() => setShowBulkModal(true)}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
@@ -88,6 +183,48 @@ export default function AccountList() {
           </button>
         </div>
       </div>
+
+      {/* Fetch All Progress Banner */}
+      {totalFetchCount > 0 && (
+        <div className={`rounded-xl border p-4 ${
+          activeFetchCount > 0 ? 'bg-blue-50 border-blue-200' :
+          failedFetchCount > 0 && doneFetchCount === 0 ? 'bg-red-50 border-red-200' :
+          'bg-emerald-50 border-emerald-200'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {activeFetchCount > 0 ? (
+                <Loader className="w-5 h-5 text-blue-500 animate-spin" />
+              ) : failedFetchCount > 0 && doneFetchCount === 0 ? (
+                <XCircle className="w-5 h-5 text-red-500" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+              )}
+              <div>
+                <p className="text-sm font-medium text-gray-900">
+                  {activeFetchCount > 0
+                    ? `Fetching pages & groups... (${doneFetchCount + failedFetchCount}/${totalFetchCount} done)`
+                    : `Fetch complete — ${doneFetchCount} success, ${failedFetchCount} failed`
+                  }
+                </p>
+                {activeFetchCount > 0 && (
+                  <div className="w-48 h-1.5 bg-blue-100 rounded-full mt-1.5 overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.round(((doneFetchCount + failedFetchCount) / totalFetchCount) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+            {activeFetchCount === 0 && (
+              <button onClick={dismissFetchAll} className="p-1 rounded-lg hover:bg-white/50 text-gray-500">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -136,6 +273,17 @@ export default function AccountList() {
                           </div>
                         )}
                         {account.username}
+                        {(() => {
+                          const fs = getFetchStatus(account.id)
+                          if (!fs) return null
+                          if (['pending', 'claimed', 'running'].includes(fs.status))
+                            return <RefreshCw className="w-3.5 h-3.5 text-blue-500 animate-spin" />
+                          if (fs.status === 'done')
+                            return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          if (fs.status === 'failed')
+                            return <XCircle className="w-3.5 h-3.5 text-red-500" title={fs.error || 'Failed'} />
+                          return null
+                        })()}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-500">{account.fb_user_id}</td>
@@ -152,7 +300,7 @@ export default function AccountList() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => healthCheckMutation.mutate(account.id)}
+                          onClick={() => requireAgent(() => healthCheckMutation.mutate(account.id))}
                           disabled={healthCheckMutation.isPending || account.status === 'checking'}
                           className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                         >

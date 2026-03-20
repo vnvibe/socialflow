@@ -14,9 +14,9 @@ const { postToPage, postToGroup, postToProfile } = require('./fb-cookie-post')
 // - Cookie posting fails
 // - Account requires browser interaction
 
-async function createPostJob(supabase, { type, content_id, target_id, account_id, userId }) {
+async function createPostJob(supabase, { type, content_id, target_id, account_id, userId, useGraph = false }) {
   const jobType = {
-    page: 'post_page',
+    page: useGraph ? 'post_page_graph' : 'post_page',
     group: 'post_group',
     profile: 'post_profile'
   }[type]
@@ -34,16 +34,32 @@ async function createPostJob(supabase, { type, content_id, target_id, account_id
 }
 
 // Smart post: try cookie first, fallback to browser job
-async function smartPost(supabase, { type, content, account, targetId, userId }) {
-  // If content has media, always use browser (needs file upload)
+async function smartPost(supabase, { type, content, account, targetId, userId, page }) {
+  const hasPageToken = page?.access_token
+
+  // If content has media, prefer Graph if page token available; else browser job
   if (content.media_id) {
     return createPostJob(supabase, {
       type,
       content_id: content.id,
       target_id: targetId,
       account_id: account.id,
-      userId
+      userId,
+      useGraph: type === 'page' && hasPageToken
     })
+  }
+
+  // If page token exists, prefer Graph job even for text/link (avoid Playwright)
+  if (type === 'page' && hasPageToken) {
+    const job = await createPostJob(supabase, {
+      type,
+      content_id: content.id,
+      target_id: targetId,
+      account_id: account.id,
+      userId,
+      useGraph: true
+    })
+    return { method: 'graph_job', job_id: job.id }
   }
 
   // Try cookie-based post first (faster, lighter)
@@ -73,16 +89,17 @@ async function smartPost(supabase, { type, content, account, targetId, userId })
       return { method: 'cookie', ...result }
     }
   } catch (err) {
-    console.warn(`Cookie post failed for ${type}, falling back to browser:`, err.message)
+    console.warn(`Cookie post failed for ${type}, falling back to browser job:`, err.message)
   }
 
-  // Fallback to browser job
+  // Fallback to browser job (Playwright)
   const job = await createPostJob(supabase, {
     type,
     content_id: content.id,
     target_id: targetId,
     account_id: account.id,
-    userId
+    userId,
+    useGraph: false
   })
 
   return { method: 'browser', job_id: job.id }

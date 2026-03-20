@@ -1,23 +1,25 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Upload, Download, Trash2, Film, Image, Music, Play, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { Upload, Download, Trash2, Film, Image, Music, Play, Clock, CheckCircle, AlertCircle, Loader2, PenSquare, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
 const tabs = [
-  { key: 'all', label: 'All' },
-  { key: 'video', label: 'Videos', icon: Film },
-  { key: 'image', label: 'Images', icon: Image },
-  { key: 'music', label: 'Music', icon: Music }
+  { key: 'all', label: 'Tất cả' },
+  { key: 'video', label: 'Video', icon: Film },
+  { key: 'image', label: 'Hình ảnh', icon: Image },
+  { key: 'music', label: 'Âm nhạc', icon: Music }
 ]
 
 const statusConfig = {
-  pending: { icon: Clock, label: 'Pending', cls: 'bg-yellow-100 text-yellow-700' },
-  processing: { icon: Loader2, label: 'Processing', cls: 'bg-blue-100 text-blue-700' },
-  done: { icon: CheckCircle, label: 'Done', cls: 'bg-green-100 text-green-700' },
-  error: { icon: AlertCircle, label: 'Error', cls: 'bg-red-100 text-red-700' }
+  pending: { icon: Clock, label: 'Chờ xử lý', cls: 'bg-yellow-100 text-yellow-700' },
+  processing: { icon: Loader2, label: 'Đang xử lý', cls: 'bg-blue-100 text-blue-700' },
+  done: { icon: CheckCircle, label: 'Hoàn thành', cls: 'bg-green-100 text-green-700' },
+  error: { icon: AlertCircle, label: 'Lỗi', cls: 'bg-red-100 text-red-700' }
 }
+
+const typeLabel = { video: 'Video', image: 'Ảnh', music: 'Nhạc' }
 
 export default function MediaLibrary() {
   const queryClient = useQueryClient()
@@ -37,8 +39,8 @@ export default function MediaLibrary() {
       formData.append('file', file)
       return api.post('/media/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['media'] }); toast.success('Upload complete') },
-    onError: () => toast.error('Upload failed')
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['media'] }); toast.success('Đã tải lên thành công') },
+    onError: () => toast.error('Tải lên thất bại')
   })
 
   const downloadUrlMutation = useMutation({
@@ -47,15 +49,15 @@ export default function MediaLibrary() {
       queryClient.invalidateQueries({ queryKey: ['media'] })
       setShowDownload(false)
       setDownloadUrl('')
-      toast.success('Download started')
+      toast.success('Đã bắt đầu tải về')
     },
-    onError: () => toast.error('Download failed')
+    onError: () => toast.error('Tải về thất bại')
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/media/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['media'] }); toast.success('Deleted') },
-    onError: () => toast.error('Failed to delete')
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['media'] }); toast.success('Đã xoá') },
+    onError: () => toast.error('Không thể xoá')
   })
 
   const handleFileChange = (e) => {
@@ -78,14 +80,14 @@ export default function MediaLibrary() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Media Library</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Thư viện</h1>
         <div className="flex gap-2">
           <button onClick={() => setShowDownload(true)} className="flex items-center gap-2 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50">
-            <Download size={18} /> Download URL
+            <Download size={18} /> Tải từ URL
           </button>
           <button onClick={() => fileInputRef.current?.click()} disabled={uploadMutation.isPending} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
             {uploadMutation.isPending ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-            {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
+            {uploadMutation.isPending ? 'Đang tải lên...' : 'Tải lên'}
           </button>
           <input ref={fileInputRef} type="file" accept="video/*,image/*,audio/*" onChange={handleFileChange} className="hidden" />
         </div>
@@ -109,20 +111,28 @@ export default function MediaLibrary() {
 
       {/* Media Grid */}
       {filtered.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
+        <div className="text-center py-16">
           <Film size={48} className="mx-auto mb-3 text-gray-300" />
-          <p>No media files yet</p>
+          <p className="text-gray-500 mb-2">Chưa có file media nào</p>
+          <p className="text-sm text-gray-400 mb-4">Tải lên ảnh, video hoặc nhạc để bắt đầu tạo nội dung</p>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm"
+          >
+            <Plus size={16} /> Tải lên file đầu tiên
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {filtered.map(item => {
             const status = statusConfig[item.processing_status] || statusConfig.pending
             const StatusIcon = status.icon
+            const isDone = item.processing_status === 'done'
             return (
               <div key={item.id} className="bg-white rounded-xl shadow overflow-hidden group">
                 <div className="relative aspect-video bg-gray-100">
-                  {item.thumbnail_url ? (
-                    <img src={item.thumbnail_url} alt={item.title} className="w-full h-full object-cover" />
+                  {(item.thumbnail_url || item.url || item.original_path) ? (
+                    <img src={item.thumbnail_url || item.url || item.original_path} alt={item.title} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       {item.type === 'video' && <Film size={32} className="text-gray-300" />}
@@ -132,8 +142,8 @@ export default function MediaLibrary() {
                   )}
 
                   {/* Type badge */}
-                  <span className="absolute top-2 left-2 text-xs px-2 py-0.5 rounded-full bg-black/60 text-white capitalize">
-                    {item.type}
+                  <span className="absolute top-2 left-2 text-xs px-2 py-0.5 rounded-full bg-black/60 text-white">
+                    {typeLabel[item.type] || item.type}
                   </span>
 
                   {/* Duration */}
@@ -152,7 +162,7 @@ export default function MediaLibrary() {
 
                   {/* Delete button */}
                   <button
-                    onClick={() => { if (confirm('Delete this media?')) deleteMutation.mutate(item.id) }}
+                    onClick={() => { if (confirm('Bạn có chắc muốn xoá file này?')) deleteMutation.mutate(item.id) }}
                     className="absolute top-2 right-2 p-1 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
                   >
                     <Trash2 size={12} />
@@ -160,7 +170,7 @@ export default function MediaLibrary() {
                 </div>
 
                 <div className="p-3">
-                  <h3 className="text-sm font-medium text-gray-900 truncate">{item.title || item.original_filename || 'Untitled'}</h3>
+                  <h3 className="text-sm font-medium text-gray-900 truncate">{item.title || item.original_filename || 'Chưa đặt tên'}</h3>
                   <div className="flex items-center justify-between mt-2">
                     <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${status.cls}`}>
                       <StatusIcon size={10} className={item.processing_status === 'processing' ? 'animate-spin' : ''} /> {status.label}
@@ -169,6 +179,16 @@ export default function MediaLibrary() {
                       <span className="text-xs text-gray-400">{(item.file_size / 1024 / 1024).toFixed(1)} MB</span>
                     )}
                   </div>
+
+                  {/* Create content link — only for done items */}
+                  {isDone && (
+                    <Link
+                      to={`/content/new?media_id=${item.id}`}
+                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-2"
+                    >
+                      <PenSquare size={12} /> Tạo nội dung
+                    </Link>
+                  )}
                 </div>
               </div>
             )
@@ -180,21 +200,22 @@ export default function MediaLibrary() {
       {showDownload && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowDownload(false)}>
           <div className="bg-white rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">Download from URL</h2>
+            <h2 className="text-lg font-bold mb-4">Tải từ đường dẫn</h2>
             <input
               placeholder="https://example.com/video.mp4"
               value={downloadUrl}
               onChange={e => setDownloadUrl(e.target.value)}
               className="w-full border rounded-lg px-3 py-2"
             />
+            <p className="text-xs text-gray-400 mt-1">Hỗ trợ link video từ TikTok, YouTube, Facebook...</p>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowDownload(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={() => setShowDownload(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Huỷ</button>
               <button
                 onClick={() => downloadUrlMutation.mutate(downloadUrl)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 disabled={downloadUrlMutation.isPending || !downloadUrl.trim()}
               >
-                {downloadUrlMutation.isPending ? 'Downloading...' : 'Download'}
+                {downloadUrlMutation.isPending ? 'Đang tải...' : 'Tải về'}
               </button>
             </div>
           </div>

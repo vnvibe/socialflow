@@ -7,34 +7,37 @@ import {
   Film,
   PenSquare,
   Send,
+  Inbox,
+  Eye,
   Megaphone,
   TrendingUp,
   BarChart3,
-  Brain,
-  Shield,
-  UserCog,
+  CalendarDays,
+  Settings,
+  Globe,
 } from 'lucide-react'
 import useAuthStore from '../../store/auth.store'
 
 const mainLinks = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/accounts', label: 'Accounts', icon: Users },
-  { to: '/pages', label: 'Pages', icon: FileText },
-  { to: '/groups', label: 'Groups', icon: UsersRound },
-  { to: '/media', label: 'Media', icon: Film },
-  { to: '/content', label: 'Content', icon: PenSquare },
-  { to: '/publish', label: 'Publish', icon: Send },
-  { to: '/campaigns', label: 'Campaigns', icon: Megaphone },
-  { to: '/trends', label: 'Trends', icon: TrendingUp },
-  { to: '/analytics', label: 'Analytics', icon: BarChart3 },
+  { to: '/dashboard', label: 'Tổng quan', icon: LayoutDashboard },
+  { to: '/accounts', label: 'Tài khoản', icon: Users },
+  { to: '/pages', label: 'Fanpage', icon: FileText },
+  { to: '/groups', label: 'Nhóm', icon: UsersRound },
+  { to: '/media', label: 'Thư viện', icon: Film },
+  { to: '/content', label: 'Nội dung', icon: PenSquare },
+  { to: '/publish', label: 'Đăng bài', icon: Send },
+  { to: '/inbox', label: 'Hộp thư', icon: Inbox },
+  { to: '/monitor', label: 'Theo dõi', icon: Eye },
+  { to: '/campaigns', label: 'Chiến dịch', icon: Megaphone },
+  { to: '/calendar', label: 'Lịch', icon: CalendarDays },
+  { to: '/trends', label: 'Xu hướng', icon: TrendingUp },
+  { to: '/analytics', label: 'Thống kê', icon: BarChart3 },
+  { to: '/settings/websites', label: 'Website', icon: Globe },
 ]
 
-const settingsLinks = [
-  { to: '/settings/ai', label: 'AI Settings', icon: Brain },
-  { to: '/settings/proxies', label: 'Proxies', icon: Shield },
-]
+const settingsLinks = []
 
-export default function Sidebar() {
+export default function Sidebar({ onClose }) {
   const profile = useAuthStore((s) => s.profile)
   const isAdmin = profile?.role === 'admin'
 
@@ -60,7 +63,7 @@ export default function Sidebar() {
       {/* Main navigation */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
         {mainLinks.map((link) => (
-          <NavLink key={link.to} to={link.to} className={linkClasses}>
+          <NavLink key={link.to} to={link.to} className={linkClasses} onClick={onClose}>
             <link.icon className="w-5 h-5 shrink-0" />
             {link.label}
           </NavLink>
@@ -69,17 +72,15 @@ export default function Sidebar() {
         {/* Separator */}
         <div className="border-t border-slate-700 my-4" />
 
-        {settingsLinks.map((link) => (
-          <NavLink key={link.to} to={link.to} className={linkClasses}>
-            <link.icon className="w-5 h-5 shrink-0" />
-            {link.label}
+        {isAdmin ? (
+          <NavLink to="/settings/admin" className={linkClasses} onClick={onClose}>
+            <Settings className="w-5 h-5 shrink-0" />
+            Cài đặt hệ thống
           </NavLink>
-        ))}
-
-        {isAdmin && (
-          <NavLink to="/settings/users" className={linkClasses}>
-            <UserCog className="w-5 h-5 shrink-0" />
-            Users
+        ) : (
+          <NavLink to="/settings" className={linkClasses} onClick={onClose}>
+            <Settings className="w-5 h-5 shrink-0" />
+            Cài đặt
           </NavLink>
         )}
       </nav>

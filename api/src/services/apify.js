@@ -11,7 +11,21 @@
  * }
  */
 
-async function getApifyConfig(supabase) {
+async function getApifyConfig(supabase, userId) {
+  // If userId provided, check user's own Apify config first
+  if (userId) {
+    const { data: userSettings } = await supabase
+      .from('user_settings')
+      .select('apify_config')
+      .eq('user_id', userId)
+      .single()
+
+    if (userSettings?.apify_config?.keys?.length) {
+      return userSettings.apify_config
+    }
+  }
+
+  // Fallback to admin/system config
   const { data } = await supabase
     .from('system_settings')
     .select('value')

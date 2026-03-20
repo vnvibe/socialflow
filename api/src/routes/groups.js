@@ -68,4 +68,29 @@ module.exports = async (fastify) => {
     if (error) return reply.code(500).send({ error: error.message })
     return { success: true }
   })
+
+  // POST /groups/resolve - Queue agent job to visit group URLs and fetch name/info
+  fastify.post('/resolve', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { account_id, group_ids } = req.body
+    if (!account_id || !group_ids?.length) return reply.code(400).send({ error: 'account_id and group_ids required' })
+
+    // Check agent online
+    const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id').gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
+    if (!agents?.length) return reply.code(503).send({ error: 'No agent online. Start the SocialFlow Agent first.' })
+
+    // Fetch group records
+    const { data: groups } = await supabase.from('fb_groups').select('id, fb_group_id, url').in('id', group_ids)
+    if (!groups?.length) return reply.code(404).send({ error: 'No groups found' })
+
+    // Create agent job
+    const { data: job, error } = await supabase.from('jobs').insert({
+      type: 'check_health',
+      payload: { action: 'resolve_group', account_id, groups },
+      status: 'pending',
+      scheduled_at: new Date().toISOString()
+    }).select().single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return { message: 'Resolve queued', job_id: job.id, group_count: groups.length }
+  })
 }

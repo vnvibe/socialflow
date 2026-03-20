@@ -1,4 +1,5 @@
 const { runApifyActor } = require('../services/apify')
+const { getOrchestratorForUser } = require('../services/ai/orchestrator')
 
 // apify/facebook-posts-scraper for pages, apify/facebook-groups-scraper for groups
 const ACTOR_FB_PAGES = 'apify~facebook-posts-scraper'
@@ -49,11 +50,14 @@ function normalizePost(item) {
   // Shares
   const shares = item.sharesCount || item.shares || item.reshare_count || item.sharesTotal || 0
 
-  // Images: could be string, array, or nested
+  // Images: could be string, array, or nested — handle many Apify formats
   const imageUrl = item.photoUrl || item.imageUrl || item.photo
+    || item.fullSizeUrl || item.attachedUrl || item.pictureUrl
     || (Array.isArray(item.imageUrls) ? item.imageUrls[0] : null)
     || (Array.isArray(item.images) ? item.images[0] : null)
-    || item.media?.[0]?.thumbnail || null
+    || (Array.isArray(item.attachments) ? (item.attachments[0]?.photo || item.attachments[0]?.url || item.attachments[0]?.imageUrl) : null)
+    || item.media?.[0]?.thumbnail || item.media?.[0]?.photo || item.media?.[0]?.url
+    || null
 
   return {
     fb_post_id: fbPostId,
@@ -145,6 +149,15 @@ async function fetchSourcePosts(supabase, source, log) {
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
+  // Helper: resolve effective owner_id (admin can impersonate via ?as_user=uuid)
+  function getOwnerId(req) {
+    const asUser = req.query?.as_user
+    if (asUser && req.user.role === 'admin' && asUser !== req.user.id) {
+      return asUser
+    }
+    return req.user.id
+  }
+
   // ============================================
   // SOURCES CRUD
   // ============================================
@@ -154,7 +167,7 @@ module.exports = async (fastify) => {
     const { data, error } = await supabase
       .from('monitored_sources')
       .select('*')
-      .eq('owner_id', req.user.id)
+      .eq('owner_id', getOwnerId(req))
       .order('created_at', { ascending: false })
 
     if (error) return reply.code(500).send({ error: error.message })
@@ -197,6 +210,26 @@ module.exports = async (fastify) => {
     return reply.code(201).send(data)
   })
 
+  // PUT /monitoring/fetch-method — bulk update fetch_method for all user's sources
+  fastify.put('/fetch-method', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { fetch_method, fetch_account_id } = req.body || {}
+    if (!fetch_method || !['apify', 'cookie'].includes(fetch_method)) {
+      return reply.code(400).send({ error: 'fetch_method must be apify or cookie' })
+    }
+    const updates = { fetch_method }
+    if (fetch_method === 'cookie' && fetch_account_id) {
+      updates.fetch_account_id = fetch_account_id
+    } else if (fetch_method === 'apify') {
+      updates.fetch_account_id = null
+    }
+    const { error } = await supabase
+      .from('monitored_sources')
+      .update(updates)
+      .eq('owner_id', req.user.id)
+    if (error) return reply.code(500).send({ error: error.message })
+    return { success: true, fetch_method }
+  })
+
   // PUT /monitoring/sources/:id
   fastify.put('/sources/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const allowed = ['name', 'is_active', 'fetch_interval_minutes', 'url']
@@ -234,7 +267,11 @@ module.exports = async (fastify) => {
   // ============================================
 
   // POST /monitoring/sources/:id/fetch-now — returns posts directly
+  // body.method: 'apify' (default) | 'cookie'
+  // body.account_id: required when method === 'cookie'
   fastify.post('/sources/:id/fetch-now', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { method = 'apify', account_id } = req.body || {}
+
     const { data: source } = await supabase
       .from('monitored_sources')
       .select('*')
@@ -244,6 +281,57 @@ module.exports = async (fastify) => {
 
     if (!source) return reply.code(404).send({ error: 'Source not found' })
 
+    // --- Cookie method: create agent job, poll for result ---
+    if (method === 'cookie') {
+      if (!account_id) return reply.code(400).send({ error: 'account_id required for cookie method' })
+
+      // Check agent online
+      const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
+        .gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
+      if (!agents?.length) return reply.code(503).send({ error: 'Agent không online. Khởi động agent trước.' })
+
+      const sourceUrl = source.url || `https://www.facebook.com/${source.source_type === 'group' ? 'groups/' : ''}${source.fb_source_id}`
+
+      // Create job
+      const { data: job, error: jobErr } = await supabase.from('jobs').insert({
+        type: 'fetch_source_cookie',
+        payload: {
+          account_id,
+          source_url: sourceUrl,
+          source_id: source.id,
+          source_type: source.source_type,
+          owner_id: req.user.id,
+        },
+        status: 'pending',
+        scheduled_at: new Date().toISOString(),
+        created_by: req.user.id,
+      }).select().single()
+
+      if (jobErr) return reply.code(500).send({ error: jobErr.message })
+
+      // Poll for result (timeout 90s)
+      const deadline = Date.now() + 90000
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000))
+        const { data: updated } = await supabase.from('jobs').select('status, result, error_message')
+          .eq('id', job.id).single()
+
+        if (updated?.status === 'done') {
+          const result = updated.result || {}
+          return { posts: result.posts || [], total: result.total || 0, source_name: result.source_name || source.name }
+        }
+        if (updated?.status === 'failed') {
+          return reply.code(500).send({ error: updated.error_message || 'Agent fetch failed' })
+        }
+        if (updated?.status === 'cancelled') {
+          return reply.code(400).send({ error: 'Job was cancelled' })
+        }
+      }
+
+      return reply.code(504).send({ error: 'Timeout — agent chưa trả kết quả sau 90s. Thử lại sau.' })
+    }
+
+    // --- Apify method (default) ---
     try {
       const posts = await fetchSourcePosts(supabase, source, req.log)
       // Re-read source to get updated name
@@ -274,6 +362,121 @@ module.exports = async (fastify) => {
       }
       return reply.code(500).send({ error: `Lỗi fetch: ${msg.substring(0, 200)}` })
     }
+  })
+
+  // ============================================
+  // AI REPLY GENERATION
+  // ============================================
+
+  // POST /monitoring/generate-reply — AI generates a comment for a post
+  fastify.post('/generate-reply', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { content_text, author_name, source_name, tone } = req.body || {}
+    if (!content_text) return reply.code(400).send({ error: 'content_text required' })
+
+    try {
+      const ai = await getOrchestratorForUser(req.user.id, supabase)
+      const toneInstruction = tone === 'professional' ? 'chuyên nghiệp, lịch sự'
+        : tone === 'friendly' ? 'thân thiện, gần gũi'
+        : tone === 'funny' ? 'hài hước, vui vẻ'
+        : 'tự nhiên, phù hợp với ngữ cảnh'
+
+      const messages = [
+        {
+          role: 'system',
+          content: `Bạn là người có chuyên môn sâu trong lĩnh vực liên quan đến bài viết. Viết 1 comment tiếng Việt reply bài Facebook.
+
+QUAN TRỌNG - TUYỆT ĐỐI KHÔNG:
+- Câu sáo rỗng: "Cảm ơn chia sẻ", "Bài viết rất hữu ích", "Thông tin quý giá"
+- Khen chung chung: "Hay quá", "Tuyệt vời", "Rất bổ ích"
+- Mở đầu bằng "Cảm ơn anh/chị"
+- Dùng hashtag, emoji quá 1 cái
+
+YÊU CẦU:
+- Giọng văn: ${toneInstruction}
+- Đi thẳng vào nội dung, nói như người hiểu biết thật sự về chủ đề
+- Bổ sung góc nhìn, kinh nghiệm thực tế, hoặc thông tin liên quan
+- Nếu có ý kiến trái chiều hợp lý thì nêu ra (tạo thảo luận)
+- Đặt câu hỏi cụ thể về chi tiết trong bài (không hỏi chung chung)
+- 1-3 câu, ngắn gọn, đọc như người thật comment
+- CHỈ trả về nội dung comment, không giải thích`
+        },
+        {
+          role: 'user',
+          content: `Bài viết từ "${source_name || 'Facebook'}"${author_name ? ` bởi ${author_name}` : ''}:\n\n${content_text.substring(0, 1500)}`
+        }
+      ]
+
+      const result = await ai.call('caption_gen', messages, { max_tokens: 300 })
+      const comment = (result.content || result.text || '').trim()
+      return { comment }
+    } catch (err) {
+      req.log.error({ err }, 'AI generate reply failed')
+      return reply.code(500).send({ error: 'Lỗi AI: ' + (err.message || 'Unknown').substring(0, 200) })
+    }
+  })
+
+  // ============================================
+  // COMMENT LOGS — persistent record of all comment actions
+  // ============================================
+
+  // POST /monitoring/comment-log — create log when sending comment job
+  fastify.post('/comment-log', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { job_id, account_id, fb_post_id, post_url, source_name, comment_text } = req.body || {}
+    if (!fb_post_id || !comment_text) return reply.code(400).send({ error: 'fb_post_id and comment_text required' })
+
+    const { data, error } = await supabase.from('comment_logs').insert({
+      owner_id: req.user.id,
+      job_id: job_id || null,
+      account_id: account_id || null,
+      fb_post_id,
+      post_url: post_url || null,
+      source_name: source_name || null,
+      comment_text,
+      status: 'pending',
+    }).select().single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.code(201).send(data)
+  })
+
+  // GET /monitoring/comment-logs — list comment history
+  fastify.get('/comment-logs', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { status, account_id, limit = 100, offset = 0 } = req.query
+
+    let query = supabase
+      .from('comment_logs')
+      .select('*, accounts(username)')
+      .eq('owner_id', getOwnerId(req))
+      .order('created_at', { ascending: false })
+      .range(offset, offset + parseInt(limit) - 1)
+
+    if (status) query = query.eq('status', status)
+    if (account_id) query = query.eq('account_id', account_id)
+
+    const { data, error } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
+  // PUT /monitoring/comment-logs/:id — update status (called by agent after execution)
+  fastify.put('/comment-logs/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { status, error_message } = req.body || {}
+    if (!status) return reply.code(400).send({ error: 'status required' })
+
+    const updates = { status }
+    if (error_message) updates.error_message = error_message
+    if (status === 'done' || status === 'failed') updates.finished_at = new Date().toISOString()
+
+    const { data, error } = await supabase
+      .from('comment_logs')
+      .update(updates)
+      .eq('id', req.params.id)
+      .eq('owner_id', req.user.id)
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
   })
 
   // ============================================
@@ -315,7 +518,7 @@ module.exports = async (fastify) => {
     let query = supabase
       .from('monitored_posts')
       .select('*, monitored_sources(name, source_type, fb_source_id, avatar_url)', { count: 'exact' })
-      .eq('owner_id', req.user.id)
+      .eq('owner_id', getOwnerId(req))
       .order('fetched_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1)
 
@@ -334,7 +537,7 @@ module.exports = async (fastify) => {
     let query = supabase
       .from('monitored_posts')
       .select('*, monitored_sources(name, source_type, fb_source_id, avatar_url)', { count: 'exact' })
-      .eq('owner_id', req.user.id)
+      .eq('owner_id', getOwnerId(req))
       .order('fetched_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1)
 

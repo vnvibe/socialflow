@@ -1,25 +1,90 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Eye, EyeOff, CheckCircle, AlertCircle, Loader2, Save, Zap } from 'lucide-react'
+import { Eye, EyeOff, CheckCircle, AlertCircle, Loader2, Save, Zap, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
-const providers = [
-  { key: 'openai', name: 'OpenAI', color: 'bg-green-500' },
-  { key: 'deepseek', name: 'Deepseek', color: 'bg-blue-500' },
-  { key: 'anthropic', name: 'Anthropic', color: 'bg-orange-500' },
-  { key: 'gemini', name: 'Gemini', color: 'bg-purple-500' },
-  { key: 'groq', name: 'Groq', color: 'bg-red-500' },
-  { key: 'kimi', name: 'Kimi', color: 'bg-cyan-500' },
-  { key: 'minimax', name: 'MiniMax', color: 'bg-pink-500' }
+const providerList = [
+  {
+    key: 'openai', name: 'OpenAI', color: 'bg-green-500',
+    models: [
+      { value: 'gpt-4o', label: 'GPT-4o (mới nhất)' },
+      { value: 'gpt-4o-mini', label: 'GPT-4o Mini (rẻ, nhanh)' },
+      { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+      { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo (rẻ nhất)' },
+    ]
+  },
+  {
+    key: 'deepseek', name: 'DeepSeek', color: 'bg-blue-500',
+    models: [
+      { value: 'deepseek-chat', label: 'DeepSeek V3 (deepseek-chat)' },
+      { value: 'deepseek-reasoner', label: 'DeepSeek R1 (reasoning)' },
+    ]
+  },
+  {
+    key: 'anthropic', name: 'Anthropic', color: 'bg-orange-500',
+    models: [
+      { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+      { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (rẻ, nhanh)' },
+    ]
+  },
+  {
+    key: 'gemini', name: 'Gemini', color: 'bg-purple-500',
+    models: [
+      { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (mới nhất)' },
+      { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+      { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+    ]
+  },
+  {
+    key: 'groq', name: 'Groq', color: 'bg-red-500',
+    models: [
+      { value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B (mạnh)' },
+      { value: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B' },
+      { value: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B (nhanh nhất)' },
+    ]
+  },
+  {
+    key: 'kimi', name: 'Kimi', color: 'bg-cyan-500',
+    models: [
+      { value: 'moonshot-v1-8k', label: 'Moonshot V1 8K' },
+      { value: 'moonshot-v1-32k', label: 'Moonshot V1 32K' },
+      { value: 'moonshot-v1-128k', label: 'Moonshot V1 128K (long context)' },
+    ]
+  },
+  {
+    key: 'minimax', name: 'MiniMax', color: 'bg-pink-500',
+    models: [
+      { value: 'abab6.5-chat', label: 'ABAB 6.5 Chat' },
+      { value: 'abab5.5-chat', label: 'ABAB 5.5 Chat' },
+    ]
+  },
+  {
+    key: 'fal', name: 'fal.ai (Image)', color: 'bg-yellow-500',
+    models: [
+      { value: 'fal-ai/flux/schnell', label: 'Flux Schnell (nhanh)' },
+      { value: 'fal-ai/flux/dev', label: 'Flux Dev' },
+      { value: 'fal-ai/flux-pro/v1.1', label: 'Flux Pro 1.1' },
+      { value: 'fal-ai/flux.2/dev', label: 'Flux 2 Dev (mới)' },
+      { value: 'fal-ai/nano-banana-2', label: 'Nano 2 (siêu nhanh)' },
+      { value: 'fal-ai/nano-banana-pro', label: 'Nano Pro (Gemini)' },
+      { value: 'fal-ai/recraft-v3', label: 'Recraft V3' },
+      { value: 'fal-ai/recraft-v4', label: 'Recraft V4 (mới)' },
+      { value: 'fal-ai/ideogram/v3', label: 'Ideogram V3' },
+      { value: 'fal-ai/qwen-image-max', label: 'Qwen Image Max' },
+    ]
+  }
 ]
 
 const functions = [
-  { key: 'caption_gen', label: 'Caption Generation' },
-  { key: 'hashtag_gen', label: 'Hashtag Generation' },
-  { key: 'spin_text', label: 'Text Spinning' },
-  { key: 'content_analysis', label: 'Content Analysis' },
-  { key: 'trend_analysis', label: 'Trend Analysis' }
+  { key: 'caption_gen', label: 'Tạo caption' },
+  { key: 'hashtag_gen', label: 'Tạo hashtag' },
+  { key: 'spin_text', label: 'Spin text' },
+  { key: 'content_analysis', label: 'Phân tích nội dung' },
+  { key: 'trend_analysis', label: 'Phân tích xu hướng' },
+  { key: 'relevance_review', label: 'AI Review (Feed scan)' },
+  { key: 'content_ideas', label: 'Gợi ý ý tưởng' },
+  { key: 'image_gen', label: 'Tạo ảnh AI' },
 ]
 
 export default function AISettings() {
@@ -27,6 +92,7 @@ export default function AISettings() {
   const [settings, setSettings] = useState({})
   const [showKeys, setShowKeys] = useState({})
   const [testResults, setTestResults] = useState({})
+  const [showAddProvider, setShowAddProvider] = useState(false)
 
   const { data: savedSettings, isLoading } = useQuery({
     queryKey: ['ai-settings'],
@@ -41,19 +107,19 @@ export default function AISettings() {
 
   const saveMutation = useMutation({
     mutationFn: (data) => api.put('/ai/settings', data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['ai-settings'] }); toast.success('Settings saved') },
-    onError: () => toast.error('Failed to save')
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['ai-settings'] }); toast.success('Đã lưu') },
+    onError: () => toast.error('Lưu thất bại')
   })
 
   const testMutation = useMutation({
-    mutationFn: (provider) => api.post('/ai/test', { provider }),
-    onSuccess: (res, provider) => {
-      setTestResults(prev => ({ ...prev, [provider]: { success: true, message: res.data.message || 'Connection successful' } }))
-      toast.success(`${provider} test passed`)
+    mutationFn: ({ provider, api_key, model }) => api.post('/ai/test', { provider, api_key, model }),
+    onSuccess: (res, vars) => {
+      setTestResults(prev => ({ ...prev, [vars.provider]: { success: true, message: res.data.response || 'Kết nối thành công' } }))
+      toast.success(`${vars.provider} OK`)
     },
-    onError: (err, provider) => {
-      setTestResults(prev => ({ ...prev, [provider]: { success: false, message: err.response?.data?.message || 'Connection failed' } }))
-      toast.error(`${provider} test failed`)
+    onError: (err, vars) => {
+      setTestResults(prev => ({ ...prev, [vars.provider]: { success: false, message: err.response?.data?.error || 'Kết nối thất bại' } }))
+      toast.error(`${vars.provider} thất bại`)
     }
   })
 
@@ -70,12 +136,23 @@ export default function AISettings() {
     }))
   }
 
-  const updateDefaultModel = (funcKey, value) => {
+  const removeProvider = (providerKey) => {
+    setSettings(prev => {
+      const newProviders = { ...prev.providers }
+      delete newProviders[providerKey]
+      return { ...prev, providers: newProviders }
+    })
+  }
+
+  const updateDefault = (funcKey, field, value) => {
     setSettings(prev => ({
       ...prev,
-      default_models: {
-        ...prev.default_models,
-        [funcKey]: value
+      defaults: {
+        ...prev.defaults,
+        [funcKey]: {
+          ...prev.defaults?.[funcKey],
+          [field]: value
+        }
       }
     }))
   }
@@ -84,89 +161,111 @@ export default function AISettings() {
     setShowKeys(prev => ({ ...prev, [key]: !prev[key] }))
   }
 
-  if (isLoading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
+  // Get list of enabled/configured providers
+  const configuredProviderKeys = Object.keys(settings.providers || {})
+  const availableToAdd = providerList.filter(p => !configuredProviderKeys.includes(p.key))
+
+  const handleTestProvider = (providerKey) => {
+    const ps = settings.providers?.[providerKey]
+    if (!ps?.api_key || ps.api_key.endsWith('...')) {
+      toast.error('Nhập API key trước khi test')
+      return
+    }
+    testMutation.mutate({
+      provider: providerKey,
+      api_key: ps.api_key,
+      model: ps.model
+    })
+  }
+
+  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">AI Settings</h1>
+        <h2 className="text-lg font-semibold text-gray-900">AI Providers</h2>
         <button
           onClick={() => saveMutation.mutate(settings)}
           disabled={saveMutation.isPending}
           className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
         >
           <Save size={18} />
-          {saveMutation.isPending ? 'Saving...' : 'Save All'}
+          {saveMutation.isPending ? 'Đang lưu...' : 'Lưu tất cả'}
         </button>
       </div>
 
-      {/* Providers */}
-      <div className="space-y-4 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900">API Providers</h2>
-        {providers.map(provider => {
-          const providerSettings = settings.providers?.[provider.key] || {}
-          const testResult = testResults[provider.key]
+      {/* Configured Providers */}
+      <div className="space-y-4 mb-6">
+        {configuredProviderKeys.map(key => {
+          const info = providerList.find(p => p.key === key) || { key, name: key, color: 'bg-gray-500', models: [] }
+          const ps = settings.providers?.[key] || {}
+          const testResult = testResults[key]
+
           return (
-            <div key={provider.key} className="bg-white rounded-xl shadow p-4">
+            <div key={key} className="bg-white rounded-xl shadow p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${provider.color}`} />
-                  <h3 className="font-semibold text-gray-900">{provider.name}</h3>
+                  <div className={`w-3 h-3 rounded-full ${info.color}`} />
+                  <h3 className="font-semibold text-gray-900">{info.name}</h3>
+                  {ps.enabled && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Active</span>}
                 </div>
                 <div className="flex items-center gap-3">
-                  {/* Enable toggle */}
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <div className={`relative w-10 h-5 rounded-full transition-colors ${providerSettings.enabled ? 'bg-blue-600' : 'bg-gray-300'}`}>
-                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${providerSettings.enabled ? 'translate-x-5' : ''}`} />
+                    <div className={`relative w-10 h-5 rounded-full transition-colors ${ps.enabled ? 'bg-blue-600' : 'bg-gray-300'}`}>
+                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${ps.enabled ? 'translate-x-5' : ''}`} />
                     </div>
-                    <input
-                      type="checkbox"
-                      checked={providerSettings.enabled || false}
-                      onChange={e => updateProvider(provider.key, 'enabled', e.target.checked)}
-                      className="sr-only"
-                    />
-                    <span className="text-sm text-gray-600">{providerSettings.enabled ? 'Enabled' : 'Disabled'}</span>
+                    <input type="checkbox" checked={ps.enabled || false} onChange={e => updateProvider(key, 'enabled', e.target.checked)} className="sr-only" />
                   </label>
-
-                  {/* Test button */}
                   <button
-                    onClick={() => testMutation.mutate(provider.key)}
-                    disabled={testMutation.isPending}
+                    onClick={() => handleTestProvider(key)}
+                    disabled={testMutation.isPending && testMutation.variables?.provider === key}
                     className="flex items-center gap-1 text-sm border rounded-lg px-3 py-1.5 hover:bg-gray-50"
                   >
-                    {testMutation.isPending && testMutation.variables === provider.key ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Zap size={14} />
-                    )}
+                    {testMutation.isPending && testMutation.variables?.provider === key ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
                     Test
                   </button>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type={showKeys[provider.key] ? 'text' : 'password'}
-                    value={providerSettings.api_key || ''}
-                    onChange={e => updateProvider(provider.key, 'api_key', e.target.value)}
-                    placeholder={`${provider.name} API Key`}
-                    className="w-full border rounded-lg px-3 py-2 pr-10 text-sm font-mono"
-                  />
-                  <button
-                    onClick={() => toggleKeyVisibility(provider.key)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showKeys[provider.key] ? <EyeOff size={16} /> : <Eye size={16} />}
+                  <button onClick={() => removeProvider(key)} className="text-red-400 hover:text-red-600" title="Xóa provider">
+                    <Trash2 size={16} />
                   </button>
                 </div>
               </div>
 
-              {/* Test result */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* API Key */}
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">API Key</label>
+                  <div className="relative">
+                    <input
+                      type={showKeys[key] ? 'text' : 'password'}
+                      value={ps.api_key || ''}
+                      onChange={e => updateProvider(key, 'api_key', e.target.value)}
+                      placeholder={`${info.name} API Key`}
+                      className="w-full border rounded-lg px-3 py-2 pr-10 text-sm font-mono"
+                    />
+                    <button onClick={() => toggleKeyVisibility(key)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                      {showKeys[key] ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Model Select */}
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Model mặc định</label>
+                  <select
+                    value={ps.model || ''}
+                    onChange={e => updateProvider(key, 'model', e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">-- Chọn model --</option>
+                    {info.models.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
               {testResult && (
-                <div className={`flex items-center gap-2 mt-2 text-sm ${testResult.success ? 'text-green-600' : 'text-red-600'}`}>
+                <div className={`flex items-center gap-2 mt-3 text-sm ${testResult.success ? 'text-green-600' : 'text-red-600'}`}>
                   {testResult.success ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-                  {testResult.message}
+                  <span className="truncate">{testResult.message}</span>
                 </div>
               )}
             </div>
@@ -174,26 +273,83 @@ export default function AISettings() {
         })}
       </div>
 
-      {/* Default Models */}
+      {/* Add Provider */}
+      {availableToAdd.length > 0 && (
+        <div className="mb-8">
+          {!showAddProvider ? (
+            <button onClick={() => setShowAddProvider(true)} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 border border-dashed border-blue-300 rounded-lg px-4 py-2 w-full justify-center hover:bg-blue-50">
+              <Plus size={16} /> Thêm provider
+            </button>
+          ) : (
+            <div className="bg-white rounded-xl shadow p-4">
+              <p className="text-sm font-medium text-gray-700 mb-3">Chọn provider để thêm:</p>
+              <div className="flex flex-wrap gap-2">
+                {availableToAdd.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => {
+                      setSettings(prev => ({
+                        ...prev,
+                        providers: {
+                          ...prev.providers,
+                          [p.key]: { enabled: true, api_key: '', model: '' }
+                        }
+                      }))
+                      setShowAddProvider(false)
+                    }}
+                    className="flex items-center gap-2 border rounded-lg px-3 py-2 text-sm hover:bg-gray-50"
+                  >
+                    <div className={`w-2.5 h-2.5 rounded-full ${p.color}`} />
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setShowAddProvider(false)} className="text-xs text-gray-400 mt-2 hover:text-gray-600">Hủy</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Default per Function */}
       <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Default Model per Function</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Model mặc định theo chức năng</h2>
+        <p className="text-sm text-gray-500">Chọn provider + model riêng cho từng chức năng. Để trống sẽ dùng provider đầu tiên đang bật.</p>
         <div className="bg-white rounded-xl shadow p-4">
           <div className="space-y-4">
-            {functions.map(fn => (
-              <div key={fn.key} className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-700">{fn.label}</label>
-                <select
-                  value={settings.default_models?.[fn.key] || ''}
-                  onChange={e => updateDefaultModel(fn.key, e.target.value)}
-                  className="w-64 border rounded-lg px-3 py-2 text-sm"
-                >
-                  <option value="">Auto (use enabled provider)</option>
-                  {providers.filter(p => settings.providers?.[p.key]?.enabled).map(p => (
-                    <option key={p.key} value={p.key}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            ))}
+            {functions.map(fn => {
+              const fnDefault = settings.defaults?.[fn.key] || {}
+              const selectedProvider = providerList.find(p => p.key === fnDefault.provider)
+
+              return (
+                <div key={fn.key} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                  <label className="text-sm font-medium text-gray-700 sm:w-48 shrink-0">{fn.label}</label>
+                  <div className="flex gap-2 flex-1">
+                    <select
+                      value={fnDefault.provider || ''}
+                      onChange={e => updateDefault(fn.key, 'provider', e.target.value)}
+                      className="border rounded-lg px-3 py-2 text-sm flex-1"
+                    >
+                      <option value="">Auto</option>
+                      {configuredProviderKeys
+                        .filter(k => settings.providers?.[k]?.enabled)
+                        .map(k => {
+                          const info = providerList.find(p => p.key === k)
+                          return <option key={k} value={k}>{info?.name || k}</option>
+                        })}
+                    </select>
+                    <select
+                      value={fnDefault.model || ''}
+                      onChange={e => updateDefault(fn.key, 'model', e.target.value)}
+                      className="border rounded-lg px-3 py-2 text-sm flex-1"
+                      disabled={!fnDefault.provider}
+                    >
+                      <option value="">Model mặc định</option>
+                      {selectedProvider?.models.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
