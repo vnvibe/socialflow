@@ -10,15 +10,16 @@ echo      SocialFlow Agent
 echo   ====================================
 echo.
 
-:: Check .env first (most common issue)
-if not exist ".env" (
+:: Check config exists (.env or lib\config.js)
+if not exist ".env" if not exist "lib\config.js" (
     color 0C
-    echo   [!] File .env khong ton tai
+    echo   [!] Thieu file cau hinh
     echo   Tai lai agent tu trang Cai dat.
     echo.
     pause
     exit /b
 )
+if not exist ".env" echo   [*] Dung lib\config.js
 
 :: Use local node if available, otherwise system node
 set "NODE=node"

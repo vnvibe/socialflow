@@ -1,4 +1,4 @@
-require('dotenv').config()
+require('dotenv').config() // .env optional — lib/config.js is fallback
 const { startPoller, getStopPoller } = require('./jobs/poller')
 const { checkFFmpeg } = require('./video/processor')
 const os = require('os')
