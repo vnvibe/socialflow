@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Download, RefreshCw, X, Terminal, Loader2 } from 'lucide-react'
+import { Download, RefreshCw, X, Terminal, Loader2, Globe, Monitor, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
@@ -16,7 +16,31 @@ export default function AgentStatus() {
   })
 
   const online = data?.online ?? null
-  const agentCount = data?.agents?.length || 0
+  const agents = data?.agents || []
+  const preferredId = data?.preferredExecutorId
+  const extensions = agents.filter(a => a.platform === 'chrome-extension')
+  const desktopAgents = agents.filter(a => a.platform !== 'chrome-extension')
+  const bothOnline = extensions.length > 0 && desktopAgents.length > 0
+
+  // Determine label + icon for status button
+  let StatusIcon = Terminal
+  let statusLabel = `Agent (${agents.length})`
+  if (online) {
+    if (preferredId) {
+      const pref = agents.find(a => a.agent_id === preferredId)
+      if (pref?.platform === 'chrome-extension') { StatusIcon = Globe; statusLabel = 'Extension' }
+      else if (pref) { StatusIcon = Monitor; statusLabel = `Agent` }
+    } else if (extensions.length > 0 && desktopAgents.length === 0) {
+      StatusIcon = Globe; statusLabel = 'Extension'
+    } else if (desktopAgents.length > 0 && extensions.length === 0) {
+      StatusIcon = Monitor; statusLabel = `Agent`
+    } else if (bothOnline) {
+      statusLabel = `Ext + Agent`
+    }
+  }
+
+  // Keep agentCount for backward compat in modal
+  const agentCount = agents.length
 
   const handleRecheck = async () => {
     const result = await refetch()
@@ -53,15 +77,24 @@ export default function AgentStatus() {
   return (
     <>
       <button
-        onClick={() => !online && setShowModal(true)}
+        onClick={() => setShowModal(true)}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
           online
-            ? 'text-green-700 bg-green-50'
+            ? bothOnline && !preferredId
+              ? 'text-yellow-700 bg-yellow-50 hover:bg-yellow-100 cursor-pointer'
+              : 'text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer'
             : 'text-red-700 bg-red-50 hover:bg-red-100 cursor-pointer'
         }`}
       >
-        <span className={`w-2 h-2 rounded-full ${online ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
-        {online ? `Agent (${agentCount})` : 'Agent offline'}
+        {online ? (
+          bothOnline && !preferredId
+            ? <AlertTriangle size={13} className="text-yellow-500" />
+            : <span className="w-2 h-2 rounded-full bg-green-500" />
+        ) : (
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+        )}
+        {online ? <StatusIcon size={12} /> : null}
+        {online ? statusLabel : 'Offline'}
       </button>
 
       {showModal && (
