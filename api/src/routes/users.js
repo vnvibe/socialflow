@@ -58,14 +58,18 @@ module.exports = async (fastify) => {
 
     const { is_active, role } = req.body
 
-    // Toggle active status in profiles
+    // Toggle active status in profiles (upsert in case profile row doesn't exist yet)
     if (is_active !== undefined) {
-      await supabase.from('profiles').update({ is_active }).eq('id', req.params.id)
+      await supabase.from('profiles').upsert({ id: req.params.id, is_active }, { onConflict: 'id' })
       // Also ban/unban in Supabase auth
-      if (!is_active) {
-        await supabase.auth.admin.updateUserById(req.params.id, { banned_until: '2099-01-01T00:00:00Z' })
-      } else {
-        await supabase.auth.admin.updateUserById(req.params.id, { banned_until: null })
+      try {
+        if (!is_active) {
+          await supabase.auth.admin.updateUserById(req.params.id, { ban_duration: '876000h' })
+        } else {
+          await supabase.auth.admin.updateUserById(req.params.id, { ban_duration: 'none' })
+        }
+      } catch (authErr) {
+        console.error('[USERS] Failed to update auth ban status:', authErr.message)
       }
     }
 
