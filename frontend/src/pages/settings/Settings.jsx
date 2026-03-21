@@ -143,16 +143,9 @@ function UserAgentTab() {
   const handleDownload = async () => {
     setDownloading(true)
     try {
-      const res = await api.get('/agent/download', { responseType: 'blob' })
-      const url = window.URL.createObjectURL(new Blob([res.data]))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'socialflow-agent.zip'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-      toast.success('Tải agent thành công!')
+      const res = await api.get('/agent/download')
+      window.open(res.data.url, '_blank')
+      toast.success('Đang tải SocialFlow Agent...')
     } catch (err) {
       toast.error(err.response?.data?.error || 'Không thể tải agent')
     } finally {
