@@ -58,9 +58,25 @@ module.exports = async (fastify) => {
 
     const { is_active, role } = req.body
 
-    // Toggle active status in profiles (upsert in case profile row doesn't exist yet)
+    // Toggle active status in profiles
     if (is_active !== undefined) {
-      await supabase.from('profiles').upsert({ id: req.params.id, is_active }, { onConflict: 'id' })
+      const { data: existingProfile } = await supabase
+        .from('profiles').select('id').eq('id', req.params.id).single()
+
+      if (existingProfile) {
+        await supabase.from('profiles').update({ is_active }).eq('id', req.params.id)
+      } else {
+        // Profile doesn't exist (self-registered user) — derive username from email
+        const { data: authUser } = await supabase.auth.admin.getUserById(req.params.id)
+        const email = authUser?.user?.email || ''
+        await supabase.from('profiles').insert({
+          id: req.params.id,
+          username: email.split('@')[0] || req.params.id.substring(0, 8),
+          role: 'user',
+          is_active,
+        })
+      }
+
       // Also ban/unban in Supabase auth
       try {
         if (!is_active) {
