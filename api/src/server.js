@@ -52,6 +52,12 @@ app.register(require('./routes/permissions'), { prefix: '/permissions' })
 // Health check
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 
+// Extension config (public — returns client-safe Supabase credentials for Chrome Extension login)
+app.get('/extension/config', async () => ({
+  supabaseUrl: process.env.SUPABASE_URL,
+  supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+}))
+
 // Start server
 const start = async () => {
   try {
