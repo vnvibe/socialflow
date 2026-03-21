@@ -55,6 +55,14 @@ module.exports = async (fastify) => {
 
   // ─── Google OAuth ─────────────────────────────────────────────────────────────
 
+  // GET /websites/google/debug-uri — xem redirect_uri đang dùng
+  fastify.get('/google/debug-uri', async (req, reply) => {
+    return {
+      GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI || '(not set, default: http://localhost:3000/websites/google/callback)',
+      FRONTEND_URL: process.env.FRONTEND_URL || '(not set, default: http://localhost:5173)',
+    }
+  })
+
   // GET /websites/google/auth?token=JWT
   // Step 1: validate token, create temp record, redirect to Google
   fastify.get('/google/auth', async (req, reply) => {
