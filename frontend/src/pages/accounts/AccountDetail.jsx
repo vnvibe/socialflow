@@ -559,25 +559,86 @@ function ConfigTab({ account, queryClient }) {
   )
 }
 
+// ── Infinite scroll hook ──────────────────────────────────────────────────
+function useInfiniteList(baseUrl, limit = 30) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [hasMore, setHasMore] = useState(true)
+  const sentinelRef = useRef(null)
+  const activeRef = useRef(false)
+  const offsetRef = useRef(0)
+  const hasMoreRef = useRef(true)
+
+  const fetchPage = useCallback(async (off) => {
+    if (activeRef.current || !hasMoreRef.current) return
+    activeRef.current = true
+    setLoading(true)
+    try {
+      const { data } = await api.get(`${baseUrl}?limit=${limit}&offset=${off}`)
+      const batch = data.items || []
+      setItems(prev => off === 0 ? batch : [...prev, ...batch])
+      hasMoreRef.current = data.hasMore === true
+      setHasMore(data.hasMore === true)
+      offsetRef.current = off + batch.length
+    } catch (e) {
+      console.error('[InfiniteList]', e)
+    } finally {
+      activeRef.current = false
+      setLoading(false)
+      if (off === 0) setInitialLoading(false)
+    }
+  }, [baseUrl, limit])
+
+  useEffect(() => {
+    setItems([])
+    hasMoreRef.current = true
+    setHasMore(true)
+    setInitialLoading(true)
+    offsetRef.current = 0
+    activeRef.current = false
+    fetchPage(0)
+  }, [baseUrl]) // eslint-disable-line
+
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el) return
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && hasMoreRef.current && !activeRef.current) {
+        fetchPage(offsetRef.current)
+      }
+    }, { threshold: 0.1 })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [fetchPage])
+
+  const reset = useCallback(() => {
+    setItems([])
+    hasMoreRef.current = true
+    setHasMore(true)
+    setInitialLoading(true)
+    offsetRef.current = 0
+    activeRef.current = false
+    fetchPage(0)
+  }, [fetchPage])
+
+  return { items, loading, initialLoading, hasMore, sentinelRef, reset }
+}
+// ─────────────────────────────────────────────────────────────────────────
+
 function FanpagesTab({ accountId, onQuickPost }) {
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState({ fb_page_id: '', name: '', url: '', category: '' })
   const [addLoading, setAddLoading] = useState(false)
-  const queryClient = useQueryClient()
   const { requireAgent } = useAgentGuard()
 
-  const { data: fanpages = [], isLoading } = useQuery({
-    queryKey: ['account-fanpages', accountId],
-    queryFn: () => api.get(`/accounts/${accountId}/fanpages`).then((r) => r.data),
-    refetchInterval: 5000,
-  })
+  const { items: fanpages, initialLoading, loading, sentinelRef, reset } = useInfiniteList(`/accounts/${accountId}/fanpages`)
 
   const fetchMutation = useMutation({
     mutationFn: () => api.post(`/accounts/${accountId}/fetch-pages`, {}),
     onSuccess: () => {
       toast.success('Fetching pages from Facebook... Agent is processing.')
-      queryClient.invalidateQueries({ queryKey: ['account-fanpages', accountId] })
-      queryClient.invalidateQueries({ queryKey: ['fanpages'] })
+      reset()
     },
     onError: (err) => {
       if (err.response?.status === 503) toast.error('Agent offline! Start the SocialFlow Agent first.')
@@ -587,11 +648,7 @@ function FanpagesTab({ accountId, onQuickPost }) {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/fanpages/${id}`),
-    onSuccess: () => {
-      toast.success('Fanpage removed')
-      queryClient.invalidateQueries({ queryKey: ['account-fanpages', accountId] })
-      queryClient.invalidateQueries({ queryKey: ['fanpages'] })
-    },
+    onSuccess: () => { toast.success('Fanpage removed'); reset() },
     onError: () => toast.error('Delete failed'),
   })
 
@@ -609,8 +666,7 @@ function FanpagesTab({ accountId, onQuickPost }) {
       toast.success('Fanpage added')
       setShowAdd(false)
       setAddForm({ fb_page_id: '', name: '', url: '', category: '' })
-      queryClient.invalidateQueries({ queryKey: ['account-fanpages', accountId] })
-      queryClient.invalidateQueries({ queryKey: ['fanpages'] })
+      reset()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Add failed')
     } finally { setAddLoading(false) }
@@ -650,7 +706,7 @@ function FanpagesTab({ accountId, onQuickPost }) {
         </form>
       )}
 
-      {isLoading ? (
+      {initialLoading ? (
         <div className="flex items-center justify-center h-32"><Loader className="w-5 h-5 animate-spin text-blue-500" /></div>
       ) : fanpages.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
@@ -692,6 +748,12 @@ function FanpagesTab({ accountId, onQuickPost }) {
               ))}
             </tbody>
           </table>
+          <div ref={sentinelRef} className="h-1" />
+          {loading && (
+            <div className="flex justify-center py-3 border-t border-gray-100">
+              <Loader className="w-4 h-4 animate-spin text-gray-400" />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -702,21 +764,15 @@ function GroupsTab({ accountId, onQuickPost }) {
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState({ fb_group_id: '', name: '', url: '' })
   const [addLoading, setAddLoading] = useState(false)
-  const queryClient = useQueryClient()
   const { requireAgent } = useAgentGuard()
 
-  const { data: groups = [], isLoading } = useQuery({
-    queryKey: ['account-groups', accountId],
-    queryFn: () => api.get(`/accounts/${accountId}/groups`).then((r) => r.data),
-    refetchInterval: 5000,
-  })
+  const { items: groups, initialLoading, loading, sentinelRef, reset } = useInfiniteList(`/accounts/${accountId}/groups`)
 
   const fetchMutation = useMutation({
     mutationFn: () => api.post(`/accounts/${accountId}/fetch-groups`, {}),
     onSuccess: () => {
       toast.success('Fetching groups from Facebook... Agent is processing.')
-      queryClient.invalidateQueries({ queryKey: ['account-groups', accountId] })
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      reset()
     },
     onError: (err) => {
       if (err.response?.status === 503) toast.error('Agent offline! Start the SocialFlow Agent first.')
@@ -726,11 +782,7 @@ function GroupsTab({ accountId, onQuickPost }) {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => api.delete(`/groups/${id}`),
-    onSuccess: () => {
-      toast.success('Group removed')
-      queryClient.invalidateQueries({ queryKey: ['account-groups', accountId] })
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
-    },
+    onSuccess: () => { toast.success('Group removed'); reset() },
     onError: () => toast.error('Delete failed'),
   })
 
@@ -748,8 +800,7 @@ function GroupsTab({ accountId, onQuickPost }) {
       toast.success('Group added')
       setShowAdd(false)
       setAddForm({ fb_group_id: '', name: '', url: '' })
-      queryClient.invalidateQueries({ queryKey: ['account-groups', accountId] })
-      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      reset()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Add failed')
     } finally { setAddLoading(false) }
@@ -789,7 +840,7 @@ function GroupsTab({ accountId, onQuickPost }) {
         </form>
       )}
 
-      {isLoading ? (
+      {initialLoading ? (
         <div className="flex items-center justify-center h-32"><Loader className="w-5 h-5 animate-spin text-blue-500" /></div>
       ) : groups.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
@@ -846,6 +897,12 @@ function GroupsTab({ accountId, onQuickPost }) {
               ))}
             </tbody>
           </table>
+          <div ref={sentinelRef} className="h-1" />
+          {loading && (
+            <div className="flex justify-center py-3 border-t border-gray-100">
+              <Loader className="w-4 h-4 animate-spin text-gray-400" />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -853,13 +910,9 @@ function GroupsTab({ accountId, onQuickPost }) {
 }
 
 function HistoryTab({ accountId }) {
-  const { data: history = [], isLoading } = useQuery({
-    queryKey: ['account-history', accountId],
-    queryFn: () =>
-      api.get(`/accounts/${accountId}/history`).then((r) => r.data),
-  })
+  const { items: history, initialLoading, loading, sentinelRef } = useInfiniteList(`/accounts/${accountId}/history`)
 
-  if (isLoading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-32">
         <Loader className="w-5 h-5 animate-spin text-blue-500" />
@@ -907,6 +960,12 @@ function HistoryTab({ accountId }) {
           </span>
         </div>
       ))}
+      <div ref={sentinelRef} className="h-1" />
+      {loading && (
+        <div className="flex justify-center py-3">
+          <Loader className="w-4 h-4 animate-spin text-gray-400" />
+        </div>
+      )}
     </div>
   )
 }
