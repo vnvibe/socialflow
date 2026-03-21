@@ -1203,7 +1203,7 @@ Return ONLY the image prompt, nothing else.`
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {(job.status === 'pending' || job.status === 'claimed') && (
+                        {(job.status === 'pending' || job.status === 'claimed' || job.status === 'running') && (
                           <button onClick={() => cancelMutation.mutate(job.id)} className="text-gray-400 hover:text-red-500 text-xs">
                             <XCircle size={14} />
                           </button>
