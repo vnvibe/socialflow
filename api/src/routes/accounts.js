@@ -124,6 +124,28 @@ module.exports = async (fastify) => {
     return data || []
   })
 
+  // GET /accounts/:id/history - Publish history for specific account
+  fastify.get('/:id/history', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data, error } = await supabase
+      .from('publish_history')
+      .select('id, status, published_at, target_type, target_name, final_caption, error_message, job_id, fb_post_id')
+      .eq('account_id', req.params.id)
+      .order('published_at', { ascending: false })
+      .limit(50)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return (data || []).map(h => ({
+      id: h.id,
+      status: h.status,
+      action: h.target_type ? `Post → ${h.target_type}` : 'Published',
+      detail: h.target_name || h.final_caption?.substring(0, 80) || null,
+      created_at: h.published_at,
+      error_message: h.error_message,
+      job_id: h.job_id,
+      fb_post_id: h.fb_post_id,
+    }))
+  })
+
   // GET /accounts/:id/groups - List groups for specific account
   fastify.get('/:id/groups', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data, error } = await supabase
