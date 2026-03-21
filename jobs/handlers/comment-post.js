@@ -94,59 +94,82 @@ async function commentPostHandler(payload, supabase) {
     await humanMouseMove(browserPage)
     await delay(1000, 2000)
 
+    // Scroll down to load comments section
+    await browserPage.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 0.6)))
+    await delay(2000, 3000)
+
     // Find and click the comment input area
     console.log('[COMMENT-POST] Looking for comment box...')
 
-    // Try multiple selectors for comment box
-    const commentBoxSelectors = [
-      'div[contenteditable="true"][aria-label*="comment" i]',
+    // Selectors for the ACTIVE Lexical editor (contenteditable) — priority order
+    const activeBoxSelectors = [
+      'div[data-lexical-editor="true"][contenteditable="true"]',
       'div[contenteditable="true"][aria-label*="bình luận" i]',
+      'div[contenteditable="true"][aria-label*="comment" i]',
       'div[contenteditable="true"][aria-label*="Write" i]',
       'div[contenteditable="true"][aria-label*="Viết" i]',
-      'div[contenteditable="true"][role="textbox"][aria-label*="comment" i]',
-      // Fallback: click "Write a comment" placeholder text
-      '[aria-label*="Write a comment"]',
-      '[aria-label*="Viết bình luận"]',
+      'div[contenteditable="true"][role="textbox"]',
     ]
 
-    let commentBox = null
-    for (const selector of commentBoxSelectors) {
-      commentBox = await browserPage.$(selector)
-      if (commentBox) {
-        console.log(`[COMMENT-POST] Found comment box with: ${selector}`)
-        break
+    // Placeholder trigger selectors — clicking these activates the Lexical editor
+    const placeholderSelectors = [
+      // Non-hidden aria-label targets
+      'div[aria-label="Viết bình luận"]:not([aria-hidden="true"])',
+      'div[aria-label="Write a comment"]:not([aria-hidden="true"])',
+      'div[aria-label="Leave a comment"]:not([aria-hidden="true"])',
+      // Generic comment action area
+      '[data-testid="comment-composer"]',
+      'form[method="post"] [role="textbox"]',
+    ]
+
+    async function findActiveCommentBox() {
+      for (const sel of activeBoxSelectors) {
+        try {
+          const el = await browserPage.$(sel)
+          if (el) {
+            // Confirm it's visible (not in a collapsed/hidden reply thread)
+            const visible = await el.isVisible().catch(() => false)
+            if (visible) {
+              console.log(`[COMMENT-POST] Found comment box: ${sel}`)
+              return el
+            }
+          }
+        } catch {}
       }
+      return null
     }
 
+    let commentBox = await findActiveCommentBox()
+
     if (!commentBox) {
-      // Try scrolling down to load comments section
-      await browserPage.evaluate(() => window.scrollBy(0, 500))
-      await delay(2000, 3000)
-
-      // Try clicking "Comment" button area to open comment box
-      const commentBtnSelectors = [
-        'div[aria-label="Leave a comment"]',
-        'div[aria-label="Viết bình luận"]',
-        'span:has-text("Comment")',
-        'span:has-text("Bình luận")',
-      ]
-
-      for (const selector of commentBtnSelectors) {
+      // Try clicking placeholder to activate the Lexical editor
+      console.log('[COMMENT-POST] No active box — clicking placeholder to activate...')
+      for (const sel of placeholderSelectors) {
         try {
-          const btn = await browserPage.$(selector)
-          if (btn) {
-            await btn.click()
-            await delay(1000, 2000)
+          const trigger = await browserPage.$(sel)
+          if (trigger) {
+            await trigger.scrollIntoViewIfNeeded()
+            await trigger.click({ timeout: 5000 })
+            await delay(1500, 2500)
+            console.log(`[COMMENT-POST] Clicked placeholder: ${sel}`)
             break
           }
         } catch {}
       }
 
-      // Try finding comment box again after clicking
-      for (const selector of commentBoxSelectors) {
-        commentBox = await browserPage.$(selector)
-        if (commentBox) break
-      }
+      // Scroll a bit more and re-search
+      await browserPage.evaluate(() => window.scrollBy(0, 300))
+      await delay(1000, 2000)
+      commentBox = await findActiveCommentBox()
+    }
+
+    if (!commentBox) {
+      // Last resort: try pressing Tab or clicking near comment area to trigger focus
+      try {
+        await browserPage.keyboard.press('Tab')
+        await delay(800, 1200)
+        commentBox = await findActiveCommentBox()
+      } catch {}
     }
 
     if (!commentBox) {
@@ -154,9 +177,21 @@ async function commentPostHandler(payload, supabase) {
       throw new Error('Could not find comment input box')
     }
 
-    // Click to focus
-    await commentBox.click()
+    // Scroll into view and click to focus
+    await commentBox.scrollIntoViewIfNeeded()
+    await delay(300, 600)
+    await commentBox.click({ timeout: 10000 })
     await delay(500, 1000)
+
+    // Verify focus — if not focused, try evaluate click
+    const isFocused = await browserPage.evaluate(
+      el => document.activeElement === el || el.contains(document.activeElement),
+      commentBox
+    ).catch(() => false)
+    if (!isFocused) {
+      await browserPage.evaluate(el => el.focus(), commentBox)
+      await delay(300, 600)
+    }
 
     // Type comment with human-like delays
     console.log(`[COMMENT-POST] Typing comment (${comment_text.length} chars)...`)
