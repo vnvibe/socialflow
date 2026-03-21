@@ -275,6 +275,21 @@ ipcMain.handle('logout', () => {
   return true
 })
 
+// Single instance lock — prevent multiple agent windows
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    // Someone tried to open a second instance — focus existing window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
 // App lifecycle
 app.whenReady().then(async () => {
   createTray()
