@@ -112,34 +112,36 @@ module.exports = async (fastify) => {
     return { success: true }
   })
 
-  // GET /accounts/:id/fanpages - List fanpages for specific account (paginated)
+  // GET /accounts/:id/fanpages - List fanpages (paginated when offset param present, array otherwise)
   fastify.get('/:id/fanpages', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const paginated = req.query.offset !== undefined
     const limit = Math.min(parseInt(req.query.limit) || 30, 100)
     const offset = parseInt(req.query.offset) || 0
-    const { data, error } = await supabase
-      .from('fanpages')
-      .select('*')
-      .eq('account_id', req.params.id)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+    let query = supabase.from('fanpages').select('*').eq('account_id', req.params.id).order('created_at', { ascending: false })
+    if (paginated) query = query.range(offset, offset + limit - 1)
 
+    const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
+    if (!paginated) return data || []
     return { items: data || [], hasMore: (data || []).length === limit }
   })
 
-  // GET /accounts/:id/history - Publish history for specific account (paginated)
+  // GET /accounts/:id/history - Publish history (paginated when offset param present)
   fastify.get('/:id/history', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const paginated = req.query.offset !== undefined
     const limit = Math.min(parseInt(req.query.limit) || 30, 100)
     const offset = parseInt(req.query.offset) || 0
-    const { data, error } = await supabase
+    let query = supabase
       .from('publish_history')
       .select('id, status, published_at, target_type, target_name, final_caption, error_message, job_id, fb_post_id')
       .eq('account_id', req.params.id)
       .order('published_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+    if (paginated) query = query.range(offset, offset + limit - 1)
+    else query = query.limit(50)
 
+    const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
-    const items = (data || []).map(h => ({
+    const mapped = (data || []).map(h => ({
       id: h.id,
       status: h.status,
       action: h.target_type ? `Post → ${h.target_type}` : 'Published',
@@ -149,21 +151,21 @@ module.exports = async (fastify) => {
       job_id: h.job_id,
       fb_post_id: h.fb_post_id,
     }))
-    return { items, hasMore: items.length === limit }
+    if (!paginated) return mapped
+    return { items: mapped, hasMore: mapped.length === limit }
   })
 
-  // GET /accounts/:id/groups - List groups for specific account (paginated)
+  // GET /accounts/:id/groups - List groups (paginated when offset param present, array otherwise)
   fastify.get('/:id/groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const paginated = req.query.offset !== undefined
     const limit = Math.min(parseInt(req.query.limit) || 30, 100)
     const offset = parseInt(req.query.offset) || 0
-    const { data, error } = await supabase
-      .from('fb_groups')
-      .select('*')
-      .eq('account_id', req.params.id)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+    let query = supabase.from('fb_groups').select('*').eq('account_id', req.params.id).order('created_at', { ascending: false })
+    if (paginated) query = query.range(offset, offset + limit - 1)
 
+    const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
+    if (!paginated) return data || []
     return { items: data || [], hasMore: (data || []).length === limit }
   })
 
