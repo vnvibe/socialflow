@@ -82,6 +82,112 @@
       color: #94a3b8;
     }
 
+    /* User info bar */
+    .user-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 20px;
+      background: #162032;
+      border-bottom: 1px solid #334155;
+      font-size: 12px;
+    }
+    .user-email {
+      color: #7dd3fc;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .user-email::before {
+      content: '';
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #22c55e;
+    }
+    .btn-logout {
+      background: none;
+      border: 1px solid #334155;
+      color: #64748b;
+      padding: 3px 10px !important;
+      font-size: 11px !important;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-logout:hover { border-color: #ef4444; color: #ef4444; }
+
+    /* Login screen */
+    .login-screen {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-box {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 36px 40px;
+      width: 340px;
+    }
+    .login-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: 4px;
+    }
+    .login-subtitle {
+      font-size: 13px;
+      color: #64748b;
+      margin-bottom: 28px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-label {
+      display: block;
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .form-input {
+      width: 100%;
+      padding: 9px 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-input:focus { border-color: #3b82f6; }
+    .form-input::placeholder { color: #475569; }
+    .login-error {
+      color: #f87171;
+      font-size: 12px;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .btn-login {
+      width: 100%;
+      padding: 10px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-top: 4px;
+    }
+    .btn-login:hover:not(:disabled) { background: #2563eb; }
+    .btn-login:disabled { background: #1e3a5f; color: #475569; cursor: not-allowed; }
+
     /* Controls */
     .controls {
       display: flex;
@@ -107,13 +213,13 @@
       background: #22c55e;
       color: white;
     }
-    .btn-start:hover { background: #16a34a; }
+    .btn-start:hover:not(:disabled) { background: #16a34a; }
     .btn-start:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
     .btn-stop {
       background: #ef4444;
       color: white;
     }
-    .btn-stop:hover { background: #dc2626; }
+    .btn-stop:hover:not(:disabled) { background: #dc2626; }
     .btn-stop:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
     .btn-clear {
       background: #334155;
@@ -187,6 +293,8 @@
       gap: 8px;
     }
     .empty-state .icon { font-size: 48px; opacity: 0.3; }
+
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -202,34 +310,61 @@
     </div>
   </div>
 
-  <div class="controls">
-    <button class="btn-start" id="btnStart" onclick="startAgent()">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
-      Start
-    </button>
-    <button class="btn-stop" id="btnStop" disabled onclick="stopAgent()">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-      Stop
-    </button>
-
-    <div class="stats">
-      <div class="stat">
-        <div class="stat-value" id="logCount">0</div>
-        <div class="stat-label">Logs</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value" id="errorCount">0</div>
-        <div class="stat-label">Errors</div>
-      </div>
-    </div>
-
-    <button class="btn-clear" onclick="clearLogs()">Clear</button>
+  <!-- User info bar (shown when logged in) -->
+  <div class="user-bar hidden" id="userBar">
+    <span class="user-email" id="userEmail"></span>
+    <button class="btn-logout" onclick="logout()">Đăng xuất</button>
   </div>
 
-  <div class="logs" id="logsContainer">
-    <div class="empty-state" id="emptyState">
-      <div class="icon">&#9881;</div>
-      <div>Agent is starting...</div>
+  <!-- Login screen (shown when not logged in) -->
+  <div class="login-screen" id="loginScreen">
+    <div class="login-box">
+      <div class="login-title">Đăng nhập SocialFlow</div>
+      <div class="login-subtitle">Đăng nhập để bắt đầu xử lý jobs</div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="inputEmail" placeholder="email@example.com" autocomplete="email" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Mật khẩu</label>
+        <input class="form-input" type="password" id="inputPassword" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+      <div class="login-error" id="loginError"></div>
+      <button class="btn-login" id="btnLogin" onclick="doLogin()">Đăng nhập</button>
+    </div>
+  </div>
+
+  <!-- Main UI (shown when logged in) -->
+  <div id="mainUI" class="hidden" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+    <div class="controls">
+      <button class="btn-start" id="btnStart" onclick="startAgent()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
+        Start
+      </button>
+      <button class="btn-stop" id="btnStop" disabled onclick="stopAgent()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+        Stop
+      </button>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value" id="logCount">0</div>
+          <div class="stat-label">Logs</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="errorCount">0</div>
+          <div class="stat-label">Errors</div>
+        </div>
+      </div>
+
+      <button class="btn-clear" onclick="clearLogs()">Clear</button>
+    </div>
+
+    <div class="logs" id="logsContainer">
+      <div class="empty-state" id="emptyState">
+        <div class="icon">&#9881;</div>
+        <div>Nhấn Start để chạy agent</div>
+      </div>
     </div>
   </div>
 
@@ -243,6 +378,59 @@
       document.getElementById('statusText').textContent = running ? 'Running' : 'Stopped'
       document.getElementById('btnStart').disabled = running
       document.getElementById('btnStop').disabled = !running
+    }
+
+    function showLoggedIn(user) {
+      document.getElementById('loginScreen').classList.add('hidden')
+      const mainUI = document.getElementById('mainUI')
+      mainUI.classList.remove('hidden')
+      mainUI.style.display = 'flex'
+      document.getElementById('userBar').classList.remove('hidden')
+      document.getElementById('userEmail').textContent = user.email
+    }
+
+    function showLoggedOut() {
+      document.getElementById('loginScreen').classList.remove('hidden')
+      const mainUI = document.getElementById('mainUI')
+      mainUI.classList.add('hidden')
+      mainUI.style.display = 'none'
+      document.getElementById('userBar').classList.add('hidden')
+      updateUI(false)
+    }
+
+    async function doLogin() {
+      const email = document.getElementById('inputEmail').value.trim()
+      const password = document.getElementById('inputPassword').value
+      const errEl = document.getElementById('loginError')
+      const btn = document.getElementById('btnLogin')
+
+      if (!email || !password) {
+        errEl.textContent = 'Vui lòng nhập email và mật khẩu'
+        errEl.style.display = 'block'
+        return
+      }
+
+      btn.disabled = true
+      btn.textContent = 'Đang đăng nhập...'
+      errEl.style.display = 'none'
+
+      const res = await window.agent.login(email, password)
+
+      if (res.error) {
+        errEl.textContent = res.error
+        errEl.style.display = 'block'
+        btn.disabled = false
+        btn.textContent = 'Đăng nhập'
+        return
+      }
+
+      showLoggedIn(res.user)
+    }
+
+    async function logout() {
+      await window.agent.logout()
+      showLoggedOut()
+      document.getElementById('inputPassword').value = ''
     }
 
     function addLogEntry(entry) {
@@ -259,10 +447,8 @@
       div.innerHTML = `<span class="log-time">${timeStr}</span><span class="log-text">${escapeHtml(entry.text)}</span>`
       container.appendChild(div)
 
-      // Auto-scroll
       container.scrollTop = container.scrollHeight
 
-      // Update counts
       document.getElementById('logCount').textContent = container.children.length
       if (entry.type === 'error') {
         totalErrors++
@@ -293,16 +479,34 @@
       document.getElementById('errorCount').textContent = '0'
     }
 
+    // Enter key on password field triggers login
+    document.getElementById('inputPassword').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doLogin()
+    })
+    document.getElementById('inputEmail').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('inputPassword').focus()
+    })
+
     // Initialize
     async function init() {
-      const status = await window.agent.getStatus()
-      updateUI(status.running)
+      const [status, user] = await Promise.all([
+        window.agent.getStatus(),
+        window.agent.getUser(),
+      ])
 
-      const existingLogs = await window.agent.getLogs()
-      existingLogs.forEach(addLogEntry)
+      if (user) {
+        showLoggedIn(user)
+        updateUI(status.running)
+        const existingLogs = await window.agent.getLogs()
+        existingLogs.forEach(addLogEntry)
+      }
 
       window.agent.onLog(addLogEntry)
       window.agent.onStatus((s) => updateUI(s.running))
+      window.agent.onUser((u) => {
+        if (u) showLoggedIn(u)
+        else showLoggedOut()
+      })
       window.agent.onSetup((msg) => {
         const el = document.getElementById('statusText')
         if (msg) {

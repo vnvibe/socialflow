@@ -4,6 +4,7 @@ const os = require('os')
 const { closeAll } = require('../browser/session-pool')
 
 const AGENT_ID = process.env.AGENT_ID || `${os.hostname()}-${process.pid}`
+const AGENT_USER_ID = process.env.AGENT_USER_ID || null  // set when user logs in via Electron
 const POLL_MS = 5000
 // Non-posting jobs (video processing, health check, etc.) có thể chạy song song
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT) || 5
@@ -63,7 +64,10 @@ async function poll() {
       .order('scheduled_at', { ascending: true })
       .limit(MAX_CONCURRENT - running.size)
 
-    if (excludedUserIds.length > 0) {
+    // If logged in as a specific user, only pick up their jobs
+    if (AGENT_USER_ID) {
+      query = query.eq('created_by', AGENT_USER_ID)
+    } else if (excludedUserIds.length > 0) {
       query = query.not('created_by', 'in', `(${excludedUserIds.join(',')})`)
     }
 
@@ -255,7 +259,8 @@ async function recoverStaleJobs() {
 }
 
 function startPoller() {
-  console.log(`[POLLER] Starting — posting: sequential, delay: ${POST_DELAY_MIN}-${POST_DELAY_MAX}min (random), other jobs: max ${MAX_CONCURRENT} concurrent`)
+  const userInfo = AGENT_USER_ID ? ` | user: ${process.env.AGENT_USER_EMAIL || AGENT_USER_ID}` : ''
+  console.log(`[POLLER] Starting — posting: sequential, delay: ${POST_DELAY_MIN}-${POST_DELAY_MAX}min (random), other jobs: max ${MAX_CONCURRENT} concurrent${userInfo}`)
   recoverStaleJobs().then(() => poll())
   const pollInterval = setInterval(poll, POLL_MS)
   // Periodically recover stale jobs (every 2 minutes)

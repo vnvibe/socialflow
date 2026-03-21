@@ -8,6 +8,7 @@ let tray = null
 let agentProcess = null
 let isQuitting = false
 let logs = []
+let userSession = null  // { id, email, access_token }
 const MAX_LOGS = 500
 
 // Paths
@@ -20,6 +21,12 @@ const appRoot = isPackaged
       return fs.existsSync(unpacked) ? unpacked : path.join(process.resourcesPath, 'app')
     })()
   : path.join(__dirname, '..')
+
+// Load embedded config (anon key for user auth)
+let agentConfig = {}
+try { agentConfig = require(path.join(appRoot, 'lib', 'config')) } catch {}
+const SUPABASE_URL = process.env.SUPABASE_URL || agentConfig.SUPABASE_URL
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || agentConfig.SUPABASE_ANON_KEY
 
 function addLog(line, type = 'info') {
   const entry = { time: new Date().toISOString(), text: line, type }
@@ -102,7 +109,14 @@ function startAgent() {
 
   agentProcess = fork(agentPath, [], {
     cwd: appRoot,
-    env: { ...process.env, ...envVars },
+    env: {
+      ...process.env,
+      ...envVars,
+      ...(userSession && {
+        AGENT_USER_ID: userSession.id,
+        AGENT_USER_EMAIL: userSession.email,
+      }),
+    },
     silent: true,
   })
 
@@ -222,7 +236,9 @@ function createTray() {
 // IPC handlers
 ipcMain.handle('get-status', () => ({ running: !!agentProcess }))
 ipcMain.handle('get-logs', () => logs)
+ipcMain.handle('get-user', () => userSession)
 ipcMain.handle('start-agent', async () => {
+  if (!userSession) return { error: 'Chưa đăng nhập' }
   await ensurePlaywright()
   startAgent()
   return true
@@ -230,15 +246,43 @@ ipcMain.handle('start-agent', async () => {
 ipcMain.handle('stop-agent', () => { stopAgent(); return true })
 ipcMain.handle('clear-logs', () => { logs = []; return true })
 
+ipcMain.handle('login', async (_, { email, password }) => {
+  try {
+    const { createClient } = require(path.join(appRoot, 'node_modules', '@supabase/supabase-js'))
+    const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    const { data, error } = await client.auth.signInWithPassword({ email, password })
+    if (error) return { error: error.message }
+    userSession = { id: data.user.id, email: data.user.email, access_token: data.session.access_token }
+    addLog(`Đã đăng nhập: ${userSession.email}`, 'success')
+    updateTray()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('user', userSession)
+    }
+    return { user: { id: userSession.id, email: userSession.email } }
+  } catch (err) {
+    return { error: err.message }
+  }
+})
+
+ipcMain.handle('logout', () => {
+  if (agentProcess) stopAgent()
+  userSession = null
+  addLog('Đã đăng xuất', 'info')
+  updateTray()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('user', null)
+  }
+  return true
+})
+
 // App lifecycle
 app.whenReady().then(async () => {
   createTray()
   createWindow()
 
-  // Auto-setup and start
+  // Pre-install Playwright in background (don't auto-start — require login first)
   try {
     await ensurePlaywright()
-    startAgent()
   } catch (err) {
     addLog(`Startup error: ${err.message}`, 'error')
     console.error('Startup error:', err)
