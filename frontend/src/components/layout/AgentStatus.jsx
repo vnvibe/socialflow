@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Download, RefreshCw, X, Terminal, Loader2, Globe, Monitor, AlertTriangle } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Download, RefreshCw, X, Terminal, Loader2, Globe, Monitor, AlertTriangle, CheckCircle2, Circle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
 export default function AgentStatus() {
   const [showModal, setShowModal] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [settingExecutor, setSettingExecutor] = useState(false)
+  const queryClient = useQueryClient()
 
   const { data, refetch, isRefetching } = useQuery({
     queryKey: ['agent-status'],
@@ -22,33 +24,42 @@ export default function AgentStatus() {
   const desktopAgents = agents.filter(a => a.platform !== 'chrome-extension')
   const bothOnline = extensions.length > 0 && desktopAgents.length > 0
 
-  // Determine label + icon for status button
+  // Status button label + icon
   let StatusIcon = Terminal
   let statusLabel = `Agent (${agents.length})`
   if (online) {
     if (preferredId) {
       const pref = agents.find(a => a.agent_id === preferredId)
       if (pref?.platform === 'chrome-extension') { StatusIcon = Globe; statusLabel = 'Extension' }
-      else if (pref) { StatusIcon = Monitor; statusLabel = `Agent` }
+      else if (pref) { StatusIcon = Monitor; statusLabel = 'Agent' }
     } else if (extensions.length > 0 && desktopAgents.length === 0) {
       StatusIcon = Globe; statusLabel = 'Extension'
     } else if (desktopAgents.length > 0 && extensions.length === 0) {
-      StatusIcon = Monitor; statusLabel = `Agent`
+      StatusIcon = Monitor; statusLabel = 'Agent'
     } else if (bothOnline) {
-      statusLabel = `Ext + Agent`
+      statusLabel = 'Ext + Agent'
     }
   }
 
-  // Keep agentCount for backward compat in modal
-  const agentCount = agents.length
+  const handleSetExecutor = async (executorId) => {
+    setSettingExecutor(true)
+    try {
+      await api.put('/agent/executor', { executorId })
+      await queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      toast.success(executorId ? 'Đã chọn executor' : 'Đặt lại tự động')
+    } catch {
+      toast.error('Không thể lưu cài đặt')
+    } finally {
+      setSettingExecutor(false)
+    }
+  }
 
   const handleRecheck = async () => {
     const result = await refetch()
     if (result.data?.online) {
-      toast.success('Agent đã kết nối!')
-      setShowModal(false)
+      toast.success('Đã kết nối!')
     } else {
-      toast.error('Agent vẫn chưa chạy')
+      toast.error('Vẫn chưa có executor nào chạy')
     }
   }
 
@@ -76,80 +87,177 @@ export default function AgentStatus() {
 
   return (
     <>
+      {/* Status button */}
       <button
         onClick={() => setShowModal(true)}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
           online
             ? bothOnline && !preferredId
-              ? 'text-yellow-700 bg-yellow-50 hover:bg-yellow-100 cursor-pointer'
-              : 'text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer'
-            : 'text-red-700 bg-red-50 hover:bg-red-100 cursor-pointer'
+              ? 'text-yellow-700 bg-yellow-50 hover:bg-yellow-100'
+              : 'text-green-700 bg-green-50 hover:bg-green-100'
+            : 'text-red-700 bg-red-50 hover:bg-red-100'
         }`}
       >
-        {online ? (
-          bothOnline && !preferredId
+        {online
+          ? bothOnline && !preferredId
             ? <AlertTriangle size={13} className="text-yellow-500" />
             : <span className="w-2 h-2 rounded-full bg-green-500" />
-        ) : (
-          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-        )}
-        {online ? <StatusIcon size={12} /> : null}
+          : <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+        }
+        {online && <StatusIcon size={12} />}
         {online ? statusLabel : 'Offline'}
       </button>
 
+      {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowModal(false)}>
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
+
+            {/* Header */}
+            <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
-                  <Terminal className="w-4 h-4 text-red-600" />
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${online ? 'bg-green-100' : 'bg-red-100'}`}>
+                  <Terminal className={`w-4 h-4 ${online ? 'text-green-600' : 'text-red-600'}`} />
                 </div>
-                <h2 className="text-lg font-bold text-gray-900">Agent chưa chạy</h2>
+                <h2 className="text-lg font-bold text-gray-900">
+                  {online ? 'Executor đang chạy' : 'Chưa có executor'}
+                </h2>
               </div>
               <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
                 <X size={20} />
               </button>
             </div>
 
-            <p className="text-sm text-gray-600 mb-5">
-              Agent cần chạy trên máy tính để đăng bài, fetch nhóm/trang, kiểm tra tài khoản...
-            </p>
+            {online ? (
+              /* ── ONLINE: show executors ── */
+              <div className="space-y-4">
+                {/* Warning khi cả 2 online */}
+                {bothOnline && !preferredId && (
+                  <div className="flex items-start gap-2.5 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                    <AlertTriangle size={15} className="text-yellow-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-yellow-800">Cả hai đang online</p>
+                      <p className="text-xs text-yellow-600 mt-0.5">Chọn 1 cái để tránh xung đột nhận job.</p>
+                    </div>
+                  </div>
+                )}
 
-            {/* Download button */}
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium mb-4"
-            >
-              {downloading ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-              {downloading ? 'Đang đóng gói...' : 'Tải Agent về máy'}
-            </button>
+                {/* Extension list */}
+                {extensions.map(a => {
+                  const isActive = preferredId === a.agent_id || (!preferredId && !bothOnline)
+                  return (
+                    <div key={a.agent_id} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${isActive && !bothOnline ? 'border-green-300 bg-green-50' : preferredId === a.agent_id ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50'}`}>
+                      <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center shrink-0">
+                        <Globe size={18} className="text-purple-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800">Chrome Extension</p>
+                        <p className="text-xs text-gray-400">Chạy trong trình duyệt</p>
+                      </div>
+                      <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                      {bothOnline && (
+                        <button
+                          onClick={() => handleSetExecutor(preferredId === a.agent_id ? null : a.agent_id)}
+                          disabled={settingExecutor}
+                          className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+                            preferredId === a.agent_id
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-white border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
+                          }`}
+                        >
+                          {settingExecutor ? <Loader2 size={11} className="animate-spin" /> : preferredId === a.agent_id ? <><CheckCircle2 size={11} /> Đang dùng</> : <><Circle size={11} /> Chọn</>}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
 
-            {/* Simple steps */}
-            <div className="bg-gray-50 rounded-lg p-4 space-y-2 mb-4">
-              <div className="flex items-center gap-3 text-sm">
-                <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shrink-0">1</span>
-                <span className="text-gray-700">Giải nén file ZIP</span>
+                {/* Desktop Agent list */}
+                {desktopAgents.map(a => {
+                  const isActive = preferredId === a.agent_id || (!preferredId && !bothOnline)
+                  return (
+                    <div key={a.agent_id} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${isActive && !bothOnline ? 'border-green-300 bg-green-50' : preferredId === a.agent_id ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50'}`}>
+                      <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                        <Monitor size={18} className="text-blue-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800">Desktop Agent</p>
+                        <p className="text-xs text-gray-400 truncate">{a.hostname}</p>
+                      </div>
+                      <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                      {bothOnline && (
+                        <button
+                          onClick={() => handleSetExecutor(preferredId === a.agent_id ? null : a.agent_id)}
+                          disabled={settingExecutor}
+                          className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+                            preferredId === a.agent_id
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-white border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
+                          }`}
+                        >
+                          {settingExecutor ? <Loader2 size={11} className="animate-spin" /> : preferredId === a.agent_id ? <><CheckCircle2 size={11} /> Đang dùng</> : <><Circle size={11} /> Chọn</>}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+
+                <div className="flex items-center justify-between pt-1">
+                  <p className="text-xs text-gray-400">Cập nhật mỗi 15s</p>
+                  <button
+                    onClick={handleRecheck}
+                    disabled={isRefetching}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
+                    {isRefetching ? 'Đang kiểm tra...' : 'Làm mới'}
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-3 text-sm">
-                <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shrink-0">2</span>
-                <span className="text-gray-700">Chạy <strong>SocialFlow.bat</strong></span>
+            ) : (
+              /* ── OFFLINE: setup guide ── */
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  Cần có executor để đăng bài, fetch dữ liệu, kiểm tra tài khoản...
+                </p>
+                <p className="text-sm font-medium text-gray-700">Tuỳ chọn:</p>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-lg px-4 py-3">
+                    <Globe size={18} className="text-purple-500 shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">Chrome Extension</p>
+                      <p className="text-xs text-gray-500">Cài addon vào trình duyệt, đăng nhập SocialFlow</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                    <Monitor size={18} className="text-blue-500 shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">Desktop Agent</p>
+                      <p className="text-xs text-gray-500">Tải file ZIP, chạy SocialFlow.bat</p>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                >
+                  {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  {downloading ? 'Đang đóng gói...' : 'Tải Desktop Agent'}
+                </button>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-400">Đã chạy rồi?</p>
+                  <button
+                    onClick={handleRecheck}
+                    disabled={isRefetching}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
+                    {isRefetching ? 'Kiểm tra...' : 'Kiểm tra lại'}
+                  </button>
+                </div>
               </div>
-              <p className="text-xs text-gray-400 pl-8">Lần đầu tự cài đặt. Lỗi tự khởi động lại.</p>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-400">Đã chạy agent rồi?</p>
-              <button
-                onClick={handleRecheck}
-                disabled={isRefetching}
-                className="flex items-center gap-2 px-4 py-2 text-sm border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={isRefetching ? 'animate-spin' : ''} />
-                {isRefetching ? 'Kiểm tra...' : 'Kiểm tra lại'}
-              </button>
-            </div>
+            )}
           </div>
         </div>
       )}
