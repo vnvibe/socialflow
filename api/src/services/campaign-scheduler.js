@@ -14,11 +14,12 @@ function initScheduler() {
     } catch (err) {
       console.error('[SCHEDULER] Campaign error:', err.message)
     }
-    try {
-      await processPendingScans()
-    } catch (err) {
-      console.error('[SCHEDULER] Scan error:', err.message)
-    }
+    // scan_group_keyword auto-scheduling disabled — jobs must be triggered manually
+    // try {
+    //   await processPendingScans()
+    // } catch (err) {
+    //   console.error('[SCHEDULER] Scan error:', err.message)
+    // }
     try {
       await processEngagementChecks()
     } catch (err) {
