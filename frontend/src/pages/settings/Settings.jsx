@@ -257,18 +257,18 @@ function UserAgentTab() {
             className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium text-base"
           >
             {downloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download size={20} />}
-            {downloading ? 'Đang đóng gói...' : 'Tải Agent'}
+            {downloading ? 'Đang tải...' : 'Tải Agent'}
           </button>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
             <div className="flex items-start gap-3">
               <span className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">1</span>
-              <span className="text-sm text-gray-700">Giải nén file ZIP</span>
+              <span className="text-sm text-gray-700">Tải file <strong>SocialFlow Agent.exe</strong></span>
             </div>
             <div className="flex items-start gap-3">
               <span className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">2</span>
-              <span className="text-sm text-gray-700">Mở thư mục, chạy <strong>SocialFlow.bat</strong></span>
+              <span className="text-sm text-gray-700">Double-click để chạy — hiện ngay trên thanh taskbar</span>
             </div>
-            <p className="text-xs text-blue-600 mt-2 pl-9">Lần đầu sẽ tự cài đặt (2-3 phút). Sau đó mở lại là chạy ngay.</p>
+            <p className="text-xs text-blue-600 mt-2 pl-9">Lần đầu sẽ tự cài đặt Chromium (~150MB). Sau đó mở lại là chạy ngay.</p>
           </div>
         </div>
       </div>
