@@ -6,26 +6,17 @@ const { closeAll } = require('../browser/session-pool')
 const AGENT_ID = process.env.AGENT_ID || `${os.hostname()}-${process.pid}`
 const AGENT_USER_ID = process.env.AGENT_USER_ID || null  // set when user logs in via Electron
 const POLL_MS = 5000
-// Non-posting jobs (video processing, health check, etc.) có thể chạy song song
-const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT) || 5
 
-// Browser jobs chạy tuần tự (1 job/lượt) để tránh conflict session
-// Graph API jobs (post_page_graph) không cần cooldown vì là API call trực tiếp
 const POST_TYPES = ['post_page', 'post_page_graph', 'post_group', 'post_profile']
-const BROWSER_TYPES = [...POST_TYPES, 'fetch_source_cookie', 'comment_post', 'scan_group_keyword']
-const GRAPH_API_TYPES = ['post_page_graph'] // No cooldown needed
 // Nghỉ ngẫu nhiên giữa các bài đăng (phút)
-// Env: POST_DELAY_MIN (default 2), POST_DELAY_MAX (default 5)
 const POST_DELAY_MIN = parseFloat(process.env.POST_DELAY_MIN) || 2
 const POST_DELAY_MAX = parseFloat(process.env.POST_DELAY_MAX) || 5
 
-const running = new Set()
-let isPostingActive = false // chỉ 1 posting job chạy tại 1 thời điểm
-let lastPostFinishedAt = 0  // timestamp khi bài đăng cuối hoàn thành
-let currentCooldownMs = 0   // cooldown ngẫu nhiên được chọn sau mỗi bài
-let pollFails = 0           // track consecutive poll failures
+const running = new Set()        // currently running job ids
+let lastPostFinishedAt = 0       // timestamp khi bài đăng cuối hoàn thành
+let currentCooldownMs = 0        // cooldown ngẫu nhiên sau mỗi bài đăng
+let pollFails = 0
 
-// Random delay trong khoảng [min, max] phút → ms
 function randomPostDelay() {
   const minutes = POST_DELAY_MIN + Math.random() * (POST_DELAY_MAX - POST_DELAY_MIN)
   return Math.round(minutes * 60 * 1000)
@@ -51,79 +42,63 @@ async function getExcludedUserIds() {
 }
 
 async function poll() {
-  if (running.size >= MAX_CONCURRENT) return
+  if (running.size > 0) return  // strictly 1 job at a time
 
   try {
-    const excludedUserIds = await getExcludedUserIds()
-
     let query = supabase
       .from('jobs')
       .select('*')
       .eq('status', 'pending')
       .lte('scheduled_at', new Date().toISOString())
       .order('scheduled_at', { ascending: true })
-      .limit(MAX_CONCURRENT - running.size)
+      .limit(1)
 
-    // Per-user isolation: only pick up own jobs + system jobs (created_by IS NULL)
     if (AGENT_USER_ID) {
       query = query.or(`created_by.eq.${AGENT_USER_ID},created_by.is.null`)
-    } else if (excludedUserIds.length > 0) {
-      query = query.not('created_by', 'in', `(${excludedUserIds.join(',')})`)
+    } else {
+      const excludedUserIds = await getExcludedUserIds()
+      if (excludedUserIds.length > 0) {
+        query = query.not('created_by', 'in', `(${excludedUserIds.join(',')})`)
+      }
     }
 
     const { data: jobs } = await query
+    if (!jobs?.length) return
 
-    for (const job of (jobs || [])) {
-      const isPostJob = POST_TYPES.includes(job.type)
-      const isBrowserJob = BROWSER_TYPES.includes(job.type)
-      const isGraphApi = GRAPH_API_TYPES.includes(job.type)
+    const job = jobs[0]
+    const isPostJob = POST_TYPES.includes(job.type)
 
-      // Browser jobs (posting + fetch + comment + scan): chỉ 1 job dùng browser tại 1 thời điểm
-      if (isBrowserJob && !isGraphApi) {
-        if (isPostingActive) continue
-
-        // Post jobs: phải nghỉ ngẫu nhiên giữa các bài
-        if (isPostJob) {
-          const timeSinceLastPost = Date.now() - lastPostFinishedAt
-          if (lastPostFinishedAt > 0 && timeSinceLastPost < currentCooldownMs) {
-            const waitSec = Math.ceil((currentCooldownMs - timeSinceLastPost) / 1000)
-            console.log(`[POLLER] Post cooldown: waiting ${waitSec}s (${(currentCooldownMs / 60000).toFixed(1)}min total)`)
-            continue
-          }
-        }
+    // Post cooldown between posting jobs
+    if (isPostJob && lastPostFinishedAt > 0) {
+      const elapsed = Date.now() - lastPostFinishedAt
+      if (elapsed < currentCooldownMs) {
+        const waitSec = Math.ceil((currentCooldownMs - elapsed) / 1000)
+        console.log(`[POLLER] Post cooldown: ${waitSec}s remaining (${(currentCooldownMs / 60000).toFixed(1)}min total)`)
+        return
       }
-
-      // Claim job
-      const { error } = await supabase.from('jobs')
-        .update({ status: 'claimed', agent_id: AGENT_ID, started_at: new Date() })
-        .eq('id', job.id)
-        .eq('status', 'pending')
-
-      if (error) continue
-
-      running.add(job.id)
-      if (isBrowserJob && !isGraphApi) isPostingActive = true
-
-      console.log(`[JOB] Claimed ${job.type} (${job.id})${isBrowserJob ? ' [BROWSER - sequential]' : ''}`)
-
-      executeJob(job).finally(() => {
-        running.delete(job.id)
-        if (isBrowserJob && !isGraphApi) {
-          isPostingActive = false
-          if (isPostJob) {
-            lastPostFinishedAt = Date.now()
-            currentCooldownMs = randomPostDelay()
-            const cooldownMin = (currentCooldownMs / 60000).toFixed(1)
-            console.log(`[POLLER] Browser post finished, next cooldown: ${cooldownMin}min (random ${POST_DELAY_MIN}-${POST_DELAY_MAX}min)`)
-          } else {
-            console.log(`[POLLER] Browser job finished (${job.type}), ready for next`)
-          }
-        }
-        if (isGraphApi) {
-          console.log(`[POLLER] Graph API post finished, no cooldown needed`)
-        }
-      })
     }
+
+    // Claim job
+    const { error } = await supabase.from('jobs')
+      .update({ status: 'claimed', agent_id: AGENT_ID, started_at: new Date() })
+      .eq('id', job.id)
+      .eq('status', 'pending')
+
+    if (error) return  // another agent claimed it first
+
+    running.add(job.id)
+    console.log(`[JOB] Claimed ${job.type} (${job.id})`)
+
+    executeJob(job).finally(() => {
+      running.delete(job.id)
+      if (isPostJob) {
+        lastPostFinishedAt = Date.now()
+        currentCooldownMs = randomPostDelay()
+        console.log(`[POLLER] Post done, next cooldown: ${(currentCooldownMs / 60000).toFixed(1)}min`)
+      } else {
+        console.log(`[POLLER] Job done (${job.type}), ready for next`)
+      }
+    })
   } catch (err) {
     pollFails++
     if (pollFails === 1 || pollFails % 6 === 0) {
@@ -131,7 +106,6 @@ async function poll() {
     }
     return
   }
-  // Reset on success
   if (pollFails > 0) {
     console.log(`[POLLER] Reconnected after ${pollFails} poll failures`)
     pollFails = 0
@@ -260,7 +234,7 @@ async function recoverStaleJobs() {
 
 function startPoller() {
   const userInfo = AGENT_USER_ID ? ` | user: ${process.env.AGENT_USER_EMAIL || AGENT_USER_ID}` : ''
-  console.log(`[POLLER] Starting — posting: sequential, delay: ${POST_DELAY_MIN}-${POST_DELAY_MAX}min (random), other jobs: max ${MAX_CONCURRENT} concurrent${userInfo}`)
+  console.log(`[POLLER] Starting — sequential (1 job at a time), post delay: ${POST_DELAY_MIN}-${POST_DELAY_MAX}min${userInfo}`)
   recoverStaleJobs().then(() => poll())
   const pollInterval = setInterval(poll, POLL_MS)
   // Periodically recover stale jobs (every 2 minutes)
