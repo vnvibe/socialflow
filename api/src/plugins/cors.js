@@ -4,9 +4,11 @@ const fp = require('fastify-plugin')
 
 module.exports = fp(async (fastify) => {
   fastify.register(require('@fastify/cors'), {
-    origin: true, // Allow all in dev
+    origin: (origin, cb) => cb(null, true), // reflect any origin
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   })
 })
