@@ -171,7 +171,7 @@ async function fetchGroupsHandler(payload, supabase) {
     await delay(1000, 3000)
 
     // Đóng tab nhưng KHÔNG đóng browser
-    await page.close().catch(() => {})
+    await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
     releaseSession(account_id)
 
     // Upsert groups vào DB
@@ -210,7 +210,7 @@ async function fetchGroupsHandler(payload, supabase) {
   } catch (err) {
     console.error(`[FETCH-GROUPS] Error:`, err.message)
     // Đóng tab nếu có lỗi, nhưng vẫn giữ browser
-    if (page) await page.close().catch(() => {})
+    if (page) await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
     releaseSession(account_id)
     throw err
   }

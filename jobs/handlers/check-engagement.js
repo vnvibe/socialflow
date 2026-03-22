@@ -110,7 +110,7 @@ async function checkEngagementHandler(payload, supabase) {
     if (browserPage) await saveDebugScreenshot(browserPage, `engagement-error-${account_id}`)
     throw err
   } finally {
-    if (browserPage) await browserPage.close().catch(() => {})
+    if (browserPage) await browserPage.goto('about:blank', { timeout: 3000 }).catch(() => {})
     releaseSession(account_id)
   }
 }

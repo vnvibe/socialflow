@@ -340,7 +340,7 @@ async function postPageHandler(payload, supabase) {
     throw err
   } finally {
     // Close tab but keep browser open
-    if (browserPage) await browserPage.close().catch(() => {})
+    if (browserPage) await browserPage.goto('about:blank', { timeout: 3000 }).catch(() => {})
     releaseSession(account_id)
   }
 }

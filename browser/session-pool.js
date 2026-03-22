@@ -9,7 +9,7 @@ const os = require('os')
 const PROFILES_DIR = path.join(os.homedir(), '.socialflow', 'profiles')
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000 // 15 phút (tăng lên vì fetch có thể lâu)
 
-// Map account_id -> { browser, context, storageFile, lastUsed, closing }
+// Map account_id -> { browser, context, storageFile, lastUsed, closing, busy }
 const sessions = new Map()
 
 let cleanupInterval = null
@@ -56,6 +56,7 @@ async function getSession(account, opts = {}) {
     profileDir: session.profileDir,
     lastUsed: Date.now(),
     closing: false,
+    busy: false,
   }
 
   sessions.set(id, entry)
@@ -70,7 +71,19 @@ async function getSession(account, opts = {}) {
  */
 async function getPage(account, opts = {}) {
   const session = await getSession(account, opts)
-  const page = await session.context.newPage()
+  session.busy = true
+
+  // Reuse tab đang có thay vì mở tab mới
+  let page = null
+  try {
+    const pages = session.context.pages()
+    page = pages.find(p => !p.isClosed()) || null
+    if (page) console.log(`[SESSION-POOL] Reusing existing tab for ${account.username || account.id}`)
+  } catch {}
+
+  if (!page) {
+    page = await session.context.newPage()
+  }
 
   // Set cookies nếu có cookie_string
   if (account.cookie_string) {
@@ -98,6 +111,7 @@ function releaseSession(accountId) {
   const session = sessions.get(accountId)
   if (session) {
     session.lastUsed = Date.now()
+    session.busy = false
   }
 }
 
@@ -141,17 +155,11 @@ function cleanupIdleSessions() {
   const now = Date.now()
   for (const [id, session] of sessions) {
     if (now - session.lastUsed > IDLE_TIMEOUT_MS && !session.closing) {
-      // Check xem còn page nào đang mở không (= đang chạy job)
-      try {
-        const pages = session.context.pages()
-        if (pages.length > 0) {
-          // Có page đang mở → job đang chạy, KHÔNG đóng, refresh lastUsed
-          session.lastUsed = Date.now()
-          console.log(`[SESSION-POOL] Session ${id} has ${pages.length} active pages, keeping alive`)
-          continue
-        }
-      } catch {
-        // Context đã chết, đóng luôn
+      // Dùng busy flag thay vì check pages.length (vì tab được reuse và không đóng)
+      if (session.busy) {
+        session.lastUsed = Date.now()
+        console.log(`[SESSION-POOL] Session ${id} is busy, keeping alive`)
+        continue
       }
       console.log(`[SESSION-POOL] Session ${id} idle for ${Math.round(IDLE_TIMEOUT_MS / 60000)}min, closing...`)
       closeSession(id)

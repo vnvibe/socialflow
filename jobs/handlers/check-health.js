@@ -157,7 +157,7 @@ async function checkHealthHandler(payload, supabase) {
     }
 
     // Release session back to pool (keep browser open for reuse)
-    try { await page.close() } catch {}
+    try { await page.goto('about:blank', { timeout: 3000 }) } catch {}
     releaseSession(account_id)
 
     // Build update object
@@ -185,7 +185,7 @@ async function checkHealthHandler(payload, supabase) {
     return { status, reason, username: result.name }
   } catch (err) {
     if (page) {
-      try { await page.close() } catch {}
+      try { await page.goto('about:blank', { timeout: 3000 }) } catch {}
       releaseSession(account_id)
     }
     await supabase.from('accounts').update({
