@@ -270,11 +270,10 @@ export default function WebsiteSettings() {
       return
     }
 
-    let timer, timeout
     const bc = new BroadcastChannel('google_oauth')
+    let timeout
 
     const cleanup = () => {
-      clearInterval(timer)
       clearTimeout(timeout)
       bc.close()
       setConnecting(false)
@@ -290,11 +289,7 @@ export default function WebsiteSettings() {
       }
     }
 
-    timer = setInterval(() => {
-      try { if (popup?.closed) cleanup() } catch (e) { /* COOP blocks access while on Google */ }
-    }, 500)
-
-    // Auto-cleanup after 5 minutes
+    // Auto-cleanup after 5 minutes (COOP blocks popup.closed check so no interval)
     timeout = setTimeout(() => { cleanup(); toast.error('Hết thời gian kết nối. Vui lòng thử lại.') }, 5 * 60 * 1000)
   }
 
