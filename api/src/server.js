@@ -18,6 +18,7 @@ app.decorate('supabase', supabase)
 app.register(require('./plugins/cors'))
 app.register(require('./plugins/auth'))
 app.register(require('./plugins/r2'))
+app.register(require('./plugins/cache'))
 app.register(require('@fastify/multipart'), {
   limits: {
     fileSize: 500 * 1024 * 1024 // 500MB max
