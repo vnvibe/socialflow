@@ -1,5 +1,20 @@
 const { runApifyActor } = require('../services/apify')
 const { getOrchestratorForUser } = require('../services/ai/orchestrator')
+const { getRedis } = require('../lib/redis')
+
+const POSTS_TTL = 24 * 60 * 60 // 24h
+
+function postsKey(userId, sourceId) {
+  return `monitor:posts:${userId}:${sourceId}`
+}
+
+async function cachePostsToRedis(userId, sourceId, posts, sourceName) {
+  const redis = getRedis()
+  if (!redis) return
+  try {
+    await redis.setex(postsKey(userId, sourceId), POSTS_TTL, JSON.stringify({ posts, source_name: sourceName, fetchedAt: Date.now() }))
+  } catch {}
+}
 
 // apify/facebook-posts-scraper for pages, apify/facebook-groups-scraper for groups
 const ACTOR_FB_PAGES = 'apify~facebook-posts-scraper'
@@ -266,6 +281,20 @@ module.exports = async (fastify) => {
   // FETCH — returns posts to frontend (cached in localStorage)
   // ============================================
 
+  // GET /monitoring/sources/:id/posts — đọc posts từ Redis cache (cross-browser)
+  fastify.get('/sources/:id/posts', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const redis = getRedis()
+    if (!redis) return { posts: [], total: 0, source_name: null, fetchedAt: null }
+    try {
+      const cached = await redis.get(postsKey(req.user.id, req.params.id))
+      if (cached) {
+        const data = typeof cached === 'string' ? JSON.parse(cached) : cached
+        return { posts: data.posts || [], total: (data.posts || []).length, source_name: data.source_name, fetchedAt: data.fetchedAt }
+      }
+    } catch {}
+    return { posts: [], total: 0, source_name: null, fetchedAt: null }
+  })
+
   // POST /monitoring/sources/:id/fetch-now — returns posts directly
   // body.method: 'apify' (default) | 'cookie'
   // body.account_id: required when method === 'cookie'
@@ -318,7 +347,10 @@ module.exports = async (fastify) => {
 
         if (updated?.status === 'done') {
           const result = updated.result || {}
-          return { posts: result.posts || [], total: result.total || 0, source_name: result.source_name || source.name }
+          const posts = result.posts || []
+          const sourceName = result.source_name || source.name
+          await cachePostsToRedis(req.user.id, req.params.id, posts, sourceName)
+          return { posts, total: posts.length, source_name: sourceName }
         }
         if (updated?.status === 'failed') {
           return reply.code(500).send({ error: updated.error_message || 'Agent fetch failed' })
@@ -340,7 +372,9 @@ module.exports = async (fastify) => {
         .select('name')
         .eq('id', req.params.id)
         .single()
-      return { posts, total: posts.length, source_name: updatedSource?.name || source.name }
+      const sourceName = updatedSource?.name || source.name
+      await cachePostsToRedis(req.user.id, req.params.id, posts, sourceName)
+      return { posts, total: posts.length, source_name: sourceName }
     } catch (err) {
       req.log.error({ err }, 'Fetch source failed')
       // Return user-friendly error

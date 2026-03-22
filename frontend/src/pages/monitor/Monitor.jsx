@@ -231,6 +231,28 @@ function WallTab({ filterAccountId, fetchMethod, requireAgent }) {
     queryFn: () => api.get('/monitoring/sources').then(r => r.data),
   })
 
+  // Load posts từ Redis cache (cross-browser) khi source list sẵn sàng
+  // Chỉ load cho source chưa có trong localStorage (tránh overwrite fresh local cache)
+  useEffect(() => {
+    if (!sources.length) return
+    const stale = sources.filter(s => !isCacheFresh(s.id))
+    if (!stale.length) return
+    Promise.all(
+      stale.map(s =>
+        api.get(`/monitoring/sources/${s.id}/posts`)
+          .then(r => {
+            const posts = r.data?.posts || []
+            if (posts.length > 0) {
+              setCachedPosts(s.id, posts)
+            }
+          })
+          .catch(() => {})
+      )
+    ).then(() => {
+      setCachedPostsState(getAllCachedPosts())
+    })
+  }, [sources.length])
+
   // Comment logs — track which posts have been replied to (persisted in DB)
   const cmtLogsUrl = filterAccountId
     ? `/monitoring/comment-logs?limit=200&account_id=${filterAccountId}`
