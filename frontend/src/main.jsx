@@ -18,11 +18,32 @@ const queryClient = new QueryClient({
   }
 })
 
-// Persist cache vào localStorage — sống qua reload trang
+// Lấy userId từ Supabase session trong localStorage (sync, không cần await)
+function getStoredUserId() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k?.includes('-auth-token')) {
+        const v = JSON.parse(localStorage.getItem(k))
+        return v?.user?.id || 'anon'
+      }
+    }
+  } catch {}
+  return 'anon'
+}
+
+// Storage wrapper scope theo userId — mỗi user có cache riêng, không dính nhau
+const userScopedStorage = {
+  getItem: (key) => localStorage.getItem(`${key}-${getStoredUserId()}`),
+  setItem: (key, value) => localStorage.setItem(`${key}-${getStoredUserId()}`, value),
+  removeItem: (key) => localStorage.removeItem(`${key}-${getStoredUserId()}`),
+}
+
+// Persist cache vào localStorage — sống qua reload trang, scope theo user
 const persister = createSyncStoragePersister({
-  storage: window.localStorage,
+  storage: userScopedStorage,
   key: 'sf-cache',
-  throttleTime: 3000, // write localStorage tối đa 1 lần/3s
+  throttleTime: 3000,
 })
 
 ReactDOM.createRoot(document.getElementById('root')).render(

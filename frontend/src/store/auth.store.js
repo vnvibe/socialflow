@@ -3,11 +3,6 @@ import { supabase } from '../lib/supabase'
 
 let authInitialized = false
 let authSubscription = null
-let currentUserId = null
-
-function clearQueryCache() {
-  localStorage.removeItem('sf-cache')
-}
 
 const useAuthStore = create((set) => ({
   user: null,
@@ -38,11 +33,6 @@ const useAuthStore = create((set) => ({
 
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
-          // Đổi tài khoản → xóa cache của user cũ
-          if (currentUserId && currentUserId !== session.user.id) {
-            clearQueryCache()
-          }
-          currentUserId = session.user.id
           const { data: profile } = await supabase
             .from('profiles')
             .select('*')
@@ -50,7 +40,6 @@ const useAuthStore = create((set) => ({
             .single()
           set({ user: session.user, profile })
         } else {
-          currentUserId = null
           set({ user: null, profile: null })
         }
       })
@@ -84,8 +73,6 @@ const useAuthStore = create((set) => ({
   },
 
   logout: async () => {
-    clearQueryCache()
-    currentUserId = null
     await supabase.auth.signOut()
     set({ user: null, profile: null })
   },
