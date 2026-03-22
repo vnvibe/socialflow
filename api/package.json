@@ -14,6 +14,7 @@
     "@fastify/multipart": "^9.0.3",
     "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.49.1",
+    "@upstash/redis": "^1.37.0",
     "archiver": "^7.0.1",
     "axios": "^1.13.6",
     "cron-parser": "^5.5.0",

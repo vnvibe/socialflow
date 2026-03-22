@@ -1,4 +1,5 @@
 const { google } = require('googleapis')
+const { cached, invalidate } = require('../lib/redis')
 
 const SCOPES = [
   'email',
@@ -349,13 +350,7 @@ module.exports = async (fastify) => {
     }
   })
 
-  // ─── In-memory cache (5 min TTL) ──────────────────────────────────────────
-  const _cache = new Map()
-  function cached(key, ttlMs, fn) {
-    const hit = _cache.get(key)
-    if (hit && Date.now() - hit.ts < ttlMs) return Promise.resolve(hit.data)
-    return fn().then(data => { _cache.set(key, { data, ts: Date.now() }); return data })
-  }
+  // ─── Cache (Redis nếu có, fallback in-memory) ──────────────────────────────
 
   // POST /websites/:id/gsc-overview — quick overview for dashboard
   // Optimized: all GSC queries run in parallel via Promise.all
@@ -369,7 +364,7 @@ module.exports = async (fastify) => {
     const cacheKey = `overview:${req.params.id}:${startDate}:${endDate}:${compareStartDate || ''}:${compareEndDate || ''}`
 
     try {
-      const result = await cached(cacheKey, 5 * 60 * 1000, async () => {
+      const result = await cached(cacheKey, 5 * 60, async () => {
         const searchconsole = google.searchconsole({ version: 'v1', auth: site._oauth })
         const siteUrl = site.gsc_site_url
 
@@ -581,6 +576,7 @@ Viết ngắn gọn, thực tế, dễ hiểu. Không dùng JSON.`
       .eq('id', req.params.id)
       .eq('owner_id', req.user.id)
     if (error) return reply.code(500).send({ error: error.message })
+    invalidate(`overview:${req.params.id}:`)
     return { ok: true }
   })
 }
