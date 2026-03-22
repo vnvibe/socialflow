@@ -27,6 +27,7 @@ import Settings from './pages/settings/Settings'
 import WebsiteSettings from './pages/settings/WebsiteSettings'
 import WebsiteReport from './pages/websites/WebsiteReport'
 import OAuthCallback from './pages/OAuthCallback'
+import GoogleCallbackRelay from './pages/GoogleCallbackRelay'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuthStore()
@@ -69,6 +70,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/oauth-callback" element={<OAuthCallback />} />
+        <Route path="/websites/google/callback" element={<GoogleCallbackRelay />} />
         <Route path="/*" element={
           <ProtectedRoute>
             <AppLayout>
