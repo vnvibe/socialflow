@@ -63,7 +63,7 @@ export default function Dashboard() {
   }
 
   const stats = data?.stats || {}
-  const chartData = data?.posts_last_7_days || []
+  const chartData = data?.chart || []
 
   return (
     <div className="space-y-6">

@@ -33,13 +33,13 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // GET /jobs/:id/status (public - lightweight polling endpoint, no auth needed)
-  // Job ID is UUID so not guessable. Only returns status fields.
-  fastify.get('/:id/status', async (req, reply) => {
+  // GET /jobs/:id/status — lightweight polling, requires auth, scoped to owner
+  fastify.get('/:id/status', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data, error } = await supabase
       .from('jobs')
       .select('id, status, result, error_message, started_at, finished_at')
       .eq('id', req.params.id)
+      .eq('created_by', req.user.id)
       .single()
 
     if (error) return reply.code(404).send({ error: 'Not found' })

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Component } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import useAuthStore from './store/auth.store'
 import Sidebar from './components/layout/Sidebar'
@@ -29,6 +29,23 @@ import WebsiteReport from './pages/websites/WebsiteReport'
 import OAuthCallback from './pages/OAuthCallback'
 import GoogleCallbackRelay from './pages/GoogleCallbackRelay'
 
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(error) { return { error } }
+  render() {
+    if (this.state.error) return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center p-8">
+          <p className="text-red-500 font-medium mb-2">Đã xảy ra lỗi không mong muốn</p>
+          <p className="text-gray-500 text-sm mb-4">{this.state.error?.message}</p>
+          <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-500 text-white rounded text-sm">Tải lại trang</button>
+        </div>
+      </div>
+    )
+    return this.props.children
+  }
+}
+
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuthStore()
   if (loading) return <div className="flex items-center justify-center h-screen"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
@@ -52,7 +69,7 @@ function AppLayout({ children }) {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <TopBar onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
         <main className="flex-1 overflow-auto p-3 sm:p-6">
-          {children}
+          <ErrorBoundary>{children}</ErrorBoundary>
         </main>
       </div>
     </div>
