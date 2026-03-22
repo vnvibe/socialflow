@@ -27,6 +27,12 @@ function getTtl(url) {
   return match ? match.ttl : DEFAULT_TTL
 }
 
+// Prefix GET → dùng để invalidate cache khi mutation cùng prefix
+function getRoutePrefix(url) {
+  const match = TTL_MAP.find(r => url.startsWith(r.prefix))
+  return match ? match.prefix : url.split('/').slice(0, 2).join('/')
+}
+
 function shouldSkip(url, method) {
   if (method !== 'GET') return true
   return SKIP_PREFIXES.some(p => url.startsWith(p))
@@ -84,6 +90,25 @@ module.exports = fp(async function cachePlugin(fastify) {
     } catch {}
 
     return payload
+  })
+
+  // Tự động invalidate cache khi mutation (POST/PUT/PATCH/DELETE) thành công
+  fastify.addHook('onResponse', async (req, reply) => {
+    if (req.method === 'GET') return
+    if (reply.statusCode >= 400) return
+    const url = req.url.split('?')[0]
+    if (SKIP_PREFIXES.some(p => url.startsWith(p))) return
+
+    const userId = getUserIdFromJwt(req)
+    const prefix = getRoutePrefix(url)
+    try {
+      const pattern = `api:${userId}:${prefix}`
+      const keys = await redis.keys(`${pattern}*`)
+      if (keys.length > 0) {
+        await redis.del(...keys)
+        fastify.log.info(`[CACHE] Invalidated ${keys.length} keys for ${pattern}`)
+      }
+    } catch {}
   })
 
   fastify.decorate('invalidateCache', async (userId, prefix) => {
