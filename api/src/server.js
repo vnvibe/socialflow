@@ -62,6 +62,14 @@ app.get('/extension/config', async () => ({
 // Start server
 const start = async () => {
   try {
+    console.log('[BOOT] Checking env...')
+    if (!process.env.SUPABASE_URL) console.error('[BOOT] MISSING: SUPABASE_URL')
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) console.error('[BOOT] MISSING: SUPABASE_SERVICE_ROLE_KEY')
+
+    console.log('[BOOT] Registering routes...')
+    await app.ready()
+    console.log('[BOOT] Routes ready. Starting listener...')
+
     const port = parseInt(process.env.PORT) || 3000
     await app.listen({ port, host: '0.0.0.0' })
 
@@ -70,7 +78,7 @@ const start = async () => {
 
     console.log(`SocialFlow API running on port ${port}`)
   } catch (err) {
-    app.log.error(err)
+    console.error('[BOOT] FATAL:', err.message, err.stack)
     process.exit(1)
   }
 }
