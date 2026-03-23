@@ -62,7 +62,7 @@ async function ensurePlaywright() {
     const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
     const child = spawn(npx, ['playwright', 'install', 'chromium'], {
       cwd: appRoot,
-      env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: path.join(appRoot, '.browsers') },
+      env: { ...process.env },
       shell: true,
     })
 
