@@ -292,7 +292,17 @@ export default function AccountList() {
                       <ProxyBadge proxy={account.proxies} />
                     </td>
                     <td className="px-4 py-3">
-                      <HealthBadge status={account.status} />
+                      <div className="flex items-center gap-1.5">
+                        <HealthBadge status={account.status} />
+                        {(account.status === 'dead' || account.status === 'checkpoint') && (
+                          <button
+                            onClick={() => setEditAccount(account)}
+                            className="text-[10px] text-orange-600 hover:text-orange-700 font-medium underline"
+                          >
+                            Cap nhat cookie
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-500">
                       {account.posts_today ?? 0}/{account.max_daily_posts ?? 10}
