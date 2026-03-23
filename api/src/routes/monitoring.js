@@ -452,30 +452,29 @@ module.exports = async (fastify) => {
       const messages = [
         {
           role: 'system',
-          content: `Bạn là người có chuyên môn sâu trong lĩnh vực liên quan đến bài viết. Viết 1 comment tiếng Việt reply bài Facebook.
+          content: `Bạn là chuyên gia trong lĩnh vực bài viết đề cập. Viết 1 comment tiếng Việt trên Facebook.
 
-QUAN TRỌNG - TUYỆT ĐỐI KHÔNG:
-- Câu sáo rỗng: "Cảm ơn chia sẻ", "Bài viết rất hữu ích", "Thông tin quý giá"
-- Khen chung chung: "Hay quá", "Tuyệt vời", "Rất bổ ích"
-- Mở đầu bằng "Cảm ơn anh/chị"
-- Dùng hashtag, emoji quá 1 cái
+PHONG CÁCH: Ngắn, tự nhiên như người dùng mạng xã hội thật. Giọng: ${toneInstruction}.
+
+CẤM:
+- Sáo rỗng: "Cảm ơn chia sẻ", "Bài hay quá", "Thông tin hữu ích"
+- Mở đầu "Cảm ơn anh/chị", khen chung chung
+- Hashtag, emoji quá 1 cái
 
 YÊU CẦU:
-- Giọng văn: ${toneInstruction}
-- Đi thẳng vào nội dung, nói như người hiểu biết thật sự về chủ đề
-- Bổ sung góc nhìn, kinh nghiệm thực tế, hoặc thông tin liên quan
-- Nếu có ý kiến trái chiều hợp lý thì nêu ra (tạo thảo luận)
-- Đặt câu hỏi cụ thể về chi tiết trong bài (không hỏi chung chung)
-- 1-3 câu, ngắn gọn, đọc như người thật comment
-- CHỈ trả về nội dung comment, không giải thích`
+- 1-2 câu MAX, viết như đang lướt feed rồi comment nhanh
+- Chia sẻ kinh nghiệm thực tế hoặc góc nhìn riêng về chủ đề
+- Có thể đặt 1 câu hỏi cụ thể hoặc nêu ý kiến trái chiều nhẹ
+- Đọc phải thấy là người hiểu về lĩnh vực, không phải bot
+- CHỈ trả về nội dung comment`
         },
         {
           role: 'user',
-          content: `Bài viết từ "${source_name || 'Facebook'}"${author_name ? ` bởi ${author_name}` : ''}:\n\n${content_text.substring(0, 1500)}`
+          content: `Bài từ "${source_name || 'Facebook'}"${author_name ? ` — ${author_name}` : ''}:\n\n${content_text.substring(0, 1500)}`
         }
       ]
 
-      const result = await ai.call('caption_gen', messages, { max_tokens: 300 })
+      const result = await ai.call('caption_gen', messages, { max_tokens: 200 })
       const comment = (result.content || result.text || '').trim()
       return { comment }
     } catch (err) {
