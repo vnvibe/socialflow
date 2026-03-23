@@ -1,14 +1,8 @@
 /**
  * Check if user can access a resource.
- * Admin: always allowed
- * Owner: allowed (owner_id matches)
- * User: allowed if granted via user_resource_access
+ * ALL users (including admin) only access own + granted resources.
  */
 async function canAccess(supabase, userId, resourceType, resourceId) {
-  // Check if admin
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single()
-  if (profile?.role === 'admin') return true
-
   // Check if owner (for accounts)
   if (resourceType === 'account') {
     const { data } = await supabase.from('accounts').select('id').eq('id', resourceId).eq('owner_id', userId).single()
@@ -29,14 +23,10 @@ async function canAccess(supabase, userId, resourceType, resourceId) {
 
 /**
  * Get list of resource IDs user can access for a given type.
- * Admin: returns null (meaning "all" — caller should not filter)
- * Owner/User: returns array of accessible IDs
+ * ALL users (including admin) only see their own + granted resources.
+ * Admin cannot see other users' cookies/accounts.
  */
 async function getAccessibleIds(supabase, userId, resourceType) {
-  // Check if admin
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single()
-  if (profile?.role === 'admin') return null // null = no filter needed
-
   // Get owned resources
   let ownedIds = []
   if (resourceType === 'account') {

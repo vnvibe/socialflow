@@ -19,17 +19,10 @@ module.exports = async (fastify) => {
 
     let query = supabase.from('accounts').select('*, proxies(*)').order('created_at', { ascending: false })
 
-    if (accessibleIds === null) {
-      // Admin: show all (or filtered by as_user)
-      const ownerId = getOwnerId(req)
-      if (ownerId !== req.user.id) {
-        query = query.eq('owner_id', ownerId)
-      }
-    } else if (accessibleIds.length === 0) {
+    if (accessibleIds.length === 0) {
       return []
-    } else {
-      query = query.in('id', accessibleIds)
     }
+    query = query.in('id', accessibleIds)
 
     const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })

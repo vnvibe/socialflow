@@ -24,13 +24,10 @@ module.exports = async (fastify) => {
 
     let query = supabase.from('fb_groups').select('*, accounts(owner_id, username)').order('created_at', { ascending: false })
 
-    if (accountIds === null) {
-      // admin: all
-    } else if (accountIds.length === 0) {
+    if (accountIds.length === 0) {
       return []
-    } else {
-      query = query.in('account_id', accountIds)
     }
+    query = query.in('account_id', accountIds)
 
     const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
