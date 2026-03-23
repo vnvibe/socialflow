@@ -175,7 +175,7 @@ module.exports = async (fastify) => {
     if (!agents?.length) return reply.code(503).send({ error: 'No agent online. Start the SocialFlow Agent first.' })
 
     const { data: job, error } = await supabase.from('jobs').insert({
-      type: 'check_health', payload: { account_id: req.params.id, action: 'fetch_pages' }, status: 'pending', scheduled_at: new Date().toISOString()
+      type: 'check_health', payload: { account_id: req.params.id, action: 'fetch_pages' }, status: 'pending', scheduled_at: new Date().toISOString(), created_by: req.user.id
     }).select().single()
     if (error) return reply.code(500).send({ error: error.message })
     return { message: 'Fetch pages queued', job_id: job.id }
@@ -187,7 +187,7 @@ module.exports = async (fastify) => {
     if (!agents?.length) return reply.code(503).send({ error: 'No agent online. Start the SocialFlow Agent first.' })
 
     const { data: job, error } = await supabase.from('jobs').insert({
-      type: 'check_health', payload: { account_id: req.params.id, action: 'fetch_groups' }, status: 'pending', scheduled_at: new Date().toISOString()
+      type: 'check_health', payload: { account_id: req.params.id, action: 'fetch_groups' }, status: 'pending', scheduled_at: new Date().toISOString(), created_by: req.user.id
     }).select().single()
     if (error) return reply.code(500).send({ error: error.message })
     return { message: 'Fetch groups queued', job_id: job.id }
@@ -199,7 +199,7 @@ module.exports = async (fastify) => {
     if (!agents?.length) return reply.code(503).send({ error: 'No agent online. Start the SocialFlow Agent first.' })
 
     const { data: job, error } = await supabase.from('jobs').insert({
-      type: 'check_health', payload: { account_id: req.params.id, action: 'fetch_all' }, status: 'pending', scheduled_at: new Date().toISOString()
+      type: 'check_health', payload: { account_id: req.params.id, action: 'fetch_all' }, status: 'pending', scheduled_at: new Date().toISOString(), created_by: req.user.id
     }).select().single()
     if (error) return reply.code(500).send({ error: error.message })
     return { message: 'Fetch all queued', job_id: job.id }
@@ -521,7 +521,8 @@ module.exports = async (fastify) => {
       type: 'check_health',
       payload: { account_id: req.params.id },
       status: 'pending',
-      scheduled_at: new Date().toISOString()
+      scheduled_at: new Date().toISOString(),
+      created_by: req.user.id
     }).select().single()
 
     if (error) return reply.code(500).send({ error: error.message })
