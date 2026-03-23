@@ -299,7 +299,7 @@ async function processEngagementChecks() {
 let monitoringInProgress = false
 
 async function processMonitoringSources() {
-  if (monitoringInProgress) return // prevent overlap
+  if (monitoringInProgress) return
   monitoringInProgress = true
 
   try {
@@ -309,59 +309,59 @@ async function processMonitoringSources() {
       .from('monitored_sources')
       .select('*')
       .eq('is_active', true)
+      .gt('fetch_interval_minutes', 0)
+      .not('next_fetch_at', 'is', null)
       .lte('next_fetch_at', now)
       .order('next_fetch_at', { ascending: true })
-      .limit(3) // max 3 per cycle to avoid Apify quota burn
+      .limit(5)
 
     if (!sources?.length) return
 
-    const { fetchSourcePosts } = require('../routes/monitoring')
+    // Check agent online once
+    const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
+      .gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
+
+    if (!agents?.length) {
+      console.log('[SCHEDULER] Agent offline — skipping all monitoring fetches')
+      return
+    }
 
     for (const source of sources) {
       try {
-        const method = source.fetch_method || 'apify'
-        console.log(`[SCHEDULER] Fetching ${source.name || source.fb_source_id} via ${method}`)
-
-        if (method === 'cookie' && source.fetch_account_id) {
-          // Cookie method: create agent job
-          const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
-            .gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
-
-          if (!agents?.length) {
-            console.log(`[SCHEDULER] Agent offline — skipping cookie fetch for ${source.name || source.fb_source_id}`)
-            const nextFetch = new Date(Date.now() + 5 * 60 * 1000) // retry in 5min
-            await supabase.from('monitored_sources').update({ next_fetch_at: nextFetch.toISOString() }).eq('id', source.id)
-            continue
-          }
-
-          const sourceUrl = source.url || `https://www.facebook.com/${source.source_type === 'group' ? 'groups/' : ''}${source.fb_source_id}`
-          await supabase.from('jobs').insert({
-            type: 'fetch_source_cookie',
-            payload: {
-              account_id: source.fetch_account_id,
-              source_url: sourceUrl,
-              source_id: source.id,
-              source_type: source.source_type,
-              owner_id: source.owner_id,
-            },
-            status: 'pending',
-            scheduled_at: new Date().toISOString(),
-            created_by: source.owner_id,
-          })
-          console.log(`[SCHEDULER] Created cookie fetch job for ${source.name || source.fb_source_id}`)
-          // next_fetch_at will be updated by the agent handler when done
-        } else {
-          // Apify method (default)
-          const result = await fetchSourcePosts(supabase, source)
-          console.log(`[SCHEDULER] Source ${source.name || source.fb_source_id}: ${(result || []).length} posts`)
+        const accountId = source.account_id || source.fetch_account_id
+        if (!accountId) {
+          console.log(`[SCHEDULER] Source ${source.name || source.fb_source_id} has no account — skipping`)
+          const nextFetch = new Date(Date.now() + (source.fetch_interval_minutes || 60) * 60 * 1000)
+          await supabase.from('monitored_sources').update({ next_fetch_at: nextFetch.toISOString() }).eq('id', source.id)
+          continue
         }
-      } catch (err) {
-        console.error(`[SCHEDULER] Monitoring source ${source.id} error:`, err.message)
-        // Push next_fetch_at forward to avoid retrying immediately
-        const nextFetch = new Date(Date.now() + (source.fetch_interval_minutes || 60) * 60 * 1000)
+
+        const sourceUrl = source.url || `https://www.facebook.com/${source.source_type === 'group' ? 'groups/' : ''}${source.fb_source_id}`
+        await supabase.from('jobs').insert({
+          type: 'fetch_source_cookie',
+          payload: {
+            account_id: accountId,
+            source_url: sourceUrl,
+            source_id: source.id,
+            source_type: source.source_type,
+            owner_id: source.owner_id,
+          },
+          status: 'pending',
+          scheduled_at: new Date().toISOString(),
+          created_by: source.owner_id,
+        })
+
+        // Update next_fetch_at immediately to prevent duplicate jobs
+        const intervalMs = (source.fetch_interval_minutes || 60) * 60 * 1000
         await supabase.from('monitored_sources').update({
-          next_fetch_at: nextFetch.toISOString(),
+          next_fetch_at: new Date(Date.now() + intervalMs).toISOString(),
         }).eq('id', source.id)
+
+        console.log(`[SCHEDULER] Created fetch job: ${source.name || source.fb_source_id} (next: ${source.fetch_interval_minutes}min)`)
+      } catch (err) {
+        console.error(`[SCHEDULER] Source ${source.id} error:`, err.message)
+        const nextFetch = new Date(Date.now() + (source.fetch_interval_minutes || 60) * 60 * 1000)
+        await supabase.from('monitored_sources').update({ next_fetch_at: nextFetch.toISOString() }).eq('id', source.id)
       }
     }
   } finally {

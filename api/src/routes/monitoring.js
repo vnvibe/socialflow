@@ -664,6 +664,100 @@ YÊU CẦU:
     if (error) return reply.code(500).send({ error: error.message })
     return { data: enrichPosts(data || [], sourceMap), total: count, page: Number(page), limit: Number(limit) }
   })
+
+  // ============================================
+  // USER SAVED POSTS — per-user bookmarks & notes
+  // ============================================
+
+  // POST /monitoring/bookmark — save/unsave a post
+  fastify.post('/bookmark', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { fb_post_id, note, tags } = req.body || {}
+    if (!fb_post_id) return reply.code(400).send({ error: 'fb_post_id required' })
+
+    const { data, error } = await supabase.from('user_saved_posts').upsert({
+      user_id: req.user.id,
+      fb_post_id,
+      note: note || null,
+      tags: tags || [],
+    }, { onConflict: 'user_id,fb_post_id' }).select().single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
+  })
+
+  // DELETE /monitoring/bookmark/:fb_post_id — remove bookmark
+  fastify.delete('/bookmark/:fb_post_id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { error } = await supabase.from('user_saved_posts')
+      .delete()
+      .eq('user_id', req.user.id)
+      .eq('fb_post_id', req.params.fb_post_id)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return { ok: true }
+  })
+
+  // PUT /monitoring/bookmark/:fb_post_id — update note/tags
+  fastify.put('/bookmark/:fb_post_id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { note, tags, is_hidden } = req.body || {}
+    const updates = {}
+    if (note !== undefined) updates.note = note
+    if (tags !== undefined) updates.tags = tags
+    if (is_hidden !== undefined) updates.is_hidden = is_hidden
+
+    const { data, error } = await supabase.from('user_saved_posts')
+      .update(updates)
+      .eq('user_id', req.user.id)
+      .eq('fb_post_id', req.params.fb_post_id)
+      .select().single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
+  })
+
+  // GET /monitoring/bookmarks — list user's saved posts
+  fastify.get('/bookmarks', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { page = 1, limit = 50, tag } = req.query
+
+    let query = supabase.from('user_saved_posts')
+      .select('*', { count: 'exact' })
+      .eq('user_id', req.user.id)
+      .eq('is_hidden', false)
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1)
+
+    if (tag) query = query.contains('tags', [tag])
+
+    const { data: savedPosts, error, count } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Enrich with post data from monitored_posts
+    const fbPostIds = (savedPosts || []).map(s => s.fb_post_id)
+    let posts = []
+    if (fbPostIds.length > 0) {
+      const { data: postData } = await supabase.from('monitored_posts')
+        .select('*')
+        .in('fb_post_id', fbPostIds)
+      posts = postData || []
+    }
+
+    const postMap = {}
+    for (const p of posts) postMap[p.fb_post_id] = p
+
+    const enriched = (savedPosts || []).map(s => ({
+      ...s,
+      post: postMap[s.fb_post_id] || null
+    }))
+
+    return { data: enriched, total: count, page: Number(page), limit: Number(limit) }
+  })
+
+  // GET /monitoring/bookmark-ids — quick check which posts are bookmarked
+  fastify.get('/bookmark-ids', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data } = await supabase.from('user_saved_posts')
+      .select('fb_post_id')
+      .eq('user_id', req.user.id)
+    return (data || []).map(d => d.fb_post_id)
+  })
 }
 
 // Export for scheduler

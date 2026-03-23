@@ -34,6 +34,7 @@ export default function GroupList() {
   const [bulkText, setBulkText] = useState('')
   const [resolving, setResolving] = useState(false)
   const [selected, setSelected] = useState(new Set())
+  const [filterAccountId, setFilterAccountId] = useState('')
   const { requireAgent } = useAgentGuard()
 
   const { data: groups = [], isLoading } = useQuery({
@@ -113,8 +114,8 @@ export default function GroupList() {
   }
 
   const toggleSelectAll = () => {
-    if (selected.size === groups.length) setSelected(new Set())
-    else setSelected(new Set(groups.map(g => g.id)))
+    if (selected.size === filteredGroups.length) setSelected(new Set())
+    else setSelected(new Set(filteredGroups.map(g => g.id)))
   }
 
   const handleAdd = () => {
@@ -147,13 +148,30 @@ export default function GroupList() {
   })
 
   const defaultAccountId = accounts.length === 1 ? accounts[0].id : ''
+  const filteredGroups = filterAccountId ? groups.filter(g => g.account_id === filterAccountId) : groups
 
   if (isLoading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Quản lý nhóm</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">Quản lý nhóm</h1>
+          {accounts.length > 1 && (
+            <select
+              value={filterAccountId}
+              onChange={e => { setFilterAccountId(e.target.value); setSelected(new Set()) }}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Tất cả ({groups.length})</option>
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.username || a.fb_user_id} ({groups.filter(g => g.account_id === a.id).length})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
         <div className="flex gap-2">
           {selected.size > 0 && (
             <button
@@ -185,7 +203,7 @@ export default function GroupList() {
           <thead className="bg-gray-50">
             <tr>
               <th className="px-3 py-3 w-10">
-                <input type="checkbox" checked={groups.length > 0 && selected.size === groups.length} onChange={toggleSelectAll}
+                <input type="checkbox" checked={filteredGroups.length > 0 && selected.size === filteredGroups.length} onChange={toggleSelectAll}
                   className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
               </th>
               <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Tên nhóm</th>
@@ -198,7 +216,7 @@ export default function GroupList() {
             </tr>
           </thead>
           <tbody className="divide-y">
-            {groups.map(group => {
+            {filteredGroups.map(group => {
               const badge = typeBadge[group.group_type] || typeBadge.public
               const BadgeIcon = badge.icon
               const hasName = group.name && group.name !== group.fb_group_id
@@ -248,7 +266,7 @@ export default function GroupList() {
                 </tr>
               )
             })}
-            {groups.length === 0 && (
+            {filteredGroups.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-12 text-center">
                   <UsersRound size={40} className="mx-auto mb-3 text-gray-300" />

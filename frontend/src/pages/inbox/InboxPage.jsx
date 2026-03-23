@@ -6,23 +6,37 @@ import api from '../../lib/api'
 
 export default function InboxPage() {
   const queryClient = useQueryClient()
+  const [filterAccountId, setFilterAccountId] = useState('')
   const [selectedPageId, setSelectedPageId] = useState(null)
   const [selectedMsg, setSelectedMsg] = useState(null)
   const [reply, setReply] = useState('')
   const messagesEndRef = useRef(null)
 
+  // Load accounts
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: () => api.get('/accounts').then(r => r.data),
+  })
+
   // Load all fanpages
-  const { data: pages = [], isLoading: pagesLoading } = useQuery({
+  const { data: allPages = [], isLoading: pagesLoading } = useQuery({
     queryKey: ['fanpages'],
     queryFn: () => api.get('/fanpages').then(r => r.data),
   })
 
-  // Auto-select first page
+  // Filter pages by account
+  const pages = filterAccountId ? allPages.filter(p => p.account_id === filterAccountId) : allPages
+
+  // Auto-select first page when filter changes
   useEffect(() => {
-    if (!selectedPageId && pages.length > 0) {
+    if (pages.length > 0 && !pages.find(p => p.id === selectedPageId)) {
       setSelectedPageId(pages[0].id)
+      setSelectedMsg(null)
+    } else if (pages.length === 0) {
+      setSelectedPageId(null)
+      setSelectedMsg(null)
     }
-  }, [pages, selectedPageId])
+  }, [filterAccountId, pages.length])
 
   // Load messages for selected page
   const { data: messages = [], isLoading: messagesLoading } = useQuery({
@@ -115,7 +129,21 @@ export default function InboxPage() {
   return (
     <div className="h-[calc(100vh-120px)]">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-gray-900">Hộp thư</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">Hộp thư</h1>
+          <select
+            value={filterAccountId}
+            onChange={e => setFilterAccountId(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Tất cả nick ({allPages.length} page)</option>
+            {accounts.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.username || a.fb_user_id} ({allPages.filter(p => p.account_id === a.id).length} page)
+              </option>
+            ))}
+          </select>
+        </div>
         {selectedPageId && (
           <button
             onClick={() => fetchInboxMutation.mutate()}
@@ -131,23 +159,38 @@ export default function InboxPage() {
       <div className="flex gap-4 h-[calc(100%-60px)]">
         {/* Left: Page list + Message list */}
         <div className="w-80 flex flex-col shrink-0">
-          {/* Page tabs */}
-          <div className="bg-white rounded-t-xl shadow-sm border-b overflow-x-auto">
-            <div className="flex">
-              {pages.map(page => (
-                <button
-                  key={page.id}
-                  onClick={() => handleSelectPage(page.id)}
-                  className={`flex-shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                    selectedPageId === page.id
-                      ? 'border-blue-600 text-blue-600 bg-blue-50/50'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <span className="truncate max-w-[120px] block">{page.name || page.fb_page_id}</span>
-                </button>
-              ))}
-            </div>
+          {/* Page list grouped by account */}
+          <div className="bg-white rounded-t-xl shadow-sm border-b overflow-y-auto max-h-48">
+            {(() => {
+              // Group pages by account
+              const grouped = {}
+              for (const page of pages) {
+                const acct = page.accounts?.username || page.accounts?.fb_user_id || 'Khác'
+                if (!grouped[acct]) grouped[acct] = []
+                grouped[acct].push(page)
+              }
+              const groups = Object.entries(grouped)
+              return groups.map(([acctName, acctPages]) => (
+                <div key={acctName}>
+                  {groups.length > 1 && (
+                    <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{acctName}</div>
+                  )}
+                  {acctPages.map(page => (
+                    <button
+                      key={page.id}
+                      onClick={() => handleSelectPage(page.id)}
+                      className={`w-full text-left px-3 py-2 text-sm border-b transition-colors ${
+                        selectedPageId === page.id
+                          ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-l-blue-500'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="truncate block">{page.name || page.fb_page_id}</span>
+                    </button>
+                  ))}
+                </div>
+              ))
+            })()}
           </div>
 
           {/* Message list */}

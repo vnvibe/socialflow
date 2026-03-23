@@ -11,6 +11,7 @@ export default function PageList() {
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ account_id: '', fb_page_id: '', name: '' })
   const [selected, setSelected] = useState(new Set())
+  const [filterAccountId, setFilterAccountId] = useState('')
 
   const { data: pages = [], isLoading } = useQuery({
     queryKey: ['fanpages'],
@@ -74,19 +75,37 @@ export default function PageList() {
   }
 
   const toggleSelectAll = () => {
-    if (selected.size === pages.length) {
+    if (selected.size === filteredPages.length) {
       setSelected(new Set())
     } else {
-      setSelected(new Set(pages.map(p => p.id)))
+      setSelected(new Set(filteredPages.map(p => p.id)))
     }
   }
+
+  const filteredPages = filterAccountId ? pages.filter(p => p.account_id === filterAccountId) : pages
 
   if (isLoading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Quản lý Fanpage</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">Quản lý Fanpage</h1>
+          {accounts.length > 1 && (
+            <select
+              value={filterAccountId}
+              onChange={e => { setFilterAccountId(e.target.value); setSelected(new Set()) }}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Tất cả ({pages.length})</option>
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.username || a.fb_user_id} ({pages.filter(p => p.account_id === a.id).length})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
             <button
@@ -111,7 +130,7 @@ export default function PageList() {
               <th className="px-3 py-3 w-10">
                 <input
                   type="checkbox"
-                  checked={pages.length > 0 && selected.size === pages.length}
+                  checked={filteredPages.length > 0 && selected.size === filteredPages.length}
                   onChange={toggleSelectAll}
                   className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
@@ -126,7 +145,7 @@ export default function PageList() {
             </tr>
           </thead>
           <tbody className="divide-y">
-            {pages.map(page => (
+            {filteredPages.map(page => (
               <tr key={page.id} className={`hover:bg-gray-50 ${selected.has(page.id) ? 'bg-blue-50' : ''}`}>
                 <td className="px-3 py-3">
                   <input
@@ -196,7 +215,7 @@ export default function PageList() {
                 </td>
               </tr>
             ))}
-            {pages.length === 0 && (
+            {filteredPages.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-12 text-center">
                   <FileText size={40} className="mx-auto mb-3 text-gray-300" />

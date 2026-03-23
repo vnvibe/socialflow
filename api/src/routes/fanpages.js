@@ -1,5 +1,5 @@
 const axios = require('axios')
-const { fetchPageInbox, replyToMessage } = require('../services/facebook/fb-inbox')
+const { fetchPageInbox, replyToMessage, fetchPersonalInbox, replyPersonalMessage } = require('../services/facebook/fb-inbox')
 const { getAccessibleIds, canAccess } = require('../lib/access-check')
 
 module.exports = async (fastify) => {
@@ -12,9 +12,6 @@ module.exports = async (fastify) => {
 
   // Helper: verify fanpage access (via account)
   const verifyFanpageAccess = async (fanpageId, userId) => {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', userId).single()
-    if (profile?.role === 'admin') return true
-
     const { data: fp } = await supabase.from('fanpages').select('account_id').eq('id', fanpageId).single()
     if (!fp) return false
     return canAccess(supabase, userId, 'account', fp.account_id)
@@ -117,11 +114,14 @@ module.exports = async (fastify) => {
 
   // POST /fanpages/:id/fetch-inbox - Fetch fresh inbox from Facebook
   fastify.post('/:id/fetch-inbox', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await verifyFanpageAccess(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your fanpage' })
+    }
+
     const { data: fanpage } = await supabase
       .from('fanpages')
-      .select('*, accounts!inner(*, owner_id)')
+      .select('*, accounts!inner(*)')
       .eq('id', req.params.id)
-      .eq('accounts.owner_id', req.user.id)
       .single()
 
     if (!fanpage) return reply.code(404).send({ error: 'Not found' })
@@ -150,11 +150,14 @@ module.exports = async (fastify) => {
     const { thread_id, message_id, reply_text } = req.body
     if (!thread_id || !reply_text) return reply.code(400).send({ error: 'thread_id and reply_text required' })
 
+    if (!await verifyFanpageAccess(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your fanpage' })
+    }
+
     const { data: fanpage } = await supabase
       .from('fanpages')
-      .select('*, accounts!inner(*, owner_id)')
+      .select('*, accounts!inner(*)')
       .eq('id', req.params.id)
-      .eq('accounts.owner_id', req.user.id)
       .single()
 
     if (!fanpage) return reply.code(404).send({ error: 'Not found' })

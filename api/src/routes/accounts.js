@@ -1,4 +1,5 @@
 const { extractCUserId, generateFingerprint } = require('../services/facebook/fb-auth')
+const { fetchPersonalInbox, replyPersonalMessage } = require('../services/facebook/fb-inbox')
 const { getAccessibleIds, canAccess } = require('../lib/access-check')
 
 module.exports = async (fastify) => {
@@ -573,5 +574,84 @@ module.exports = async (fastify) => {
     }
 
     return results
+  })
+
+  // ============================================
+  // PERSONAL MESSENGER
+  // ============================================
+
+  // GET /accounts/:id/inbox — list personal messages from DB
+  fastify.get('/:id/inbox', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {
+      return reply.code(403).send({ error: 'No access' })
+    }
+
+    const limit = parseInt(req.query.limit) || 50
+    const { data, error } = await supabase
+      .from('inbox_messages')
+      .select('*')
+      .eq('fanpage_id', req.params.id) // reuse fanpage_id field for account_id
+      .eq('message_type', 'personal')
+      .order('received_at', { ascending: false })
+      .limit(limit)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
+  })
+
+  // POST /accounts/:id/fetch-inbox — fetch personal messenger (cookie, 6h rate limit)
+  fastify.post('/:id/fetch-inbox', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {
+      return reply.code(403).send({ error: 'No access' })
+    }
+
+    const { data: account } = await supabase
+      .from('accounts')
+      .select('*')
+      .eq('id', req.params.id)
+      .single()
+    if (!account) return reply.code(404).send({ error: 'Account not found' })
+
+    // Rate limit: 6h
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    if (account.last_inbox_fetched_at && account.last_inbox_fetched_at > sixHoursAgo) {
+      return { fetched: 0, skipped: true, message: 'Da tai trong 6h qua' }
+    }
+
+    const messages = await fetchPersonalInbox(account, supabase)
+
+    // Upsert — reuse inbox_messages table with message_type='personal'
+    if (messages.length > 0) {
+      const rows = messages.map(m => ({
+        fanpage_id: req.params.id, // reuse for account_id
+        fb_thread_id: m.fb_thread_id,
+        fb_message_id: m.fb_message_id,
+        sender_name: m.sender_name,
+        sender_fb_id: m.sender_fb_id,
+        message_text: m.message_text,
+        message_type: 'personal',
+        received_at: m.received_at,
+      }))
+
+      await supabase.from('inbox_messages').upsert(rows, { onConflict: 'fb_message_id' })
+    }
+
+    return { fetched: messages.length }
+  })
+
+  // POST /accounts/:id/reply-message — reply to personal message
+  fastify.post('/:id/reply-message', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {
+      return reply.code(403).send({ error: 'No access' })
+    }
+
+    const { thread_id, reply_text } = req.body
+    if (!thread_id || !reply_text) return reply.code(400).send({ error: 'thread_id and reply_text required' })
+
+    const { data: account } = await supabase.from('accounts').select('*').eq('id', req.params.id).single()
+    if (!account) return reply.code(404).send({ error: 'Account not found' })
+
+    await replyPersonalMessage(account, thread_id, reply_text, supabase)
+    return { success: true }
   })
 }
