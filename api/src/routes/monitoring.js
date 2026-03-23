@@ -492,14 +492,20 @@ YÊU CẦU:
     return data || []
   })
 
-  // PUT /monitoring/comment-logs/:id — update status (called by agent after execution)
+  // PUT /monitoring/comment-logs/:id — update status (called by agent after execution, or frontend for retry/dismiss)
   fastify.put('/comment-logs/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { status, error_message } = req.body || {}
+    const { status, error_message, job_id } = req.body || {}
     if (!status) return reply.code(400).send({ error: 'status required' })
 
     const updates = { status }
     if (error_message) updates.error_message = error_message
     if (status === 'done' || status === 'failed') updates.finished_at = new Date().toISOString()
+    if (status === 'pending') {
+      // Reset về pending (retry) — xóa error cũ, cập nhật job_id mới nếu có
+      updates.error_message = null
+      updates.finished_at = null
+      if (job_id) updates.job_id = job_id
+    }
 
     const { data, error } = await supabase
       .from('comment_logs')

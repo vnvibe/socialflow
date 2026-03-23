@@ -277,7 +277,7 @@ function WallTab({ filterAccountId, fetchMethod, requireAgent }) {
   const retryCommentMut = useMutation({
     mutationFn: async (log) => {
       // Create new job with same payload
-      await api.post('/jobs', {
+      const jobRes = await api.post('/jobs', {
         type: 'comment_post',
         payload: {
           account_id: log.account_id,
@@ -287,8 +287,11 @@ function WallTab({ filterAccountId, fetchMethod, requireAgent }) {
           source_name: log.source_name,
         },
       })
-      // Reset log status to pending
-      await api.put(`/monitoring/comment-logs/${log.id}`, { status: 'pending' })
+      // Reset log: clear error, link to new job_id
+      await api.put(`/monitoring/comment-logs/${log.id}`, {
+        status: 'pending',
+        job_id: jobRes.data?.id,
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['comment-logs'] })
