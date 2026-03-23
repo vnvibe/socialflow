@@ -6,8 +6,20 @@ const { getPage, releaseSession } = require('../../browser/session-pool')
 const { delay, humanBrowse, humanMouseMove } = require('../../browser/human')
 const { checkAccountStatus, saveDebugScreenshot } = require('./post-utils')
 
+// Lỗi do điều kiện tạm thời → có thể retry
+function isRetryable(err) {
+  const msg = err.message || ''
+  return (
+    msg.includes('Could not find comment input') ||
+    msg.includes('timeout') ||
+    msg.includes('Timeout') ||
+    msg.includes('not focused') ||
+    msg.includes('Element is not attached')
+  )
+}
+
 async function commentPostHandler(payload, supabase) {
-  const { account_id, post_url, fb_post_id, comment_text, source_name } = payload
+  const { account_id, post_url, fb_post_id, comment_text, source_name, job_id } = payload
 
   if (!account_id || !comment_text) throw new Error('account_id and comment_text required')
   if (!post_url && !fb_post_id) throw new Error('post_url or fb_post_id required')
@@ -20,19 +32,25 @@ async function commentPostHandler(payload, supabase) {
 
   if (!account) throw new Error('Account not found')
 
-  // Find comment_log linked to this job to update status (scope by owner_id for multi-user safety)
+  // Find comment_log: ưu tiên match theo job_id (retry tạo job mới), fallback theo fb_post_id
   const ownerId = account.owner_id
-  const { data: commentLogs } = await supabase
-    .from('comment_logs')
-    .select('id')
-    .eq('owner_id', ownerId)
-    .eq('fb_post_id', fb_post_id)
-    .eq('account_id', account_id)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false })
-    .limit(1)
-
+  let commentLogQuery = supabase.from('comment_logs').select('id').eq('owner_id', ownerId).eq('account_id', account_id)
+  if (job_id) {
+    commentLogQuery = commentLogQuery.eq('job_id', job_id)
+  } else {
+    commentLogQuery = commentLogQuery.eq('fb_post_id', fb_post_id).eq('status', 'pending')
+  }
+  const { data: commentLogs } = await commentLogQuery.order('created_at', { ascending: false }).limit(1)
   const commentLogId = commentLogs?.[0]?.id
+
+  const MAX_RETRIES = 2
+  let lastErr = null
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[COMMENT-POST] Retry ${attempt}/${MAX_RETRIES} sau ${attempt * 5}s...`)
+      await delay(attempt * 5000, attempt * 5000 + 2000)
+    }
 
   let browserPage
   try {
@@ -177,19 +195,30 @@ async function commentPostHandler(payload, supabase) {
       throw new Error('Could not find comment input box')
     }
 
-    // Scroll into view and click to focus
-    await commentBox.scrollIntoViewIfNeeded()
+    // Scroll into view and focus via JS (avoid Playwright actionability timeout)
+    await commentBox.scrollIntoViewIfNeeded().catch(() => {})
     await delay(300, 600)
-    await commentBox.click({ timeout: 10000 })
+
+    // Use JS focus + click — bypasses overlay/actionability issues
+    await browserPage.evaluate(el => {
+      el.scrollIntoView({ block: 'center' })
+      el.focus()
+      el.click()
+    }, commentBox)
     await delay(500, 1000)
 
-    // Verify focus — if not focused, try evaluate click
+    // Verify focus — fallback to Playwright click if JS didn't work
     const isFocused = await browserPage.evaluate(
       el => document.activeElement === el || el.contains(document.activeElement),
       commentBox
     ).catch(() => false)
     if (!isFocused) {
-      await browserPage.evaluate(el => el.focus(), commentBox)
+      console.log('[COMMENT-POST] JS focus failed, trying Playwright click...')
+      try {
+        await commentBox.click({ timeout: 5000, force: true })
+      } catch {
+        await browserPage.evaluate(el => el.focus(), commentBox)
+      }
       await delay(300, 600)
     }
 
@@ -239,30 +268,37 @@ async function commentPostHandler(payload, supabase) {
       fb_post_id,
       source_name,
       comment_length: comment_text.length,
+      attempts: attempt + 1,
     }
 
   } catch (err) {
-    console.error(`[COMMENT-POST] Error: ${err.message}`)
-
-    // Update comment_log FIRST (scope by owner_id)
-    if (commentLogId) {
-      await supabase.from('comment_logs').update({
-        status: 'failed',
-        error_message: err.message.substring(0, 500),
-        finished_at: new Date().toISOString(),
-      }).eq('id', commentLogId).eq('owner_id', ownerId).catch(() => {})
-    }
+    lastErr = err
+    console.error(`[COMMENT-POST] Attempt ${attempt + 1} failed: ${err.message}`)
 
     // Debug screenshot (best effort)
     if (browserPage) {
-      try { await saveDebugScreenshot(browserPage, `comment-error-${account_id}`) } catch {}
+      try { await saveDebugScreenshot(browserPage, `comment-error-${account_id}-attempt${attempt}`) } catch {}
     }
 
-    throw err
   } finally {
     if (browserPage) await browserPage.goto('about:blank', { timeout: 3000 }).catch(() => {})
     releaseSession(account_id)
   }
+
+  // Nếu không retryable → dừng ngay
+  if (!isRetryable(lastErr)) break
+  } // end retry loop
+
+  // Tất cả attempts đều thất bại
+  if (commentLogId) {
+    await supabase.from('comment_logs').update({
+      status: 'failed',
+      error_message: lastErr.message.substring(0, 500),
+      finished_at: new Date().toISOString(),
+    }).eq('id', commentLogId).eq('owner_id', ownerId).catch(() => {})
+  }
+
+  throw lastErr
 }
 
 module.exports = commentPostHandler
