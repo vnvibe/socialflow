@@ -16,6 +16,35 @@ async function cachePostsToRedis(userId, sourceId, posts, sourceName) {
   } catch {}
 }
 
+/**
+ * Bulk upsert fetched posts into monitored_posts table.
+ * Posts are shared globally — keyed by fb_post_id (unique).
+ * fb_source_id links posts to monitored_sources for cross-user sharing.
+ */
+async function upsertPostsToDB(supabase, posts, fbSourceId) {
+  if (!posts?.length) return
+  const rows = posts.map(p => ({
+    fb_post_id: p.fb_post_id,
+    fb_source_id: fbSourceId || null,
+    author_name: p.author_name || null,
+    author_fb_id: p.author_fb_id || null,
+    content_text: p.content_text || null,
+    post_url: p.post_url || null,
+    image_url: p.image_url || null,
+    reactions: p.reactions || 0,
+    comments: p.comments || 0,
+    shares: p.shares || 0,
+    posted_at: p.posted_at || null,
+    fetched_at: new Date().toISOString(),
+  }))
+  try {
+    await supabase.from('monitored_posts')
+      .upsert(rows, { onConflict: 'fb_post_id', ignoreDuplicates: false })
+  } catch (err) {
+    console.error('[MONITORING] upsertPostsToDB error:', err.message)
+  }
+}
+
 // apify/facebook-posts-scraper for pages, apify/facebook-groups-scraper for groups
 const ACTOR_FB_PAGES = 'apify~facebook-posts-scraper'
 const ACTOR_FB_GROUPS = 'apify~facebook-groups-scraper'
@@ -179,21 +208,34 @@ module.exports = async (fastify) => {
 
   // GET /monitoring/sources
   fastify.get('/sources', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { data, error } = await supabase
+    const { account_id } = req.query
+
+    let query = supabase
       .from('monitored_sources')
-      .select('*')
+      .select('*, accounts:account_id(id, username, avatar_url, fb_user_id)')
       .eq('owner_id', getOwnerId(req))
       .order('created_at', { ascending: false })
 
+    if (account_id) query = query.eq('account_id', account_id)
+
+    const { data, error } = await query
     if (error) return reply.code(500).send({ error: error.message })
     return data || []
   })
 
   // POST /monitoring/sources
   fastify.post('/sources', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { source_type, fb_source_id, name, url } = req.body || {}
+    const { source_type, fb_source_id, name, url, account_id } = req.body || {}
 
     if (!fb_source_id?.trim()) return reply.code(400).send({ error: 'fb_source_id required' })
+    if (!account_id) return reply.code(400).send({ error: 'account_id required' })
+
+    // Verify user owns this account
+    const { data: acct } = await supabase.from('accounts').select('id, owner_id')
+      .eq('id', account_id).single()
+    if (!acct || acct.owner_id !== req.user.id) {
+      return reply.code(403).send({ error: 'Khong co quyen su dung tai khoan nay' })
+    }
 
     let type = source_type || 'page'
     if (url && url.includes('/groups/')) type = 'group'
@@ -209,48 +251,46 @@ module.exports = async (fastify) => {
 
     const { data, error } = await supabase.from('monitored_sources').insert({
       owner_id: req.user.id,
+      account_id,
       source_type: type,
       fb_source_id: fb_source_id.trim(),
       name: name || null,
       url: sourceUrl,
       is_active: true,
+      fetch_method: 'cookie',
+      fetch_account_id: account_id,
       fetch_interval_minutes: 60,
       next_fetch_at: nextFetch.toISOString(),
     }).select().single()
 
     if (error) {
-      if (error.code === '23505') return reply.code(409).send({ error: 'Nguồn này đã được thêm' })
+      if (error.code === '23505') return reply.code(409).send({ error: 'Nguon nay da duoc them cho tai khoan nay' })
       return reply.code(500).send({ error: error.message })
     }
     return reply.code(201).send(data)
   })
 
-  // PUT /monitoring/fetch-method — bulk update fetch_method for all user's sources
-  fastify.put('/fetch-method', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { fetch_method, fetch_account_id } = req.body || {}
-    if (!fetch_method || !['apify', 'cookie'].includes(fetch_method)) {
-      return reply.code(400).send({ error: 'fetch_method must be apify or cookie' })
-    }
-    const updates = { fetch_method }
-    if (fetch_method === 'cookie' && fetch_account_id) {
-      updates.fetch_account_id = fetch_account_id
-    } else if (fetch_method === 'apify') {
-      updates.fetch_account_id = null
-    }
-    const { error } = await supabase
-      .from('monitored_sources')
-      .update(updates)
-      .eq('owner_id', req.user.id)
-    if (error) return reply.code(500).send({ error: error.message })
-    return { success: true, fetch_method }
-  })
-
   // PUT /monitoring/sources/:id
   fastify.put('/sources/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const allowed = ['name', 'is_active', 'fetch_interval_minutes', 'url']
+    const allowed = ['name', 'is_active', 'fetch_interval_minutes', 'url', 'account_id']
     const updates = {}
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key]
+    }
+
+    // Sync fetch_account_id when account_id changes
+    if (updates.account_id) {
+      updates.fetch_account_id = updates.account_id
+      updates.fetch_method = 'cookie'
+    }
+
+    // Recalculate next_fetch_at when interval changes
+    if (updates.fetch_interval_minutes !== undefined) {
+      if (updates.fetch_interval_minutes === 0) {
+        updates.next_fetch_at = null // OFF
+      } else {
+        updates.next_fetch_at = new Date(Date.now() + updates.fetch_interval_minutes * 60 * 1000).toISOString()
+      }
     }
 
     const { data, error } = await supabase
@@ -281,26 +321,29 @@ module.exports = async (fastify) => {
   // FETCH — returns posts to frontend (cached in localStorage)
   // ============================================
 
-  // GET /monitoring/sources/:id/posts — đọc posts từ Redis cache (cross-browser)
+  // GET /monitoring/sources/:id/posts — shared posts by fb_source_id
   fastify.get('/sources/:id/posts', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const redis = getRedis()
-    if (!redis) return { posts: [], total: 0, source_name: null, fetchedAt: null }
-    try {
-      const cached = await redis.get(postsKey(req.user.id, req.params.id))
-      if (cached) {
-        const data = typeof cached === 'string' ? JSON.parse(cached) : cached
-        return { posts: data.posts || [], total: (data.posts || []).length, source_name: data.source_name, fetchedAt: data.fetchedAt }
-      }
-    } catch {}
-    return { posts: [], total: 0, source_name: null, fetchedAt: null }
+    // Get fb_source_id from user's source
+    const { data: src } = await supabase.from('monitored_sources')
+      .select('fb_source_id, name')
+      .eq('id', req.params.id)
+      .eq('owner_id', getOwnerId(req))
+      .single()
+    if (!src) return reply.code(404).send({ error: 'Source not found' })
+
+    const { data, error } = await supabase
+      .from('monitored_posts')
+      .select('*')
+      .eq('fb_source_id', src.fb_source_id)
+      .order('posted_at', { ascending: false, nullsFirst: false })
+      .limit(50)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return { posts: data || [], total: (data || []).length, source_name: src.name || null }
   })
 
-  // POST /monitoring/sources/:id/fetch-now — returns posts directly
-  // body.method: 'apify' (default) | 'cookie'
-  // body.account_id: required when method === 'cookie'
+  // POST /monitoring/sources/:id/fetch-now — always uses cookie method
   fastify.post('/sources/:id/fetch-now', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { method = 'apify', account_id } = req.body || {}
-
     const { data: source } = await supabase
       .from('monitored_sources')
       .select('*')
@@ -310,92 +353,84 @@ module.exports = async (fastify) => {
 
     if (!source) return reply.code(404).send({ error: 'Source not found' })
 
+    const accountId = source.account_id || source.fetch_account_id
+    if (!accountId) return reply.code(400).send({ error: 'Source chua co tai khoan. Cap nhat tai khoan truoc.' })
+
+    // --- Fetch dedup: skip if same fb_source_id was fetched recently (by any user) ---
+    const DEDUP_MINUTES = 30
+    const { data: recentFetch } = await supabase
+      .from('monitored_sources')
+      .select('last_fetched_at')
+      .eq('fb_source_id', source.fb_source_id)
+      .not('last_fetched_at', 'is', null)
+      .gte('last_fetched_at', new Date(Date.now() - DEDUP_MINUTES * 60 * 1000).toISOString())
+      .order('last_fetched_at', { ascending: false })
+      .limit(1)
+
+    if (recentFetch?.length > 0) {
+      const { data: existingPosts } = await supabase
+        .from('monitored_posts')
+        .select('*')
+        .eq('fb_source_id', source.fb_source_id)
+        .order('posted_at', { ascending: false, nullsFirst: false })
+        .limit(50)
+      const posts = existingPosts || []
+
+      await supabase.from('monitored_sources').update({
+        last_fetched_at: new Date().toISOString(),
+        next_fetch_at: new Date(Date.now() + (source.fetch_interval_minutes || 60) * 60 * 1000).toISOString(),
+      }).eq('id', source.id)
+
+      return { posts, total: posts.length, source_name: source.name, dedup: true }
+    }
+
     // --- Cookie method: create agent job, poll for result ---
-    if (method === 'cookie') {
-      if (!account_id) return reply.code(400).send({ error: 'account_id required for cookie method' })
+    const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
+      .gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
+    if (!agents?.length) return reply.code(503).send({ error: 'Agent khong online. Khoi dong agent truoc.' })
 
-      // Check agent online
-      const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
-        .gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
-      if (!agents?.length) return reply.code(503).send({ error: 'Agent không online. Khởi động agent trước.' })
+    const sourceUrl = source.url || `https://www.facebook.com/${source.source_type === 'group' ? 'groups/' : ''}${source.fb_source_id}`
 
-      const sourceUrl = source.url || `https://www.facebook.com/${source.source_type === 'group' ? 'groups/' : ''}${source.fb_source_id}`
+    const { data: job, error: jobErr } = await supabase.from('jobs').insert({
+      type: 'fetch_source_cookie',
+      payload: {
+        account_id: accountId,
+        source_url: sourceUrl,
+        source_id: source.id,
+        source_type: source.source_type,
+        owner_id: req.user.id,
+      },
+      status: 'pending',
+      scheduled_at: new Date().toISOString(),
+      created_by: req.user.id,
+    }).select().single()
 
-      // Create job
-      const { data: job, error: jobErr } = await supabase.from('jobs').insert({
-        type: 'fetch_source_cookie',
-        payload: {
-          account_id,
-          source_url: sourceUrl,
-          source_id: source.id,
-          source_type: source.source_type,
-          owner_id: req.user.id,
-        },
-        status: 'pending',
-        scheduled_at: new Date().toISOString(),
-        created_by: req.user.id,
-      }).select().single()
+    if (jobErr) return reply.code(500).send({ error: jobErr.message })
 
-      if (jobErr) return reply.code(500).send({ error: jobErr.message })
+    // Poll for result (timeout 90s)
+    const deadline = Date.now() + 90000
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 2000))
+      const { data: updated } = await supabase.from('jobs').select('status, result, error_message')
+        .eq('id', job.id).single()
 
-      // Poll for result (timeout 90s)
-      const deadline = Date.now() + 90000
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 2000))
-        const { data: updated } = await supabase.from('jobs').select('status, result, error_message')
-          .eq('id', job.id).single()
-
-        if (updated?.status === 'done') {
-          const result = updated.result || {}
-          const posts = result.posts || []
-          const sourceName = result.source_name || source.name
-          await cachePostsToRedis(req.user.id, req.params.id, posts, sourceName)
-          return { posts, total: posts.length, source_name: sourceName }
-        }
-        if (updated?.status === 'failed') {
-          return reply.code(500).send({ error: updated.error_message || 'Agent fetch failed' })
-        }
-        if (updated?.status === 'cancelled') {
-          return reply.code(400).send({ error: 'Job was cancelled' })
-        }
+      if (updated?.status === 'done') {
+        const result = updated.result || {}
+        const posts = result.posts || []
+        const sourceName = result.source_name || source.name
+        await cachePostsToRedis(req.user.id, req.params.id, posts, sourceName)
+        await upsertPostsToDB(supabase, posts, source.fb_source_id)
+        return { posts, total: posts.length, source_name: sourceName }
       }
-
-      return reply.code(504).send({ error: 'Timeout — agent chưa trả kết quả sau 90s. Thử lại sau.' })
+      if (updated?.status === 'failed') {
+        return reply.code(500).send({ error: updated.error_message || 'Agent fetch failed' })
+      }
+      if (updated?.status === 'cancelled') {
+        return reply.code(400).send({ error: 'Job was cancelled' })
+      }
     }
 
-    // --- Apify method (default) ---
-    try {
-      const posts = await fetchSourcePosts(supabase, source, req.log)
-      // Re-read source to get updated name
-      const { data: updatedSource } = await supabase
-        .from('monitored_sources')
-        .select('name')
-        .eq('id', req.params.id)
-        .single()
-      const sourceName = updatedSource?.name || source.name
-      await cachePostsToRedis(req.user.id, req.params.id, posts, sourceName)
-      return { posts, total: posts.length, source_name: sourceName }
-    } catch (err) {
-      req.log.error({ err }, 'Fetch source failed')
-      // Return user-friendly error
-      const msg = err.message || 'Unknown error'
-      if (msg.includes('actor-is-not-rented')) {
-        return reply.code(400).send({ error: 'Apify actor cần được thuê (rent) trước khi sử dụng. Kiểm tra Apify Console.' })
-      }
-      if (msg.includes('usage hard limit exceeded') || msg.includes('platform-feature-disabled')) {
-        return reply.code(429).send({ error: 'Apify đã hết quota tháng. Nạp thêm hoặc đổi API key trong Cài đặt.' })
-      }
-      if (msg.includes('ENOTFOUND') || msg.includes('fetch failed')) {
-        return reply.code(502).send({ error: 'Không thể kết nối Apify. Kiểm tra kết nối mạng.' })
-      }
-      if (msg.includes('Không có Apify API key')) {
-        return reply.code(400).send({ error: 'Chưa cấu hình Apify API key. Vào Cài đặt để thêm.' })
-      }
-      if (msg.includes('TIMEOUT') || msg.includes('FAILED') || msg.includes('ABORTED')) {
-        return reply.code(502).send({ error: 'Apify actor chạy thất bại hoặc timeout. Thử lại sau.' })
-      }
-      return reply.code(500).send({ error: `Lỗi fetch: ${msg.substring(0, 200)}` })
-    }
+    return reply.code(504).send({ error: 'Timeout — agent chua tra ket qua sau 90s. Thu lai sau.' })
   })
 
   // ============================================
@@ -523,16 +558,22 @@ YÊU CẦU:
   // SAVE POST — only when user interacts (click/like/comment)
   // ============================================
 
-  // POST /monitoring/save-post — save a single post to DB
+  // POST /monitoring/save-post — save a single post to DB (shared, keyed by fb_post_id)
   fastify.post('/save-post', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { source_id, fb_post_id, author_name, content_text, post_url, image_url, reactions, comments, shares, posted_at, interaction_type } = req.body || {}
+    const { source_id, fb_source_id, fb_post_id, author_name, content_text, post_url, image_url, reactions, comments, shares, posted_at } = req.body || {}
 
     if (!fb_post_id) return reply.code(400).send({ error: 'fb_post_id required' })
 
+    // Resolve fb_source_id from source_id if not provided
+    let resolvedFbSourceId = fb_source_id || null
+    if (!resolvedFbSourceId && source_id) {
+      const { data: src } = await supabase.from('monitored_sources').select('fb_source_id').eq('id', source_id).single()
+      resolvedFbSourceId = src?.fb_source_id || null
+    }
+
     const { data, error } = await supabase.from('monitored_posts').upsert({
-      owner_id: req.user.id,
-      source_id: source_id || null,
       fb_post_id,
+      fb_source_id: resolvedFbSourceId,
       author_name: author_name || null,
       content_text: content_text || null,
       post_url: post_url || null,
@@ -541,54 +582,88 @@ YÊU CẦU:
       comments: comments || 0,
       shares: shares || 0,
       posted_at: posted_at || null,
-    }, { onConflict: 'owner_id,fb_post_id', ignoreDuplicates: false }).select().single()
+    }, { onConflict: 'fb_post_id', ignoreDuplicates: false }).select().single()
 
-    if (error) return reply.code(500).send({ error: error.message })
+    if (error) {
+      console.error('[MONITORING] save-post error:', error.message, { fb_post_id, fb_source_id: resolvedFbSourceId })
+      return reply.code(500).send({ error: error.message })
+    }
     return data
   })
 
   // ============================================
-  // SAVED POSTS (DB) — posts user interacted with
+  // SHARED POSTS — query by user's monitored fb_source_ids
   // ============================================
+
+  // Helper: get user's source map { fb_source_id → { name, source_type, avatar_url, fb_source_id } }
+  async function getUserSourceMap(ownerId) {
+    const { data: sources } = await supabase
+      .from('monitored_sources')
+      .select('id, fb_source_id, name, source_type, avatar_url')
+      .eq('owner_id', ownerId)
+    const map = {}
+    for (const s of (sources || [])) {
+      map[s.fb_source_id] = { name: s.name, source_type: s.source_type, fb_source_id: s.fb_source_id, avatar_url: s.avatar_url }
+    }
+    return { sources: sources || [], map }
+  }
+
+  // Attach monitored_sources metadata to posts (for frontend compat)
+  function enrichPosts(posts, sourceMap) {
+    return posts.map(p => ({ ...p, monitored_sources: sourceMap[p.fb_source_id] || null }))
+  }
 
   // GET /monitoring/saved
   fastify.get('/saved', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { source_id, search, page = 1, limit = 50 } = req.query
+    const { sources, map: sourceMap } = await getUserSourceMap(getOwnerId(req))
+    const fbSourceIds = sources.map(s => s.fb_source_id)
+    if (!fbSourceIds.length) return { data: [], total: 0, page: Number(page), limit: Number(limit) }
 
     let query = supabase
       .from('monitored_posts')
-      .select('*, monitored_sources(name, source_type, fb_source_id, avatar_url)', { count: 'exact' })
-      .eq('owner_id', getOwnerId(req))
+      .select('*', { count: 'exact' })
+      .in('fb_source_id', fbSourceIds)
       .order('fetched_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1)
 
-    if (source_id) query = query.eq('source_id', source_id)
+    // Filter by specific source: map source_id → fb_source_id
+    if (source_id) {
+      const src = sources.find(s => s.id === source_id)
+      if (src) query = query.eq('fb_source_id', src.fb_source_id)
+    }
     if (search) query = query.ilike('content_text', `%${search}%`)
 
     const { data, error, count } = await query
     if (error) return reply.code(500).send({ error: error.message })
-    return { data: data || [], total: count, page: Number(page), limit: Number(limit) }
+    return { data: enrichPosts(data || [], sourceMap), total: count, page: Number(page), limit: Number(limit) }
   })
 
-  // GET /monitoring/wall — kept for backward compat, same as /saved
+  // GET /monitoring/wall
   fastify.get('/wall', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { source_id, search, from_date, to_date, page = 1, limit = 50 } = req.query
+    const { sources, map: sourceMap } = await getUserSourceMap(getOwnerId(req))
+    const fbSourceIds = sources.map(s => s.fb_source_id)
+    if (!fbSourceIds.length) return { data: [], total: 0, page: Number(page), limit: Number(limit) }
 
     let query = supabase
       .from('monitored_posts')
-      .select('*, monitored_sources(name, source_type, fb_source_id, avatar_url)', { count: 'exact' })
-      .eq('owner_id', getOwnerId(req))
+      .select('*', { count: 'exact' })
+      .in('fb_source_id', fbSourceIds)
       .order('fetched_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1)
 
-    if (source_id) query = query.eq('source_id', source_id)
+    if (source_id) {
+      const src = sources.find(s => s.id === source_id)
+      if (src) query = query.eq('fb_source_id', src.fb_source_id)
+    }
     if (to_date) query = query.lte('fetched_at', to_date)
     if (from_date) query = query.gte('fetched_at', from_date)
     if (search) query = query.ilike('content_text', `%${search}%`)
 
     const { data, error, count } = await query
     if (error) return reply.code(500).send({ error: error.message })
-    return { data: data || [], total: count, page: Number(page), limit: Number(limit) }
+    return { data: enrichPosts(data || [], sourceMap), total: count, page: Number(page), limit: Number(limit) }
   })
 }
 
