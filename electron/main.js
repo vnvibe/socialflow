@@ -291,13 +291,28 @@ if (!gotLock) {
 }
 
 // App lifecycle
-app.whenReady().then(() => {
-  createTray()
+app.whenReady().then(async () => {
+  // Show window FIRST so user sees something immediately
   createWindow()
+  createTray()
+
+  // Show loading state
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.on('did-finish-load', () => {
+      mainWindow.webContents.send('setup-progress', 'Dang khoi dong...')
+    })
+  }
 
   // Pre-install Playwright in background — don't block window rendering
-  ensurePlaywright().catch(err => {
+  ensurePlaywright().then(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('setup-progress', null)
+    }
+  }).catch(err => {
     addLog(`Playwright setup error: ${err.message}`, 'error')
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('setup-progress', null)
+    }
   })
 })
 

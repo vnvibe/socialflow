@@ -306,7 +306,7 @@
     </div>
     <div class="status-bar">
       <div class="status-dot" id="statusDot"></div>
-      <span class="status-text" id="statusText">Stopped</span>
+      <span class="status-text" id="statusText" style="color:#fbbf24">Dang khoi dong...</span>
     </div>
   </div>
 
@@ -512,6 +512,9 @@
         if (msg) {
           el.textContent = msg
           el.style.color = '#fbbf24'
+        } else {
+          el.textContent = isRunning ? 'Running' : 'Stopped'
+          el.style.color = '#94a3b8'
         }
       })
     }
