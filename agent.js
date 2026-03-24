@@ -3,7 +3,7 @@ const path = require('path')
 const fs = require('fs')
 const envFile = fs.existsSync(path.join(__dirname, 'config.env')) ? 'config.env' : '.env'
 require('dotenv').config({ path: path.join(__dirname, envFile) })
-const { startPoller, getStopPoller } = require('./jobs/poller')
+const { startPoller, getStopPoller, getPool } = require('./jobs/poller')
 const { checkFFmpeg } = require('./video/processor')
 const os = require('os')
 
@@ -48,14 +48,29 @@ async function main() {
   // Start heartbeat
   const { config } = require('./lib/supabase')
   const AGENT_ID = process.env.AGENT_ID || config.AGENT_ID || `${os.hostname()}-${process.pid}`
+  const pkg = require('./package.json')
   let heartbeatFails = 0
   async function heartbeat() {
     try {
+      const pool = getPool()
+      const memUsage = process.memoryUsage()
       await supabase.from('agent_heartbeats').upsert({
         agent_id: AGENT_ID,
+        machine_name: os.hostname(),
+        owner_id: process.env.AGENT_USER_ID || null,
+        version: pkg.version,
+        status: 'online',
+        platform: os.platform(),
+        cpu_usage: os.loadavg()[0],
+        mem_usage: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
+        running_jobs: pool.running.size,
+        running_accounts: [...pool.running],
+        jobs_today: pool.jobsToday,
+        jobs_failed: pool.jobsFailed,
+        last_seen_at: new Date().toISOString(),
+        // Keep legacy fields for backward compat
         last_seen: new Date().toISOString(),
         hostname: os.hostname(),
-        platform: os.platform(),
         ...(process.env.AGENT_USER_ID && { user_id: process.env.AGENT_USER_ID }),
       }, { onConflict: 'agent_id' })
       if (heartbeatFails > 0) {
@@ -70,7 +85,7 @@ async function main() {
     }
   }
   heartbeat()
-  const heartbeatInterval = setInterval(heartbeat, 10000)
+  const heartbeatInterval = setInterval(heartbeat, 30000) // 30s instead of 10s
   console.log('[OK] Heartbeat started')
 
   // Start job poller (before signal handlers so stopPoller is available)

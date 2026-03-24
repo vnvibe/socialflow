@@ -16,6 +16,14 @@ const commentPostHandler = require('./comment-post')
 const fetchSourceCookieHandler = require('./fetch-source-cookie')
 const joinGroupHandler = require('./join-group')
 
+// Campaign role handlers (Sprint 3)
+const campaignDiscoverGroupsHandler = require('./campaign-discover-groups')
+const campaignScanMembersHandler = require('./campaign-scan-members')
+const campaignNurtureHandler = require('./campaign-nurture')
+const campaignSendFriendRequestHandler = require('./campaign-send-friend-request')
+const campaignInteractProfileHandler = require('./campaign-interact-profile')
+const watchMyPostsHandler = require('./watch-my-posts')
+
 module.exports = {
   post_page: postPageHandler,
   post_page_graph: postPageGraphHandler,
@@ -34,4 +42,12 @@ module.exports = {
   comment_post: commentPostHandler,
   fetch_source_cookie: fetchSourceCookieHandler,
   join_group: joinGroupHandler,
+
+  // Campaign role handlers
+  campaign_discover_groups: campaignDiscoverGroupsHandler,
+  campaign_scan_members: campaignScanMembersHandler,
+  campaign_nurture: campaignNurtureHandler,
+  campaign_send_friend_request: campaignSendFriendRequestHandler,
+  campaign_interact_profile: campaignInteractProfileHandler,
+  watch_my_posts: watchMyPostsHandler,
 }
