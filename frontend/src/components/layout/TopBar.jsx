@@ -1,6 +1,7 @@
 import { LogOut, User, Menu } from 'lucide-react'
 import useAuthStore from '../../store/auth.store'
 import AgentStatus from './AgentStatus'
+import NotificationBell from './NotificationBell'
 
 const roleBadgeColors = {
   admin: 'bg-red-100 text-red-700',
@@ -25,6 +26,7 @@ export default function TopBar({ onMenuToggle }) {
       </div>
 
       <div className="flex items-center gap-4">
+        <NotificationBell />
         {/* User info */}
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">

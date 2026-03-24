@@ -15,6 +15,7 @@ import {
   CalendarDays,
   Settings,
   Globe,
+  Activity,
 } from 'lucide-react'
 import useAuthStore from '../../store/auth.store'
 
@@ -29,6 +30,7 @@ const mainLinks = [
   { to: '/inbox', label: 'Hộp thư', icon: Inbox },
   { to: '/monitor', label: 'Theo dõi', icon: Eye },
   { to: '/campaigns', label: 'Chiến dịch', icon: Megaphone },
+  { to: '/health', label: 'Sức khỏe', icon: Activity },
   { to: '/calendar', label: 'Lịch', icon: CalendarDays },
   { to: '/trends', label: 'Xu hướng', icon: TrendingUp },
   { to: '/analytics', label: 'Thống kê', icon: BarChart3 },

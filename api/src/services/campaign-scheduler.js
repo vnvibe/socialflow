@@ -14,6 +14,11 @@ function initScheduler() {
     } catch (err) {
       console.error('[SCHEDULER] Campaign error:', err.message)
     }
+    try {
+      await processRoleCampaigns()
+    } catch (err) {
+      console.error('[SCHEDULER] Role campaign error:', err.message)
+    }
     // scan_group_keyword auto-scheduling disabled — jobs must be triggered manually
     // try {
     //   await processPendingScans()
@@ -32,7 +37,7 @@ function initScheduler() {
     }
   })
 
-  console.log('[SCHEDULER] Campaign + Scan + Engagement + Monitoring scheduler started')
+  console.log('[SCHEDULER] Campaign + Role + Engagement + Monitoring scheduler started')
 }
 
 async function processPendingCampaigns() {
@@ -150,6 +155,115 @@ function calculateNextRun(campaign) {
   }
 
   return null
+}
+
+// ============================================
+// ROLE-BASED CAMPAIGN SCHEDULER
+// ============================================
+
+async function processRoleCampaigns() {
+  const now = new Date().toISOString()
+
+  // Find campaigns with topic (role-based) that are running and due
+  const { data: campaigns } = await supabase
+    .from('campaigns')
+    .select('*, campaign_roles(*)')
+    .eq('status', 'running')
+    .eq('is_active', true)
+    .lte('next_run_at', now)
+    .not('topic', 'is', null)
+
+  if (!campaigns?.length) return
+
+  for (const campaign of campaigns) {
+    try {
+      console.log(`[SCHEDULER] Executing role campaign: ${campaign.name || campaign.id}`)
+      await executeRoleCampaign(campaign)
+    } catch (err) {
+      console.error(`[SCHEDULER] Role campaign ${campaign.id} error:`, err.message)
+    }
+  }
+}
+
+async function executeRoleCampaign(campaign) {
+  const roles = (campaign.campaign_roles || [])
+    .filter(r => r.is_active)
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+
+  if (roles.length === 0) {
+    console.log(`[SCHEDULER] Campaign ${campaign.id} has no active roles, skipping`)
+    return
+  }
+
+  // Check if today is an active day
+  const today = new Date().getDay() // 0=Sun, 1=Mon...
+  const activeDays = campaign.campaign_active_days || [1, 2, 3, 4, 5, 6, 0]
+  if (!activeDays.includes(today)) {
+    console.log(`[SCHEDULER] Campaign ${campaign.id} not active today (day ${today})`)
+    const nextRun = calculateNextRun(campaign)
+    await supabase.from('campaigns').update({ next_run_at: nextRun }).eq('id', campaign.id)
+    return
+  }
+
+  let jobsCreated = 0
+  let roleDelay = 0
+
+  for (const role of roles) {
+    const accountIds = role.account_ids || []
+    if (accountIds.length === 0) continue
+
+    // Map role_type to job type
+    const jobTypeMap = {
+      scout: 'campaign_discover_groups',
+      nurture: 'campaign_nurture',
+      connect: 'campaign_send_friend_request',
+      post: 'campaign_post',
+      custom: 'campaign_nurture', // fallback
+    }
+    const jobType = jobTypeMap[role.role_type] || 'campaign_nurture'
+
+    for (let i = 0; i < accountIds.length; i++) {
+      const accountId = accountIds[i]
+      const nickDelay = i * (campaign.nick_stagger_seconds || 60)
+      const totalDelaySec = roleDelay + nickDelay
+      const scheduledAt = new Date(Date.now() + totalDelaySec * 1000)
+
+      const { error } = await supabase.from('jobs').insert({
+        type: jobType,
+        payload: {
+          campaign_id: campaign.id,
+          role_id: role.id,
+          account_id: accountId,
+          mission: role.mission,
+          parsed_plan: role.parsed_plan,
+          config: role.config,
+          topic: campaign.topic,
+          role_type: role.role_type,
+          feeds_into: role.feeds_into,
+          read_from: role.read_from,
+        },
+        status: 'pending',
+        scheduled_at: scheduledAt.toISOString(),
+        created_by: campaign.owner_id,
+      })
+
+      if (!error) jobsCreated++
+    }
+
+    // Stagger between roles
+    roleDelay += (campaign.role_stagger_minutes || 30) * 60
+  }
+
+  // Calculate next run
+  const nextRun = calculateNextRun(campaign)
+  await supabase.from('campaigns').update({
+    last_run_at: new Date().toISOString(),
+    next_run_at: nextRun,
+    total_runs: (campaign.total_runs || 0) + 1,
+    ...(nextRun === null ? { status: 'completed', is_active: false } : {})
+  }).eq('id', campaign.id)
+
+  console.log(`[SCHEDULER] Role campaign ${campaign.name || campaign.id}: ${jobsCreated} jobs created for ${roles.length} roles, next: ${nextRun || 'completed'}`)
 }
 
 // ============================================

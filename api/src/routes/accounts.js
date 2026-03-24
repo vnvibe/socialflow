@@ -14,6 +14,21 @@ module.exports = async (fastify) => {
     return req.user.id
   }
 
+  // GET /accounts/health-summary — Account health view for dashboard
+  fastify.get('/health-summary', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const accessibleIds = await getAccessibleIds(supabase, req.user.id, 'account')
+    if (accessibleIds.length === 0) return []
+
+    const { data, error } = await supabase
+      .from('account_health_summary')
+      .select('*')
+      .in('id', accessibleIds)
+      .order('username')
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
   // GET /accounts - List accounts user owns + accounts granted by admin
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const accessibleIds = await getAccessibleIds(supabase, req.user.id, 'account')

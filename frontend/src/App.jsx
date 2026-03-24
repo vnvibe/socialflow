@@ -28,6 +28,10 @@ import WebsiteSettings from './pages/settings/WebsiteSettings'
 import WebsiteReport from './pages/websites/WebsiteReport'
 import OAuthCallback from './pages/OAuthCallback'
 import GoogleCallbackRelay from './pages/GoogleCallbackRelay'
+import CampaignList from './pages/campaigns/CampaignList'
+import CampaignForm from './pages/campaigns/CampaignForm'
+import CampaignDetail from './pages/campaigns/CampaignDetail'
+import AccountHealth from './pages/accounts/AccountHealth'
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
@@ -107,7 +111,12 @@ export default function App() {
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/pages/:id/inbox" element={<Navigate to="/inbox" />} />
                 <Route path="/monitor" element={<Monitor />} />
-                <Route path="/campaigns" element={<CampaignManager />} />
+                <Route path="/campaigns" element={<CampaignList />} />
+                <Route path="/campaigns/new" element={<CampaignForm />} />
+                <Route path="/campaigns/:id" element={<CampaignDetail />} />
+                <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
+                <Route path="/campaigns/old" element={<CampaignManager />} />
+                <Route path="/health" element={<AccountHealth />} />
                 <Route path="/calendar" element={<CampaignCalendar />} />
                 <Route path="/trends" element={<TrendCenter />} />
                 <Route path="/analytics" element={<Analytics />} />
