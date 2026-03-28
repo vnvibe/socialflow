@@ -8,6 +8,8 @@ if (baseURL && !baseURL.startsWith('http')) {
 
 const api = axios.create({ baseURL })
 
+export { baseURL as API_BASE }
+
 // Cache token từ auth state — tránh gọi getSession() mỗi request
 let _cachedToken = null
 supabase.auth.getSession().then(({ data: { session } }) => {

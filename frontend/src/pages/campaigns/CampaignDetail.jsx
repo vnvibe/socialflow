@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Target, ArrowLeft, Play, Pause, Edit, BarChart3, Users, UserPlus, Crosshair, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { Target, ArrowLeft, Play, Pause, Edit, BarChart3, Users, UserPlus, Crosshair, CheckCircle, XCircle, Clock, FileBarChart, TrendingUp, Timer, AlertTriangle, ScrollText, RefreshCw, Loader } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 import { formatDistanceToNow, format } from 'date-fns'
@@ -16,7 +17,9 @@ const STATUS_CONFIG = {
 }
 
 const TABS = [
-  { key: 'overview', label: 'Tong quan', icon: BarChart3 },
+  { key: 'overview', label: 'Tổng quan', icon: BarChart3 },
+  { key: 'activity', label: 'Nhật ký', icon: ScrollText },
+  { key: 'report', label: 'Báo cáo', icon: FileBarChart },
   { key: 'roles', label: 'Roles', icon: Users },
   { key: 'targets', label: 'Target Queue', icon: Crosshair },
   { key: 'friends', label: 'Friend Log', icon: UserPlus },
@@ -37,6 +40,26 @@ export default function CampaignDetail() {
     queryKey: ['campaign-stats', id],
     queryFn: () => api.get(`/campaigns/${id}/stats`).then(r => r.data),
     refetchInterval: 10000,
+  })
+
+  const { data: report, isLoading: reportLoading } = useQuery({
+    queryKey: ['campaign-report', id],
+    queryFn: () => api.get(`/campaigns/${id}/report`).then(r => r.data),
+    enabled: activeTab === 'report',
+  })
+
+  const { data: activityData, isLoading: activityLoading, refetch: refetchActivity } = useQuery({
+    queryKey: ['campaign-activity', id],
+    queryFn: () => api.get(`/campaigns/${id}/activity?limit=50`).then(r => r.data),
+    enabled: activeTab === 'activity',
+    refetchInterval: activeTab === 'activity' ? 5000 : false,
+  })
+
+  const { data: detailLogData } = useQuery({
+    queryKey: ['campaign-detail-log', id],
+    queryFn: () => api.get(`/campaigns/${id}/activity-log?limit=200`).then(r => r.data),
+    enabled: activeTab === 'activity',
+    refetchInterval: activeTab === 'activity' ? 10000 : false,
   })
 
   const { data: targetsData } = useQuery({
@@ -74,7 +97,7 @@ export default function CampaignDetail() {
           <button onClick={() => navigate('/campaigns')} className="p-1.5 text-gray-400 hover:text-gray-600">
             <ArrowLeft size={20} />
           </button>
-          <Target size={24} className="text-blue-600" />
+          <Target size={24} className="text-purple-600" />
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold text-gray-900">{campaign.name}</h1>
@@ -118,6 +141,8 @@ export default function CampaignDetail() {
 
       {/* Tab Content */}
       {activeTab === 'overview' && <OverviewTab campaign={campaign} stats={stats} />}
+      {activeTab === 'activity' && <ActivityTab data={activityData} loading={activityLoading} onRefresh={refetchActivity} detailLog={detailLogData} />}
+      {activeTab === 'report' && <ReportTab report={report} loading={reportLoading} />}
       {activeTab === 'roles' && <RolesTab campaign={campaign} />}
       {activeTab === 'targets' && <TargetsTab data={targetsData} />}
       {activeTab === 'friends' && <FriendsTab data={friendsData} />}
@@ -228,6 +253,398 @@ function TargetsTab({ data }) {
         </tbody>
       </table>
       {data?.total > 50 && <p className="text-xs text-gray-400 px-4 py-2">Hien {targets.length}/{data.total}</p>}
+    </div>
+  )
+}
+
+function ReportTab({ report, loading }) {
+  if (loading) return <div className="text-center py-12 text-gray-400">Dang tai bao cao...</div>
+  if (!report) return <div className="text-center py-12 text-gray-400">Khong co du lieu</div>
+
+  const s = report.summary
+  const hasData = s.total_jobs > 0
+
+  const formatDuration = (sec) => {
+    if (sec < 60) return `${sec}s`
+    if (sec < 3600) return `${Math.round(sec / 60)}m`
+    return `${Math.round(sec / 3600)}h ${Math.round((sec % 3600) / 60)}m`
+  }
+
+  // Chart data: only show days with activity
+  const chartData = (report.daily || []).map(d => ({
+    ...d,
+    date: d.date.slice(5), // MM-DD
+  }))
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard title="Tong jobs" value={s.total_jobs} icon={BarChart3} color="bg-blue-100 text-blue-700" />
+        <StatCard title="Thanh cong" value={`${s.success_rate}%`} icon={TrendingUp} color="bg-green-100 text-green-700" />
+        <StatCard title="Targets xu ly" value={`${s.targets_done}/${s.total_targets}`} icon={Crosshair} color="bg-purple-100 text-purple-700" />
+        <StatCard title="Friends gui" value={s.friends_sent} icon={UserPlus} color="bg-indigo-100 text-indigo-700" />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard title="Jobs done" value={s.jobs_done} icon={CheckCircle} color="bg-green-100 text-green-700" />
+        <StatCard title="Jobs failed" value={s.jobs_failed} icon={XCircle} color="bg-red-100 text-red-700" />
+        <StatCard title="Friends chap nhan" value={s.friends_accepted > 0 ? `${s.friends_accepted} (${s.accept_rate}%)` : '0'} icon={Users} color="bg-teal-100 text-teal-700" />
+        <StatCard title="Thoi gian TB" value={formatDuration(s.avg_job_duration_sec)} icon={Timer} color="bg-orange-100 text-orange-700" />
+      </div>
+
+      {/* Daily chart */}
+      {hasData && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">Hoat dong 14 ngay qua</h3>
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={chartData} barGap={2}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9ca3af' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} allowDecimals={false} />
+              <Tooltip
+                contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 12 }}
+                labelFormatter={(v) => `Ngay ${v}`}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="jobs_done" name="Done" fill="#22c55e" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="jobs_failed" name="Failed" fill="#ef4444" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="friends_sent" name="Friends" fill="#6366f1" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* By Role */}
+      {report.by_role?.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-3 border-b bg-gray-50">
+            <h3 className="font-semibold text-gray-900">Theo Role</h3>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">Role</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">Type</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-500">Total</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-500">Done</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-500">Failed</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-500">Rate</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {report.by_role.map(r => {
+                const rate = r.total > 0 ? Math.round((r.jobs_done / r.total) * 100) : 0
+                return (
+                  <tr key={r.role_id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5 font-medium">{r.role_name}</td>
+                    <td className="px-4 py-2.5 text-gray-500">{r.role_type}</td>
+                    <td className="px-4 py-2.5 text-right">{r.total}</td>
+                    <td className="px-4 py-2.5 text-right text-green-600">{r.jobs_done}</td>
+                    <td className="px-4 py-2.5 text-right text-red-600">{r.jobs_failed}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className={rate >= 80 ? 'text-green-600' : rate >= 50 ? 'text-yellow-600' : 'text-red-600'}>
+                        {rate}%
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* By Account */}
+      {report.by_account?.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-3 border-b bg-gray-50">
+            <h3 className="font-semibold text-gray-900">Theo Account</h3>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">Account</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-500">Total</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-500">Done</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-500">Failed</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-500">Rate</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {report.by_account.map(a => {
+                const rate = a.total > 0 ? Math.round((a.jobs_done / a.total) * 100) : 0
+                return (
+                  <tr key={a.account_id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5 font-medium">{a.account_name || a.account_id?.slice(0, 8)}</td>
+                    <td className="px-4 py-2.5 text-right">{a.total}</td>
+                    <td className="px-4 py-2.5 text-right text-green-600">{a.jobs_done}</td>
+                    <td className="px-4 py-2.5 text-right text-red-600">{a.jobs_failed}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className={rate >= 80 ? 'text-green-600' : rate >= 50 ? 'text-yellow-600' : 'text-red-600'}>
+                        {rate}%
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Recent Errors */}
+      {report.recent_errors?.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-3 border-b bg-gray-50 flex items-center gap-2">
+            <AlertTriangle size={16} className="text-red-500" />
+            <h3 className="font-semibold text-gray-900">Loi gan day</h3>
+          </div>
+          <div className="divide-y">
+            {report.recent_errors.map(e => (
+              <div key={e.job_id} className="px-5 py-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-mono bg-red-50 text-red-700 px-1.5 py-0.5 rounded">{e.type}</span>
+                  <span className="text-xs text-gray-400">{e.created_at ? format(new Date(e.created_at), 'dd/MM HH:mm') : ''}</span>
+                </div>
+                <p className="text-sm text-gray-600 line-clamp-2">{e.error_message}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!hasData && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <FileBarChart size={48} className="mx-auto mb-3 text-gray-300" />
+          <p className="text-gray-500">Chua co du lieu bao cao.</p>
+          <p className="text-sm text-gray-400 mt-1">Chay campaign de bat dau thu thap du lieu.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const JOB_STATUS = {
+  pending:  { label: 'Chờ', color: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' },
+  running:  { label: 'Đang chạy', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500 animate-pulse' },
+  done:     { label: 'Xong', color: 'bg-green-100 text-green-700', dot: 'bg-green-500' },
+  failed:   { label: 'Lỗi', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
+  cancelled:{ label: 'Hủy', color: 'bg-gray-100 text-gray-400', dot: 'bg-gray-300' },
+}
+
+const JOB_TYPE_LABELS = {
+  campaign_nurture: '💚 Nurture',
+  campaign_scout: '🔍 Scout',
+  campaign_connect: '🤝 Connect',
+  campaign_post: '✍️ Post',
+  campaign_discover_groups: '🌐 Tìm nhóm',
+  campaign_scan_members: '👥 Scan thành viên',
+  campaign_send_friend_request: '🤝 Kết bạn',
+  campaign_interact_profile: '👤 Tương tác',
+}
+
+function ActivityTab({ data, loading, onRefresh, detailLog }) {
+  const [filter, setFilter] = useState(null)
+  const [viewMode, setViewMode] = useState('jobs') // 'jobs' or 'details'
+
+  if (loading && !data) return <div className="text-center py-12 text-gray-400"><Loader className="animate-spin inline mr-2" size={16} />Đang tải nhật ký...</div>
+
+  const activities = data?.data || []
+  const filtered = filter ? activities.filter(a => a.status === filter) : activities
+  const counts = data?.counts || {}
+
+  return (
+    <div className="space-y-4">
+      {/* View mode toggle + refresh */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+          <button onClick={() => setViewMode('jobs')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${viewMode === 'jobs' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+            Jobs
+          </button>
+          <button onClick={() => setViewMode('details')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${viewMode === 'details' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+            Chi tiết
+          </button>
+        </div>
+        <button onClick={onRefresh} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
+          <RefreshCw size={12} /> Làm mới
+        </button>
+      </div>
+
+      {viewMode === 'details' && <DetailLogView data={detailLog} />}
+
+      {viewMode === 'jobs' && <>
+      {/* Filter pills */}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1.5 flex-wrap">
+          <button onClick={() => setFilter(null)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${!filter ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            Tất cả ({activities.length})
+          </button>
+          {['running', 'done', 'failed', 'pending'].map(s => {
+            const cfg = JOB_STATUS[s]
+            const count = activities.filter(a => a.status === s).length
+            if (count === 0) return null
+            return (
+              <button key={s} onClick={() => setFilter(filter === s ? null : s)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${filter === s ? 'bg-gray-900 text-white' : `${cfg.color} hover:opacity-80`}`}>
+                {cfg.label} ({count})
+              </button>
+            )
+          })}
+        </div>
+        <button onClick={onRefresh} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
+          <RefreshCw size={12} /> Làm mới
+        </button>
+      </div>
+
+      {/* Activity entries */}
+      <div className="bg-white rounded-xl border border-gray-200 divide-y">
+        {filtered.length === 0 && (
+          <div className="text-center py-12 text-gray-400">
+            <ScrollText size={32} className="mx-auto mb-2 opacity-50" />
+            Chưa có hoạt động nào
+          </div>
+        )}
+        {filtered.map(entry => {
+          const status = JOB_STATUS[entry.status] || JOB_STATUS.pending
+          const duration = entry.started_at && entry.finished_at
+            ? Math.round((new Date(entry.finished_at) - new Date(entry.started_at)) / 1000)
+            : null
+
+          return (
+            <div key={entry.id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  {/* Status dot */}
+                  <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${status.dot}`} />
+                  <div className="min-w-0 flex-1">
+                    {/* Main line: type + account */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-gray-900">
+                        {JOB_TYPE_LABELS[entry.type] || entry.type}
+                      </span>
+                      <span className="text-xs text-gray-400">•</span>
+                      <span className="text-xs text-gray-500">{entry.account_name}</span>
+                      {entry.role_name !== '-' && (
+                        <>
+                          <span className="text-xs text-gray-400">•</span>
+                          <span className="text-xs text-purple-500">{entry.role_name}</span>
+                        </>
+                      )}
+                    </div>
+                    {/* Summary or error */}
+                    {entry.status === 'done' && entry.summary && (
+                      <p className="text-xs text-green-600 mt-0.5">✓ {entry.summary}</p>
+                    )}
+                    {entry.status === 'failed' && entry.error_message && (
+                      <p className="text-xs text-red-500 mt-0.5 line-clamp-2">✗ {entry.error_message}</p>
+                    )}
+                    {entry.status === 'running' && (
+                      <p className="text-xs text-blue-500 mt-0.5 flex items-center gap-1">
+                        <Loader size={10} className="animate-spin" /> Đang thực hiện...
+                        {entry.attempt > 1 && ` (lần ${entry.attempt})`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {/* Right: time + duration */}
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xs text-gray-400">
+                    {entry.created_at ? format(new Date(entry.created_at), 'HH:mm') : ''}
+                  </p>
+                  {duration != null && (
+                    <p className="text-[10px] text-gray-300">{duration}s</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Auto-refresh indicator */}
+      <p className="text-center text-[10px] text-gray-300">Tự động cập nhật mỗi 5 giây</p>
+      </>}
+    </div>
+  )
+}
+
+const ACTION_ICONS = {
+  like: '👍', comment: '💬', join_group: '🏠', friend_request: '🤝',
+  post: '✍️', visit_group: '👁️', visit_profile: '👤', scan: '🔍',
+}
+const ACTION_LABELS = {
+  like: 'Like', comment: 'Comment', join_group: 'Tham gia nhóm', friend_request: 'Kết bạn',
+  post: 'Đăng bài', visit_group: 'Xem nhóm', visit_profile: 'Xem profile', scan: 'Scan',
+}
+
+function DetailLogView({ data }) {
+  const [actionFilter, setActionFilter] = useState(null)
+  const entries = data?.data || []
+  const summary = data?.summary || {}
+  const filtered = actionFilter ? entries.filter(e => e.action_type === actionFilter) : entries
+
+  if (!data) return <div className="text-center py-8 text-gray-400">Chưa có dữ liệu chi tiết. Chạy campaign để bắt đầu ghi log.</div>
+
+  return (
+    <div className="space-y-3">
+      {/* Summary pills */}
+      <div className="flex gap-1.5 flex-wrap">
+        <button onClick={() => setActionFilter(null)}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium ${!actionFilter ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          Tất cả ({entries.length})
+        </button>
+        {Object.entries(summary).map(([type, counts]) => (
+          <button key={type} onClick={() => setActionFilter(actionFilter === type ? null : type)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium ${actionFilter === type ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            {ACTION_ICONS[type] || '•'} {ACTION_LABELS[type] || type} ({counts.total})
+          </button>
+        ))}
+      </div>
+
+      {/* Detail entries */}
+      <div className="bg-white rounded-xl border border-gray-200 divide-y max-h-[600px] overflow-y-auto">
+        {filtered.length === 0 && (
+          <div className="text-center py-8 text-gray-400">Không có hoạt động</div>
+        )}
+        {filtered.map(entry => (
+          <div key={entry.id} className="px-4 py-2.5 hover:bg-gray-50 transition-colors">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className="text-sm">{ACTION_ICONS[entry.action_type] || '•'}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-medium text-gray-700">{ACTION_LABELS[entry.action_type] || entry.action_type}</span>
+                    {entry.target_name && (
+                      <span className="text-xs text-gray-500 truncate max-w-[200px]">{entry.target_name}</span>
+                    )}
+                    <span className="text-[10px] text-gray-300">•</span>
+                    <span className="text-[10px] text-gray-400">{entry.account_name}</span>
+                  </div>
+                  {entry.result_status === 'failed' && (
+                    <p className="text-[10px] text-red-400 mt-0.5 truncate">{entry.details?.error}</p>
+                  )}
+                  {entry.details?.comment_text && (
+                    <p className="text-[10px] text-gray-400 mt-0.5 truncate">"{entry.details.comment_text}"</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {entry.result_status === 'success' && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
+                {entry.result_status === 'failed' && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                {entry.result_status === 'skipped' && <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />}
+                <span className="text-[10px] text-gray-300">{entry.created_at ? format(new Date(entry.created_at), 'HH:mm:ss') : ''}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-center text-[10px] text-gray-300">
+        {data?.total > entries.length ? `Hiển thị ${entries.length}/${data.total}` : `${entries.length} hoạt động`} • Cập nhật mỗi 10 giây
+      </p>
     </div>
   )
 }

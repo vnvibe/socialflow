@@ -579,6 +579,63 @@ A colossal glass server tower floating in the sky above clouds, bathed in warm g
     })
   }
 
+  // POST /ai/comment - Generate contextual comment for campaign automation
+  // Accepts both authenticated users and service-role key (for agent)
+  fastify.post('/comment', async (req, reply) => {
+    const { post_snippet, group_name, topic, style, language, user_id } = req.body
+
+    // Allow service-role key OR authenticated user
+    const authHeader = req.headers.authorization || ''
+    const isServiceKey = authHeader.includes(process.env.SUPABASE_SERVICE_ROLE_KEY || '___none___')
+    if (!isServiceKey) {
+      try { await fastify.authenticate(req, reply) } catch { return }
+    }
+
+    const userId = req.user?.id || user_id || (isServiceKey ? '274868cf-742d-4d8a-89e8-bf1c37766b77' : null)
+    if (!userId) return reply.code(400).send({ error: 'user_id required' })
+
+    const lang = language === 'en' ? 'English' : 'Vietnamese'
+    const commentStyle = style || 'casual'
+
+    const styleGuides = {
+      casual: 'Thân thiện, tự nhiên như đang nói chuyện',
+      expert: 'Chuyên nghiệp, thêm kiến thức liên quan',
+      enthusiastic: 'Nhiệt tình, hào hứng, tích cực',
+    }
+
+    const prompt = `Viết MỘT bình luận Facebook ngắn gọn bằng ${lang}.
+
+Bài viết trong nhóm "${group_name || 'chung'}":
+"${(post_snippet || '').substring(0, 300)}"
+${topic ? `Chủ đề: ${topic}` : ''}
+
+Yêu cầu:
+- Giọng: ${styleGuides[commentStyle] || styleGuides.casual}
+- Tối đa 1-2 câu ngắn
+- Tối đa 1 emoji (hoặc không)
+- KHÔNG hashtag, KHÔNG link
+- Phải liên quan đến nội dung bài viết
+- Tự nhiên, không giống bot
+- Mỗi lần viết khác nhau
+
+Chỉ trả về NỘI DUNG bình luận, không giải thích.`
+
+    try {
+      const orchestrator = await getOrchestratorForUser(userId, supabase)
+      const result = await orchestrator.call('caption_gen', [
+        { role: 'user', content: prompt },
+      ], { max_tokens: 100, temperature: 0.9 })
+
+      const comment = (result?.text || '').trim().replace(/^["']|["']$/g, '')
+      if (!comment) return reply.code(500).send({ error: 'AI returned empty comment' })
+
+      return { comment }
+    } catch (err) {
+      console.error('[AI-COMMENT] Error:', err.message)
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // GET /ai/hashtag-presets - List saved presets
   fastify.get('/hashtag-presets', { preHandler: fastify.authenticate }, async (req, reply) => {
     try {

@@ -109,7 +109,6 @@ export default function App() {
                 <Route path="/content/new" element={<ContentComposer />} />
                 <Route path="/publish" element={<UnifiedPublish />} />
                 <Route path="/inbox" element={<InboxPage />} />
-                <Route path="/pages/:id/inbox" element={<Navigate to="/inbox" />} />
                 <Route path="/monitor" element={<Monitor />} />
                 <Route path="/campaigns" element={<CampaignList />} />
                 <Route path="/campaigns/new" element={<CampaignForm />} />

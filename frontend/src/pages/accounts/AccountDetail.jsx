@@ -23,7 +23,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import api from '../../lib/api'
+import api, { API_BASE } from '../../lib/api'
 import useAgentGuard from '../../hooks/useAgentGuard'
 import HealthBadge from '../../components/accounts/HealthBadge'
 import ProxyBadge from '../../components/shared/ProxyBadge'
@@ -93,7 +93,7 @@ export default function AccountDetail() {
     pollFailCountRef.current = 0
     pollBusyRef.current = false
     pollCountRef.current = 0
-    if (reason) console.log(`[Fetch] Polling stopped: ${reason}`)
+    // polling stopped
   }, [])
 
   const pollJobStatus = useCallback(async () => {
@@ -113,16 +113,13 @@ export default function AccountDetail() {
       }
 
       // Poll job status — fetch() trực tiếp, không qua axios interceptor
-      const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-      const res = await fetch(`${baseURL}/jobs/${fetchJobId}/status`)
+      const res = await fetch(`${API_BASE}/jobs/${fetchJobId}/status`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const job = await res.json()
       pollFailCountRef.current = 0
 
       const elapsed = pollStartRef.current ? Math.round((Date.now() - pollStartRef.current) / 1000) : 0
       setFetchElapsed(elapsed)
-      console.log(`[Fetch] Poll: status=${job.status}, elapsed=${elapsed}s`)
-
       setFetchStatus(job.status)
 
       if (job.status === 'done') {
@@ -142,7 +139,6 @@ export default function AccountDetail() {
       }
     } catch (err) {
       pollFailCountRef.current++
-      console.log(`[Fetch] Poll error #${pollFailCountRef.current}: ${err.message}`)
       if (pollFailCountRef.current >= MAX_POLL_FAILURES) {
         setFetchStatus('failed')
         setFetchError('Lost connection to API — check if API server is running')
@@ -582,7 +578,7 @@ function useInfiniteList(baseUrl, limit = 30) {
       setHasMore(data.hasMore === true)
       offsetRef.current = off + batch.length
     } catch (e) {
-      console.error('[InfiniteList]', e)
+      // silently handle infinite list error
     } finally {
       activeRef.current = false
       setLoading(false)

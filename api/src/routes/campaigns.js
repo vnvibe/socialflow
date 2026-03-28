@@ -93,10 +93,94 @@ module.exports = async (fastify) => {
     return data
   })
 
+  // POST /campaigns/preview-plan — AI generates plan from requirement (no save)
+  fastify.post('/preview-plan', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { requirement, topic, account_ids } = req.body
+    if (!requirement) return reply.code(400).send({ error: 'requirement required' })
+    if (!account_ids?.length) return reply.code(400).send({ error: 'account_ids required' })
+
+    // Get account names for context
+    const { data: accounts } = await supabase
+      .from('accounts')
+      .select('id, username, fb_user_id, status, daily_budget, created_at')
+      .in('id', account_ids)
+      .eq('owner_id', req.user.id)
+
+    if (!accounts?.length) return reply.code(400).send({ error: 'No valid accounts found' })
+
+    const accountNames = accounts.map(a => a.username || a.fb_user_id)
+    const nickAges = accounts.map(a => {
+      const days = Math.floor((Date.now() - new Date(a.created_at).getTime()) / 86400000)
+      return { name: a.username || a.fb_user_id, age_days: days, status: a.status }
+    })
+
+    try {
+      const steps = await parseMission(
+        requirement,
+        { topic: topic || '', roleType: 'auto', accountCount: accounts.length, accountNames, nickAges },
+        req.user.id,
+        supabase
+      )
+
+      // Build rich plan object matching frontend expectations
+      // Distribute steps across accounts as roles
+      const HARD_LIMITS = { like: 100, comment: 30, friend_request: 20, join_group: 3, post: 5, scan: 50 }
+      const roles = accounts.map((acc, i) => {
+        const name = acc.username || acc.fb_user_id || `Nick ${i + 1}`
+        const ageDays = Math.floor((Date.now() - new Date(acc.created_at).getTime()) / 86400000)
+        const ageFactor = ageDays < 30 ? 0.4 : ageDays < 90 ? 0.6 : ageDays < 180 ? 0.85 : 1.0
+        return {
+          name,
+          account_name: name,
+          account_ids: [acc.id],
+          role_type: 'custom',
+          steps: steps.map(s => ({
+            ...s,
+            quantity: s.count_mode === 'fixed' ? s.count_min : `${Math.round(s.count_min * ageFactor)}-${Math.round(s.count_max * ageFactor)}`,
+          })),
+        }
+      })
+
+      // Compute daily budget summary
+      const dailyBudget = {}
+      for (const step of steps) {
+        const key = step.quota_key || step.action
+        const max = step.count_max || step.count_min || 1
+        dailyBudget[key] = (dailyBudget[key] || 0) + max * accounts.length
+      }
+
+      // Safety warnings
+      const warnings = []
+      for (const [key, total] of Object.entries(dailyBudget)) {
+        const limit = HARD_LIMITS[key]
+        if (limit && total > limit) {
+          warnings.push(`${key}: ${total}/ngay vuot gioi han ${limit}/ngay`)
+        }
+      }
+
+      // Estimate duration (each step ~2-5 min depending on count)
+      const totalSteps = steps.reduce((sum, s) => sum + (s.count_max || 1), 0)
+      const estimatedMinutes = Math.round(totalSteps * 2.5 * accounts.length)
+
+      const plan = {
+        summary: `${roles.length} nick × ${steps.length} buoc, topic: ${topic || 'general'}`,
+        roles,
+        daily_budget: dailyBudget,
+        safety_warnings: warnings,
+        estimated_duration_minutes: estimatedMinutes,
+      }
+
+      return { plan, accounts: accountNames }
+    } catch (err) {
+      return reply.code(500).send({ error: `AI plan failed: ${err.message}` })
+    }
+  })
+
   // POST /campaigns
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const {
-      name, topic, target_pages, target_groups, target_profiles,
+      name, topic, requirement, account_ids, ai_plan, ai_plan_confirmed,
+      target_pages, target_groups, target_profiles,
       content_ids, rotation_mode, spin_mode,
       schedule_type, cron_expression, interval_minutes,
       start_at, end_at, delay_between_targets_minutes,
@@ -109,6 +193,10 @@ module.exports = async (fastify) => {
       owner_id: req.user.id,
       name,
       topic: topic || null,
+      requirement: requirement || null,
+      account_ids: account_ids || [],
+      ai_plan: ai_plan || null,
+      ai_plan_confirmed: ai_plan_confirmed || false,
       target_pages: target_pages || [],
       target_groups: target_groups || [],
       target_profiles: target_profiles || [],
@@ -124,13 +212,32 @@ module.exports = async (fastify) => {
     }).select().single()
 
     if (error) return reply.code(500).send({ error: error.message })
+
+    // Auto-create roles from ai_plan if confirmed
+    if (ai_plan?.roles && ai_plan_confirmed) {
+      for (let i = 0; i < ai_plan.roles.length; i++) {
+        const role = ai_plan.roles[i]
+        await supabase.from('campaign_roles').insert({
+          campaign_id: data.id,
+          name: role.name || `Role ${String.fromCharCode(65 + i)}`,
+          role_type: role.role_type || 'custom',
+          account_ids: role.account_ids || [],
+          mission: role.mission || '',
+          parsed_plan: role.steps || null,
+          sort_order: i,
+          is_active: true,
+        })
+      }
+    }
+
     return reply.code(201).send(data)
   })
 
   // PUT /campaigns/:id
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const allowed = [
-      'name', 'topic', 'target_pages', 'target_groups', 'target_profiles',
+      'name', 'topic', 'requirement', 'account_ids', 'ai_plan', 'ai_plan_confirmed',
+      'target_pages', 'target_groups', 'target_profiles',
       'content_ids', 'rotation_mode', 'spin_mode',
       'schedule_type', 'cron_expression', 'interval_minutes',
       'start_at', 'end_at', 'delay_between_targets_minutes',
@@ -314,6 +421,154 @@ module.exports = async (fastify) => {
     }
   })
 
+  // GET /campaigns/:id/report — aggregated campaign analytics
+  fastify.get('/:id/report', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id, name, total_runs, created_at, last_run_at, campaign_roles(id, name, role_type, account_ids)')
+      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const cid = req.params.id
+    try {
+      // 1. Fetch all campaign jobs (up to 2000)
+      const { data: allJobs } = await supabase.from('jobs')
+        .select('id, type, status, payload, started_at, finished_at, error_message, created_at')
+        .eq('payload->>campaign_id', cid)
+        .order('created_at', { ascending: false })
+        .limit(2000)
+
+      // 2. Target queue counts
+      const [tqDone, tqFailed, tqPending] = await Promise.all([
+        supabase.from('target_queue').select('id', { count: 'exact', head: true }).eq('campaign_id', cid).eq('status', 'done'),
+        supabase.from('target_queue').select('id', { count: 'exact', head: true }).eq('campaign_id', cid).eq('status', 'failed'),
+        supabase.from('target_queue').select('id', { count: 'exact', head: true }).eq('campaign_id', cid).eq('status', 'pending'),
+      ])
+
+      // 3. Friend request stats
+      const { data: friendRows } = await supabase.from('friend_request_log')
+        .select('status, sent_at')
+        .eq('campaign_id', cid)
+        .order('sent_at', { ascending: false })
+        .limit(2000)
+
+      const jobs = allJobs || []
+      const friends = friendRows || []
+
+      // === SUMMARY ===
+      const jobsDone = jobs.filter(j => j.status === 'done').length
+      const jobsFailed = jobs.filter(j => j.status === 'failed').length
+      const totalJobs = jobs.length
+      const successRate = totalJobs > 0 ? Math.round((jobsDone / totalJobs) * 100) : 0
+
+      const friendsSent = friends.length
+      const friendsAccepted = friends.filter(f => f.status === 'accepted').length
+      const acceptRate = friendsSent > 0 ? Math.round((friendsAccepted / friendsSent) * 100) : 0
+
+      // Average duration (only completed jobs with both timestamps)
+      const durations = jobs
+        .filter(j => j.started_at && j.finished_at)
+        .map(j => (new Date(j.finished_at) - new Date(j.started_at)) / 1000)
+      const avgDuration = durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0
+
+      const firstJob = jobs.length > 0 ? jobs[jobs.length - 1].created_at : null
+
+      // === DAILY BREAKDOWN (last 14 days) ===
+      const dailyMap = {}
+      const now = new Date()
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(now)
+        d.setDate(d.getDate() - i)
+        const key = d.toISOString().slice(0, 10)
+        dailyMap[key] = { date: key, jobs_done: 0, jobs_failed: 0, friends_sent: 0, friends_accepted: 0 }
+      }
+
+      for (const job of jobs) {
+        const day = (job.created_at || '').slice(0, 10)
+        if (dailyMap[day]) {
+          if (job.status === 'done') dailyMap[day].jobs_done++
+          if (job.status === 'failed') dailyMap[day].jobs_failed++
+        }
+      }
+      for (const f of friends) {
+        const day = (f.sent_at || '').slice(0, 10)
+        if (dailyMap[day]) {
+          dailyMap[day].friends_sent++
+          if (f.status === 'accepted') dailyMap[day].friends_accepted++
+        }
+      }
+
+      // === BY ROLE ===
+      const roleMap = {}
+      for (const role of (campaign.campaign_roles || [])) {
+        roleMap[role.id] = { role_id: role.id, role_name: role.name, role_type: role.role_type, jobs_done: 0, jobs_failed: 0, total: 0 }
+      }
+      for (const job of jobs) {
+        const rid = job.payload?.role_id
+        if (rid && roleMap[rid]) {
+          roleMap[rid].total++
+          if (job.status === 'done') roleMap[rid].jobs_done++
+          if (job.status === 'failed') roleMap[rid].jobs_failed++
+        }
+      }
+
+      // === BY ACCOUNT ===
+      const accountMap = {}
+      for (const job of jobs) {
+        const aid = job.payload?.account_id
+        if (!aid) continue
+        if (!accountMap[aid]) accountMap[aid] = { account_id: aid, jobs_done: 0, jobs_failed: 0, total: 0 }
+        accountMap[aid].total++
+        if (job.status === 'done') accountMap[aid].jobs_done++
+        if (job.status === 'failed') accountMap[aid].jobs_failed++
+      }
+
+      // Get account names
+      const accountIds = Object.keys(accountMap)
+      if (accountIds.length > 0) {
+        const { data: accounts } = await supabase.from('accounts').select('id, username').in('id', accountIds)
+        for (const acc of (accounts || [])) {
+          if (accountMap[acc.id]) accountMap[acc.id].account_name = acc.username || acc.id
+        }
+      }
+
+      // Count friends sent per account from job payload
+      for (const f of friends) {
+        // friend_request_log may not have account_id directly, skip if not
+      }
+
+      // === RECENT ERRORS ===
+      const recentErrors = jobs
+        .filter(j => j.status === 'failed' && j.error_message)
+        .slice(0, 10)
+        .map(j => ({ job_id: j.id, type: j.type, error_message: j.error_message, created_at: j.created_at }))
+
+      return {
+        summary: {
+          total_jobs: totalJobs,
+          jobs_done: jobsDone,
+          jobs_failed: jobsFailed,
+          success_rate: successRate,
+          total_targets: (tqDone.count || 0) + (tqFailed.count || 0) + (tqPending.count || 0),
+          targets_done: tqDone.count || 0,
+          targets_failed: tqFailed.count || 0,
+          friends_sent: friendsSent,
+          friends_accepted: friendsAccepted,
+          accept_rate: acceptRate,
+          avg_job_duration_sec: avgDuration,
+          total_runs: campaign.total_runs || 0,
+          first_run_at: firstJob,
+          last_run_at: campaign.last_run_at,
+        },
+        daily: Object.values(dailyMap),
+        by_role: Object.values(roleMap),
+        by_account: Object.values(accountMap),
+        recent_errors: recentErrors,
+      }
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // GET /campaigns/:id/targets — target queue (paginated)
   fastify.get('/:id/targets', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: campaign } = await supabase.from('campaigns')
@@ -350,4 +605,135 @@ module.exports = async (fastify) => {
     if (error) return reply.code(500).send({ error: error.message })
     return { data, total: count }
   })
+
+  // GET /campaigns/:id/activity-log — granular per-action log for AI analysis
+  fastify.get('/:id/activity-log', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { limit = 100, offset = 0, action_type, account_id, result_status, date_from, date_to } = req.query
+
+    let query = supabase
+      .from('campaign_activity_log')
+      .select('*', { count: 'exact' })
+      .eq('campaign_id', req.params.id)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1)
+
+    if (action_type) query = query.eq('action_type', action_type)
+    if (account_id) query = query.eq('account_id', account_id)
+    if (result_status) query = query.eq('result_status', result_status)
+    if (date_from) query = query.gte('created_at', date_from)
+    if (date_to) query = query.lte('created_at', date_to)
+
+    const { data, count, error } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Enrich with account names
+    const accountIds = [...new Set((data || []).map(d => d.account_id).filter(Boolean))]
+    let accountMap = {}
+    if (accountIds.length) {
+      const { data: accounts } = await supabase.from('accounts').select('id, name').in('id', accountIds)
+      accountMap = Object.fromEntries((accounts || []).map(a => [a.id, a.name]))
+    }
+
+    const enriched = (data || []).map(d => ({
+      ...d,
+      account_name: accountMap[d.account_id] || d.account_id?.slice(0, 8),
+    }))
+
+    // Summary counts by action_type
+    const summary = {}
+    for (const d of (data || [])) {
+      const key = d.action_type
+      if (!summary[key]) summary[key] = { total: 0, success: 0, failed: 0 }
+      summary[key].total++
+      if (d.result_status === 'success') summary[key].success++
+      else if (d.result_status === 'failed') summary[key].failed++
+    }
+
+    return { data: enriched, total: count, summary }
+  })
+
+  // GET /campaigns/:id/activity — real-time activity log (recent jobs)
+  fastify.get('/:id/activity', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { limit = 30, status: filterStatus } = req.query
+
+    let query = supabase.from('jobs')
+      .select('id, type, status, payload, result, error_message, started_at, finished_at, created_at, attempt')
+      .eq('payload->>campaign_id', req.params.id)
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit))
+
+    if (filterStatus) query = query.eq('status', filterStatus)
+
+    const { data: jobs, error } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Enrich with account name and role name
+    const accountIds = [...new Set((jobs || []).map(j => j.payload?.account_id).filter(Boolean))]
+    const roleIds = [...new Set((jobs || []).map(j => j.payload?.role_id).filter(Boolean))]
+
+    const [accountsRes, rolesRes] = await Promise.all([
+      accountIds.length ? supabase.from('accounts').select('id, name').in('id', accountIds) : { data: [] },
+      roleIds.length ? supabase.from('campaign_roles').select('id, name, role_type').in('id', roleIds) : { data: [] },
+    ])
+
+    const accountMap = Object.fromEntries((accountsRes.data || []).map(a => [a.id, a.name]))
+    const roleMap = Object.fromEntries((rolesRes.data || []).map(r => [r.id, { name: r.name, type: r.role_type }]))
+
+    const enriched = (jobs || []).map(j => ({
+      id: j.id,
+      type: j.type,
+      status: j.status,
+      attempt: j.attempt,
+      account_name: accountMap[j.payload?.account_id] || j.payload?.account_id?.slice(0, 8),
+      role_name: roleMap[j.payload?.role_id]?.name || '-',
+      role_type: roleMap[j.payload?.role_id]?.type || '-',
+      topic: j.payload?.topic,
+      // Extract useful summary from result
+      summary: extractJobSummary(j),
+      error_message: j.error_message,
+      started_at: j.started_at,
+      finished_at: j.finished_at,
+      created_at: j.created_at,
+    }))
+
+    // Count by status for filter pills
+    const { data: statusCounts } = await supabase.rpc('count_by_status_jsonb', { cid: req.params.id }).catch(() => ({ data: null }))
+
+    // Fallback count
+    let counts = statusCounts
+    if (!counts) {
+      const allStatuses = (jobs || []).map(j => j.status)
+      counts = {
+        pending: allStatuses.filter(s => s === 'pending').length,
+        running: allStatuses.filter(s => s === 'running').length,
+        done: allStatuses.filter(s => s === 'done').length,
+        failed: allStatuses.filter(s => s === 'failed').length,
+      }
+    }
+
+    return { data: enriched, counts }
+  })
+}
+
+function extractJobSummary(job) {
+  const r = job.result
+  if (!r) return null
+  const parts = []
+  if (r.groups_visited != null) parts.push(`${r.groups_visited} nhom`)
+  if (r.liked != null) parts.push(`${r.liked} like`)
+  if (r.commented != null) parts.push(`${r.commented} comment`)
+  if (r.friends_sent != null) parts.push(`${r.friends_sent} ket ban`)
+  if (r.groups_joined != null) parts.push(`${r.groups_joined} tham gia`)
+  if (r.groups_discovered != null) parts.push(`${r.groups_discovered} tim thay`)
+  if (r.posts_scanned != null) parts.push(`${r.posts_scanned} bai scan`)
+  if (r.message) parts.push(r.message)
+  return parts.length > 0 ? parts.join(', ') : null
 }

@@ -3,10 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Globe, Plus, Trash2, CheckCircle, ChevronDown, ChevronUp, Loader, ExternalLink, BarChart3, Search, FileBarChart } from 'lucide-react'
 import toast from 'react-hot-toast'
-import api from '../../lib/api'
+import api, { API_BASE } from '../../lib/api'
 import { supabase } from '../../lib/supabase'
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 // Modal: chọn GSC sites (multi) + GA property sau khi OAuth thành công
 function SitePickerModal({ websiteId, email, onDone, onCancel }) {

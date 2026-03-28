@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { API_BASE } from '../lib/api'
 
 /**
  * Google OAuth relay page — mounted at /websites/google/callback
@@ -7,8 +8,7 @@ import { useEffect } from 'react'
  */
 export default function GoogleCallbackRelay() {
   useEffect(() => {
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-    window.location.replace(`${apiBase}/websites/google/callback${window.location.search}`)
+    window.location.replace(`${API_BASE}/websites/google/callback${window.location.search}`)
   }, [])
 
   return (

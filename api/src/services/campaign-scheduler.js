@@ -205,18 +205,57 @@ async function executeRoleCampaign(campaign) {
     return
   }
 
+  // ── Duplicate prevention: check for existing pending/running jobs for this campaign ──
+  const { data: existingJobs } = await supabase
+    .from('jobs')
+    .select('id, type, payload->account_id')
+    .in('status', ['pending', 'claimed', 'running'])
+    .filter('payload->>campaign_id', 'eq', campaign.id)
+    .limit(100)
+
+  const existingKeys = new Set(
+    (existingJobs || []).map(j => `${j.type}:${j['payload->account_id'] || j.account_id}`)
+  )
+
+  // ── Check agent online before creating jobs ──
+  const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
+    .gte('last_seen', new Date(Date.now() - 120000).toISOString()).limit(1)
+  if (!agents?.length) {
+    console.log(`[SCHEDULER] No agent online — deferring campaign ${campaign.id}`)
+    // Push next_run_at 5 minutes forward instead of skipping entirely
+    await supabase.from('campaigns').update({
+      next_run_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    }).eq('id', campaign.id)
+    return
+  }
+
+  // ── Verify accounts are active before creating jobs ──
+  const allAccountIds = [...new Set(roles.flatMap(r => r.account_ids || []))]
+  const { data: activeAccounts } = await supabase
+    .from('accounts')
+    .select('id')
+    .in('id', allAccountIds)
+    .eq('is_active', true)
+  const activeAccountSet = new Set((activeAccounts || []).map(a => a.id))
+
   let jobsCreated = 0
+  let jobsSkipped = 0
   let roleDelay = 0
 
   for (const role of roles) {
-    const accountIds = role.account_ids || []
-    if (accountIds.length === 0) continue
+    const accountIds = (role.account_ids || []).filter(id => activeAccountSet.has(id))
+    if (accountIds.length === 0) {
+      console.log(`[SCHEDULER] Role ${role.name || role.role_type} has no active accounts, skipping`)
+      continue
+    }
 
     // Map role_type to job type
     const jobTypeMap = {
       scout: 'campaign_discover_groups',
+      scan_members: 'campaign_scan_members',
       nurture: 'campaign_nurture',
       connect: 'campaign_send_friend_request',
+      interact: 'campaign_interact_profile',
       post: 'campaign_post',
       custom: 'campaign_nurture', // fallback
     }
@@ -224,6 +263,14 @@ async function executeRoleCampaign(campaign) {
 
     for (let i = 0; i < accountIds.length; i++) {
       const accountId = accountIds[i]
+
+      // Skip if duplicate job already exists
+      const jobKey = `${jobType}:${accountId}`
+      if (existingKeys.has(jobKey)) {
+        jobsSkipped++
+        continue
+      }
+
       const nickDelay = i * (campaign.nick_stagger_seconds || 60)
       const totalDelaySec = roleDelay + nickDelay
       const scheduledAt = new Date(Date.now() + totalDelaySec * 1000)
@@ -234,6 +281,7 @@ async function executeRoleCampaign(campaign) {
           campaign_id: campaign.id,
           role_id: role.id,
           account_id: accountId,
+          owner_id: campaign.owner_id,
           mission: role.mission,
           parsed_plan: role.parsed_plan,
           config: role.config,
@@ -263,7 +311,7 @@ async function executeRoleCampaign(campaign) {
     ...(nextRun === null ? { status: 'completed', is_active: false } : {})
   }).eq('id', campaign.id)
 
-  console.log(`[SCHEDULER] Role campaign ${campaign.name || campaign.id}: ${jobsCreated} jobs created for ${roles.length} roles, next: ${nextRun || 'completed'}`)
+  console.log(`[SCHEDULER] Role campaign ${campaign.name || campaign.id}: ${jobsCreated} jobs created, ${jobsSkipped} skipped (dup), ${roles.length} roles, next: ${nextRun || 'completed'}`)
 }
 
 // ============================================
