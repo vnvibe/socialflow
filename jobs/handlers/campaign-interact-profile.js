@@ -8,11 +8,31 @@ const { humanScroll, humanMouseMove, humanClick } = require('../../browser/human
 const { saveDebugScreenshot } = require('./post-utils')
 const { checkHardLimit } = require('../../lib/hard-limits')
 const R = require('../../lib/randomizer')
+const { getActionParams } = require('../../lib/plan-executor')
+const { generateComment } = require('../../lib/ai-comment')
+const { ActivityLogger } = require('../../lib/activity-logger')
 
 async function campaignInteractProfile(payload, supabase) {
-  const { account_id, campaign_id, role_id, config } = payload
-  const targetUrl = config?.target_url || config?.fb_profile_url
-  const targetFbId = config?.target_fb_id
+  const { account_id, campaign_id, role_id, config, read_from, parsed_plan } = payload
+  let targetUrl = config?.target_url || config?.fb_profile_url
+  let targetFbId = config?.target_fb_id
+  let claimedTargetId = null
+
+  // Workflow chaining: if read_from is set, claim target from queue
+  if (!targetUrl && !targetFbId && read_from) {
+    const { data: targets } = await supabase.rpc('claim_targets', {
+      p_campaign_id: campaign_id,
+      p_target_role_id: role_id,
+      p_account_id: account_id,
+      p_limit: 1,
+    })
+    if (targets?.length) {
+      targetUrl = targets[0].fb_profile_url
+      targetFbId = targets[0].fb_user_id
+      claimedTargetId = targets[0].id
+      console.log(`[CAMPAIGN-INTERACT] Claimed target from queue: ${targets[0].fb_user_name || targetFbId}`)
+    }
+  }
 
   if (!targetUrl && !targetFbId) throw new Error('SKIP_no_target_profile')
 
@@ -22,6 +42,12 @@ async function campaignInteractProfile(payload, supabase) {
     .eq('id', account_id)
     .single()
   if (!account) throw new Error('Account not found')
+
+  const logger = new ActivityLogger(supabase, {
+    campaign_id, role_id, account_id,
+    job_id: payload.job_id,
+    owner_id: payload.owner_id || payload.created_by,
+  })
 
   const likeBudget = account.daily_budget?.like || { used: 0, max: 80 }
   const likeCheck = checkHardLimit('like', likeBudget.used, 0)
@@ -33,6 +59,7 @@ async function campaignInteractProfile(payload, supabase) {
 
     const profileUrl = targetUrl || `https://www.facebook.com/profile.php?id=${targetFbId}`
     console.log(`[CAMPAIGN-INTERACT] Visiting profile: ${profileUrl}`)
+    logger.log('visit_profile', { target_type: 'profile', target_id: targetFbId, target_url: profileUrl })
     await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     await R.sleepRange(2000, 4000)
 
@@ -49,7 +76,7 @@ async function campaignInteractProfile(payload, supabase) {
 
     // Like some posts
     if (likeCheck.allowed) {
-      const maxLikes = R.randInt(2, 5)
+      const maxLikes = getActionParams(parsed_plan, 'like', { countMin: 2, countMax: 5 }).count
       const likeButtons = await page.$$([
         'div[aria-label="Like"]',
         'div[aria-label="Thích"]',
@@ -73,6 +100,7 @@ async function campaignInteractProfile(payload, supabase) {
             p_account_id: account_id,
             p_action_type: 'like',
           })
+          logger.log('like', { target_type: 'profile', target_id: targetFbId, target_url: profileUrl })
 
           await R.sleepRange(3000, 8000)
         } catch (err) {
@@ -103,8 +131,15 @@ async function campaignInteractProfile(payload, supabase) {
 
             const commentBox = await page.$('div[contenteditable="true"][role="textbox"]')
             if (commentBox) {
-              const templates = config?.comment_templates || ['👍', 'Hay quá!', 'Nice!', '❤️']
-              const text = templates[Math.floor(Math.random() * templates.length)]
+              // Generate AI comment with template fallback
+              const text = await generateComment({
+                postText: '', // profile context, no specific post
+                groupName: '',
+                topic: payload.topic || '',
+                style: config?.comment_style || 'enthusiastic',
+                userId: payload.created_by,
+                templates: config?.comment_templates,
+              })
 
               await commentBox.click()
               await R.sleepRange(300, 800)
@@ -121,12 +156,21 @@ async function campaignInteractProfile(payload, supabase) {
                 p_account_id: account_id,
                 p_action_type: 'comment',
               })
+              logger.log('comment', { target_type: 'profile', target_id: targetFbId, target_url: profileUrl, details: { comment_text: text.substring(0, 200) } })
             }
           } catch (err) {
             console.warn(`[CAMPAIGN-INTERACT] Comment failed: ${err.message}`)
+            logger.log('comment', { target_type: 'profile', target_id: targetFbId, target_url: profileUrl, result_status: 'failed', details: { error: err.message } })
           }
         }
       }
+    }
+
+    // Update target_queue if claimed from workflow
+    if (claimedTargetId) {
+      await supabase.from('target_queue').update({
+        status: 'done', processed_at: new Date(),
+      }).eq('id', claimedTargetId)
     }
 
     console.log(`[CAMPAIGN-INTERACT] Done: ${liked} likes, ${commented} comments on profile`)
@@ -138,8 +182,16 @@ async function campaignInteractProfile(payload, supabase) {
     }
   } catch (err) {
     if (page) await saveDebugScreenshot(page, `campaign-interact-${account_id}`)
+    if (claimedTargetId) {
+      try {
+        await supabase.from('target_queue').update({
+          status: 'failed', error_message: err.message?.substring(0, 200),
+        }).eq('id', claimedTargetId)
+      } catch (_) {}
+    }
     throw err
   } finally {
+    await logger.flush().catch(() => {})
     if (page) await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
     releaseSession(account_id)
   }

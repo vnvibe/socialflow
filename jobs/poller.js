@@ -4,13 +4,14 @@ const os = require('os')
 const { closeAll } = require('../browser/session-pool')
 const { classifyError, shouldDisableAccount, isRetryable, getRetryDelayMs } = require('../lib/error-classifier')
 const { postCooldown } = require('../lib/randomizer')
+const { getMinGapMs } = require('../lib/hard-limits')
 
 const AGENT_ID = process.env.AGENT_ID || `${os.hostname()}-${process.pid}`
 const AGENT_USER_ID = process.env.AGENT_USER_ID || null  // set when user logs in via Electron
 const POLL_MS = 5000
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT) || 2
 
-const POST_TYPES = ['post_page', 'post_page_graph', 'post_group', 'post_profile']
+const POST_TYPES = ['post_page', 'post_page_graph', 'post_group', 'post_profile', 'campaign_post']
 
 // ─── NickPool — max 2 nicks concurrent ───────────────────
 class NickPool {
@@ -28,8 +29,19 @@ class NickPool {
 }
 const pool = new NickPool()
 
-let lastPostFinishedAt = 0
-let currentCooldownMs = 0
+// ─── Per-nick isolation tracking ─────────────────────────
+const nickCooldowns = new Map()        // account_id → { lastPostAt, cooldownMs }
+const nickBudgetCache = new Map()      // account_id → { budget, fetchedAt }
+const nickActionTimestamps = new Map() // `${accId}:${actionType}` → lastActionAt
+const BUDGET_CACHE_TTL = 60000         // 1 min
+
+const JOB_ACTION_MAP = {
+  post_page: 'post', post_page_graph: 'post', post_group: 'post', post_profile: 'post',
+  campaign_post: 'post', campaign_nurture: 'like', campaign_discover_groups: 'join_group',
+  campaign_send_friend_request: 'friend_request', campaign_interact_profile: 'like',
+  campaign_scan_members: 'scan', comment_post: 'comment',
+}
+
 let pollFails = 0
 
 // Cache user preferences to avoid querying on every poll
@@ -83,12 +95,33 @@ async function poll() {
       // Skip if this nick is already busy
       if (accId && pool.isRunning(accId)) continue
 
-      // Post cooldown between posting jobs
-      if (isPostJob && lastPostFinishedAt > 0) {
-        const elapsed = Date.now() - lastPostFinishedAt
-        if (elapsed < currentCooldownMs) {
-          const waitSec = Math.ceil((currentCooldownMs - elapsed) / 1000)
-          console.log(`[POLLER] Post cooldown: ${waitSec}s remaining`)
+      // Per-nick post cooldown (not global — each nick tracks independently)
+      if (isPostJob && accId) {
+        const cd = nickCooldowns.get(accId)
+        if (cd && cd.lastPostAt > 0) {
+          const elapsed = Date.now() - cd.lastPostAt
+          if (elapsed < cd.cooldownMs) {
+            continue // this nick is cooling down, try next job
+          }
+        }
+      }
+
+      // Per-nick action gap enforcement
+      const actionType = JOB_ACTION_MAP[job.type]
+      if (actionType && accId) {
+        const gapKey = `${accId}:${actionType}`
+        const lastAt = nickActionTimestamps.get(gapKey)
+        if (lastAt) {
+          const minGap = getMinGapMs(actionType)
+          if (Date.now() - lastAt < minGap) continue
+        }
+      }
+
+      // Per-nick budget pre-check (avoid claiming if daily limit already reached)
+      if (actionType && accId) {
+        const budgetOk = await checkBudgetBeforeClaim(accId, actionType)
+        if (!budgetOk) {
+          console.log(`[POLLER] Nick ${accId.slice(0,8)} budget exhausted for ${actionType}, skipping`)
           continue
         }
       }
@@ -107,11 +140,21 @@ async function poll() {
       // Fire & forget — don't await, allows concurrent execution
       executeJob(job).finally(() => {
         pool.release(accId, job.id)
-        if (isPostJob) {
-          lastPostFinishedAt = Date.now()
-          currentCooldownMs = postCooldown()
-          console.log(`[POLLER] Post done, next cooldown: ${(currentCooldownMs / 60000).toFixed(1)}min`)
+
+        // Per-nick post cooldown
+        if (isPostJob && accId) {
+          const cd = postCooldown()
+          nickCooldowns.set(accId, { lastPostAt: Date.now(), cooldownMs: cd })
+          console.log(`[POLLER] Nick ${accId.slice(0,8)} post done, cooldown: ${(cd / 60000).toFixed(1)}min`)
         }
+
+        // Track action timestamp for gap enforcement
+        if (actionType && accId) {
+          nickActionTimestamps.set(`${accId}:${actionType}`, Date.now())
+        }
+
+        // Invalidate budget cache so next poll fetches fresh
+        if (accId) nickBudgetCache.delete(accId)
       })
     }
   } catch (err) {
@@ -204,6 +247,30 @@ async function executeJob(job) {
         .update({ status: newStatus, is_active: false })
         .eq('id', job.payload.account_id)
       console.log(`[JOB] Account ${job.payload.account_id} marked as ${newStatus}`)
+
+      // Auto-queue health check to try refreshing cookie (only for SESSION_EXPIRED, not CHECKPOINT)
+      if (classified.type === 'SESSION_EXPIRED') {
+        try {
+          const { data: existing } = await supabase.from('jobs')
+            .select('id')
+            .eq('type', 'check-health')
+            .eq('payload->>account_id', job.payload.account_id)
+            .in('status', ['pending', 'claimed', 'running'])
+            .limit(1)
+          if (!existing?.length) {
+            await supabase.from('jobs').insert({
+              type: 'check-health',
+              payload: { account_id: job.payload.account_id, action: 'check-health', auto_refresh: true },
+              status: 'pending',
+              scheduled_at: new Date(Date.now() + 60000).toISOString(), // 1 phut sau
+              created_by: job.created_by,
+            })
+            console.log(`[JOB] Auto-queued health check for expired account ${job.payload.account_id}`)
+          }
+        } catch (e) {
+          console.warn(`[JOB] Failed to queue auto health check:`, e.message)
+        }
+      }
 
       // Create notification for user
       if (classified.alertLevel && job.created_by) {
@@ -332,5 +399,32 @@ function startPoller() {
 let stopPoller = async () => {} // set by startPoller
 
 function getPool() { return pool }
+
+// ─── Per-nick budget pre-check ───────────────────────────
+async function checkBudgetBeforeClaim(accountId, actionType) {
+  try {
+    const cached = nickBudgetCache.get(accountId)
+    if (cached && Date.now() - cached.fetchedAt < BUDGET_CACHE_TTL) {
+      const cat = cached.budget?.[actionType]
+      if (cat && cat.used >= cat.max) return false
+      return true
+    }
+
+    const { data } = await supabase
+      .from('accounts')
+      .select('daily_budget')
+      .eq('id', accountId)
+      .single()
+
+    if (data) {
+      nickBudgetCache.set(accountId, { budget: data.daily_budget || {}, fetchedAt: Date.now() })
+      const cat = data.daily_budget?.[actionType]
+      if (cat && cat.used >= cat.max) return false
+    }
+    return true
+  } catch {
+    return true // on error, allow the job (handler will check again)
+  }
+}
 
 module.exports = { startPoller, getStopPoller: () => stopPoller, getPool }

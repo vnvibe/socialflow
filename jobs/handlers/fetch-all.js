@@ -1226,21 +1226,27 @@ async function fetchAllHandler(payload, supabase) {
   const allFetchedPageIds = [...new Set([...(apiResult?.fetchedPageIds || []), ...(browserResult.fetchedPageIds || [])])]
   const allFetchedGroupIds = [...new Set([...(apiResult?.fetchedGroupIds || []), ...(browserResult.fetchedGroupIds || [])])]
 
-  if (canSync) {
-    // Xóa pages không còn trong lần quét mới
-    const { data: oldPages } = await supabase.from('fanpages').select('id, fb_page_id').eq('account_id', account_id)
-    const stalePages = (oldPages || []).filter(p => !allFetchedPageIds.includes(p.fb_page_id))
-    if (stalePages.length > 0) {
-      await supabase.from('fanpages').delete().in('id', stalePages.map(p => p.id))
-      console.log(`[FETCH-ALL] Xóa ${stalePages.length} pages cũ không còn trong lần quét`)
+  // Chỉ cleanup khi fetch thực sự trả về kết quả — nếu fetch 0 results thì giữ data cũ
+  const hasPages = allFetchedPageIds.length > 0
+  const hasGroups = allFetchedGroupIds.length > 0
+
+  if (canSync && (hasPages || hasGroups)) {
+    if (hasPages) {
+      const { data: oldPages } = await supabase.from('fanpages').select('id, fb_page_id').eq('account_id', account_id)
+      const stalePages = (oldPages || []).filter(p => !allFetchedPageIds.includes(p.fb_page_id))
+      if (stalePages.length > 0) {
+        await supabase.from('fanpages').delete().in('id', stalePages.map(p => p.id))
+        console.log(`[FETCH-ALL] Xóa ${stalePages.length} pages cũ không còn trong lần quét`)
+      }
     }
 
-    // Xóa groups không còn trong lần quét mới
-    const { data: oldGroups } = await supabase.from('fb_groups').select('id, fb_group_id').eq('account_id', account_id)
-    const staleGroups = (oldGroups || []).filter(g => !allFetchedGroupIds.includes(g.fb_group_id))
-    if (staleGroups.length > 0) {
-      await supabase.from('fb_groups').delete().in('id', staleGroups.map(g => g.id))
-      console.log(`[FETCH-ALL] Xóa ${staleGroups.length} groups cũ không còn trong lần quét`)
+    if (hasGroups) {
+      const { data: oldGroups } = await supabase.from('fb_groups').select('id, fb_group_id').eq('account_id', account_id)
+      const staleGroups = (oldGroups || []).filter(g => !allFetchedGroupIds.includes(g.fb_group_id))
+      if (staleGroups.length > 0) {
+        await supabase.from('fb_groups').delete().in('id', staleGroups.map(g => g.id))
+        console.log(`[FETCH-ALL] Xóa ${staleGroups.length} groups cũ không còn trong lần quét`)
+      }
     }
 
     console.log(`[FETCH-ALL] Sync done: ${allFetchedPageIds.length} pages, ${allFetchedGroupIds.length} groups`)

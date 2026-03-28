@@ -639,17 +639,21 @@ async function fetchPagesHandler(payload, supabase) {
 
     console.log(`[FETCH-PAGES] Saved ${added} pages to DB`)
 
-    // Cleanup: xoá stale pages
+    // Cleanup: xoá stale pages — CHỈ KHI fetch thực sự trả về kết quả
     const fetchedIds = decoded.map(p => p.fb_page_id)
-    const { data: existing } = await supabase
-      .from('fanpages')
-      .select('id, fb_page_id')
-      .eq('account_id', account_id)
-    const stale = (existing || []).filter(e => !fetchedIds.includes(e.fb_page_id))
-    if (stale.length > 0) {
-      const { error: delErr } = await supabase.from('fanpages').delete().in('id', stale.map(s => s.id))
-      if (!delErr) console.log(`[FETCH-PAGES] Cleaned ${stale.length} stale pages`)
-      else console.log(`[FETCH-PAGES] Cleanup error:`, delErr.message)
+    if (fetchedIds.length > 0) {
+      const { data: existing } = await supabase
+        .from('fanpages')
+        .select('id, fb_page_id')
+        .eq('account_id', account_id)
+      const stale = (existing || []).filter(e => !fetchedIds.includes(e.fb_page_id))
+      if (stale.length > 0) {
+        const { error: delErr } = await supabase.from('fanpages').delete().in('id', stale.map(s => s.id))
+        if (!delErr) console.log(`[FETCH-PAGES] Cleaned ${stale.length} stale pages`)
+        else console.log(`[FETCH-PAGES] Cleanup error:`, delErr.message)
+      }
+    } else {
+      console.log(`[FETCH-PAGES] Fetch returned 0 — giữ data cũ (cookie có thể hết hạn)`)
     }
 
     return { pages_found: decoded.length, pages_saved: added }

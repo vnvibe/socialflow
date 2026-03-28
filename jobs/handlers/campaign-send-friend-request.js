@@ -8,9 +8,17 @@ const { delay, humanScroll, humanMouseMove, humanClick } = require('../../browse
 const { saveDebugScreenshot } = require('./post-utils')
 const { checkHardLimit, applyAgeFactor } = require('../../lib/hard-limits')
 const R = require('../../lib/randomizer')
+const { getActionParams } = require('../../lib/plan-executor')
+const { ActivityLogger } = require('../../lib/activity-logger')
 
 async function campaignSendFriendRequest(payload, supabase) {
-  const { account_id, campaign_id, role_id } = payload
+  const { account_id, campaign_id, role_id, parsed_plan } = payload
+
+  const logger = new ActivityLogger(supabase, {
+    campaign_id, role_id, account_id,
+    job_id: payload.job_id,
+    owner_id: payload.owner_id || payload.created_by,
+  })
 
   const { data: account } = await supabase
     .from('accounts')
@@ -27,7 +35,8 @@ async function campaignSendFriendRequest(payload, supabase) {
   }
 
   const nickAge = Math.floor((Date.now() - new Date(account.created_at).getTime()) / 86400000)
-  const maxFR = Math.min(applyAgeFactor(remaining, nickAge), 5) // maxPerSession = 5
+  const planFR = getActionParams(parsed_plan, 'friend_request', { countMin: 3, countMax: 5 }).count
+  const maxFR = Math.min(applyAgeFactor(remaining, nickAge), planFR) // capped by plan + age factor
 
   // Claim targets atomically
   const { data: targets } = await supabase.rpc('claim_targets', {
@@ -68,6 +77,7 @@ async function campaignSendFriendRequest(payload, supabase) {
         // Navigate to profile
         const profileUrl = target.fb_profile_url || `https://www.facebook.com/profile.php?id=${target.fb_user_id}`
         console.log(`[CAMPAIGN-FR] Visiting profile: ${target.fb_user_name || target.fb_user_id}`)
+        logger.log('visit_profile', { target_type: 'profile', target_id: target.fb_user_id, target_name: target.fb_user_name, target_url: profileUrl })
         await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
         await R.sleepRange(2000, 4000)
         await humanMouseMove(page)
@@ -91,6 +101,7 @@ async function campaignSendFriendRequest(payload, supabase) {
 
           await supabase.from('target_queue').update({ status: 'skip', processed_at: new Date() }).eq('id', target.id)
           results.push({ fb_user_id: target.fb_user_id, status: 'already_friend' })
+          logger.log('friend_request', { target_type: 'profile', target_id: target.fb_user_id, target_name: target.fb_user_name, target_url: profileUrl, result_status: 'skipped', details: { reason: 'already_friend' } })
           continue
         }
 
@@ -112,6 +123,7 @@ async function campaignSendFriendRequest(payload, supabase) {
 
           await supabase.from('target_queue').update({ status: 'done', processed_at: new Date() }).eq('id', target.id)
           results.push({ fb_user_id: target.fb_user_id, status: 'already_sent' })
+          logger.log('friend_request', { target_type: 'profile', target_id: target.fb_user_id, target_name: target.fb_user_name, target_url: profileUrl, result_status: 'skipped', details: { reason: 'already_sent' } })
           continue
         }
 
@@ -160,6 +172,7 @@ async function campaignSendFriendRequest(payload, supabase) {
           sent++
           results.push({ fb_user_id: target.fb_user_id, status: 'sent' })
           console.log(`[CAMPAIGN-FR] Sent request to: ${target.fb_user_name || target.fb_user_id}`)
+          logger.log('friend_request', { target_type: 'profile', target_id: target.fb_user_id, target_name: target.fb_user_name, target_url: profileUrl, details: { status: 'sent' } })
         } else {
           // No add button found (might be restricted)
           await supabase.from('target_queue').update({
@@ -167,6 +180,7 @@ async function campaignSendFriendRequest(payload, supabase) {
             error_message: 'Add friend button not found',
           }).eq('id', target.id)
           results.push({ fb_user_id: target.fb_user_id, status: 'no_button' })
+          logger.log('friend_request', { target_type: 'profile', target_id: target.fb_user_id, target_name: target.fb_user_name, target_url: profileUrl, result_status: 'failed', details: { reason: 'no_add_button' } })
         }
       } catch (err) {
         console.warn(`[CAMPAIGN-FR] Failed for ${target.fb_user_id}: ${err.message}`)
@@ -175,6 +189,7 @@ async function campaignSendFriendRequest(payload, supabase) {
           error_message: err.message.substring(0, 200),
         }).eq('id', target.id)
         results.push({ fb_user_id: target.fb_user_id, status: 'failed', error: err.message })
+        logger.log('friend_request', { target_type: 'profile', target_id: target.fb_user_id, target_name: target.fb_user_name, result_status: 'failed', details: { error: err.message } })
       }
 
       // Gap between friend requests (45-90s)
@@ -196,6 +211,7 @@ async function campaignSendFriendRequest(payload, supabase) {
     if (page) await saveDebugScreenshot(page, `campaign-fr-${account_id}`)
     throw err
   } finally {
+    await logger.flush().catch(() => {})
     if (page) await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
     releaseSession(account_id)
   }

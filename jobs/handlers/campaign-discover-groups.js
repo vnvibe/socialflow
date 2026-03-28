@@ -8,9 +8,18 @@ const { delay, humanScroll, humanMouseMove, humanClick } = require('../../browse
 const { saveDebugScreenshot } = require('./post-utils')
 const { checkHardLimit, applyAgeFactor } = require('../../lib/hard-limits')
 const R = require('../../lib/randomizer')
+const { getActionParams } = require('../../lib/plan-executor')
+const { filterRelevantGroups } = require('../../lib/ai-filter')
+const { ActivityLogger } = require('../../lib/activity-logger')
 
 async function campaignDiscoverGroups(payload, supabase) {
-  const { account_id, campaign_id, role_id, topic, config, feeds_into } = payload
+  const { account_id, campaign_id, role_id, topic, config, feeds_into, parsed_plan } = payload
+
+  const logger = new ActivityLogger(supabase, {
+    campaign_id, role_id, account_id,
+    job_id: payload.job_id,
+    owner_id: payload.owner_id || payload.created_by,
+  })
 
   const { data: account } = await supabase
     .from('accounts')
@@ -27,7 +36,8 @@ async function campaignDiscoverGroups(payload, supabase) {
   }
 
   const nickAge = Math.floor((Date.now() - new Date(account.created_at).getTime()) / 86400000)
-  const maxJoin = applyAgeFactor(remaining, nickAge)
+  const planJoin = getActionParams(parsed_plan, 'join_group', { countMin: 1, countMax: remaining }).count
+  const maxJoin = Math.min(applyAgeFactor(remaining, nickAge), planJoin)
 
   let page
   try {
@@ -89,11 +99,12 @@ async function campaignDiscoverGroups(payload, supabase) {
       .eq('account_id', account_id)
     const joinedSet = new Set((existingGroups || []).map(g => g.fb_group_id))
 
-    // Filter: not joined, > 100 members
+    // Filter: not joined, > minMembers
     const minMembers = config?.min_members || 100
-    const candidates = groups.filter(g =>
-      !joinedSet.has(g.fb_group_id) && g.member_count >= minMembers
-    )
+    const notJoined = groups.filter(g => !joinedSet.has(g.fb_group_id) && g.member_count >= minMembers)
+
+    // AI relevance filter — send all group names to AI, get back relevant ones
+    const candidates = await filterRelevantGroups(notJoined, topic, payload.owner_id)
 
     let joined = 0
     const joinedGroups = []
@@ -102,6 +113,7 @@ async function campaignDiscoverGroups(payload, supabase) {
       if (joined >= maxJoin) break
 
       try {
+        logger.log('visit_group', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url })
         await page.goto(group.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
         await R.sleepRange(2000, 4000)
         await humanMouseMove(page)
@@ -145,6 +157,7 @@ async function campaignDiscoverGroups(payload, supabase) {
           joined++
           joinedGroups.push(group)
           console.log(`[CAMPAIGN-SCOUT] Joined group: ${group.name} (${group.member_count} members)`)
+          logger.log('join_group', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { member_count: group.member_count } })
 
           // Gap between joins
           if (joined < maxJoin && candidates.indexOf(group) < candidates.length - 1) {
@@ -155,6 +168,7 @@ async function campaignDiscoverGroups(payload, supabase) {
         }
       } catch (err) {
         console.warn(`[CAMPAIGN-SCOUT] Failed to join ${group.name}: ${err.message}`)
+        logger.log('join_group', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, result_status: 'failed', details: { error: err.message } })
       }
     }
 
@@ -208,6 +222,7 @@ async function campaignDiscoverGroups(payload, supabase) {
               { onConflict: 'campaign_id,fb_user_id', ignoreDuplicates: true }
             )
             totalMembers += members.length
+            logger.log('scan', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, details: { members_found: members.length } })
           }
         } catch (err) {
           console.warn(`[CAMPAIGN-SCOUT] Failed to scan members of ${group.name}: ${err.message}`)
@@ -226,6 +241,7 @@ async function campaignDiscoverGroups(payload, supabase) {
     if (page) await saveDebugScreenshot(page, `campaign-scout-${account_id}`)
     throw err
   } finally {
+    await logger.flush().catch(() => {})
     if (page) await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
     releaseSession(account_id)
   }
