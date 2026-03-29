@@ -606,54 +606,102 @@ module.exports = async (fastify) => {
     return { data, total: count }
   })
 
-  // GET /campaigns/:id/activity-log — granular per-action log for AI analysis
+  // GET /campaigns/:id/activity-log — granular per-action log (cursor-based)
   fastify.get('/:id/activity-log', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: campaign } = await supabase.from('campaigns')
       .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
     if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
 
-    const { limit = 100, offset = 0, action_type, account_id, result_status, date_from, date_to } = req.query
+    const { limit = 30, after, page = 1, action_type, account_id, result_status, date_from, date_to } = req.query
+    const lim = Math.min(parseInt(limit) || 30, 200)
+    const pageNum = Math.max(1, parseInt(page) || 1)
 
-    let query = supabase
+    // Build base filter
+    let baseFilter = supabase
       .from('campaign_activity_log')
       .select('*', { count: 'exact' })
       .eq('campaign_id', req.params.id)
-      .order('created_at', { ascending: false })
-      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1)
 
-    if (action_type) query = query.eq('action_type', action_type)
-    if (account_id) query = query.eq('account_id', account_id)
-    if (result_status) query = query.eq('result_status', result_status)
-    if (date_from) query = query.gte('created_at', date_from)
-    if (date_to) query = query.lte('created_at', date_to)
+    if (action_type) baseFilter = baseFilter.eq('action_type', action_type)
+    if (account_id) baseFilter = baseFilter.eq('account_id', account_id)
+    if (result_status) baseFilter = baseFilter.eq('result_status', result_status)
+    if (date_from) baseFilter = baseFilter.gte('created_at', date_from)
+    if (date_to) baseFilter = baseFilter.lte('created_at', date_to)
 
-    const { data, count, error } = await query
+    let query, isPolling = false
+
+    if (after) {
+      // Poll mode: fetch entries NEWER than this timestamp (no pagination)
+      query = baseFilter.gt('created_at', after).order('created_at', { ascending: true }).limit(lim)
+      isPolling = true
+    } else {
+      // Page mode: offset-based pagination
+      const offset = (pageNum - 1) * lim
+      query = baseFilter.order('created_at', { ascending: false }).range(offset, offset + lim - 1)
+    }
+
+    const { data, error, count } = await query
     if (error) return reply.code(500).send({ error: error.message })
 
+    // When polling (after), reverse so newest is first for frontend prepend
+    const entries = isPolling ? (data || []).reverse() : (data || [])
+
     // Enrich with account names
-    const accountIds = [...new Set((data || []).map(d => d.account_id).filter(Boolean))]
+    const accountIds = [...new Set(entries.map(d => d.account_id).filter(Boolean))]
     let accountMap = {}
     if (accountIds.length) {
       const { data: accounts } = await supabase.from('accounts').select('id, name').in('id', accountIds)
       accountMap = Object.fromEntries((accounts || []).map(a => [a.id, a.name]))
     }
 
-    const enriched = (data || []).map(d => ({
+    const enriched = entries.map(d => ({
       ...d,
       account_name: accountMap[d.account_id] || d.account_id?.slice(0, 8),
     }))
 
-    // Summary counts by action_type
+    // Summary: aggregate over ENTIRE campaign (not just this page)
+    const { data: sumRows } = await supabase.rpc('campaign_activity_summary', { p_campaign_id: req.params.id }).catch(() => ({ data: null }))
     const summary = {}
-    for (const d of (data || [])) {
-      const key = d.action_type
-      if (!summary[key]) summary[key] = { total: 0, success: 0, failed: 0 }
-      summary[key].total++
-      if (d.result_status === 'success') summary[key].success++
-      else if (d.result_status === 'failed') summary[key].failed++
+    if (sumRows) {
+      for (const r of sumRows) {
+        summary[r.action_type] = { total: r.total, success: r.success, failed: r.failed }
+      }
+    } else {
+      // Fallback: count from this page only
+      for (const d of enriched) {
+        const key = d.action_type
+        if (!summary[key]) summary[key] = { total: 0, success: 0, failed: 0 }
+        summary[key].total++
+        if (d.result_status === 'success') summary[key].success++
+        else if (d.result_status === 'failed') summary[key].failed++
+      }
     }
 
-    return { data: enriched, total: count, summary }
+    // Total count (from query with filters applied, or from count param)
+    let total = count
+    if (total == null) {
+      const { count: c } = await supabase
+        .from('campaign_activity_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('campaign_id', req.params.id)
+      total = c || 0
+    }
+
+    const totalPages = Math.ceil(total / lim)
+
+    // Get distinct accounts in this campaign (for filter dropdown)
+    const { data: accountRows } = await supabase
+      .from('campaign_activity_log')
+      .select('account_id')
+      .eq('campaign_id', req.params.id)
+    const uniqueAccountIds = [...new Set((accountRows || []).map(r => r.account_id).filter(Boolean))]
+    let accounts = []
+    if (uniqueAccountIds.length) {
+      const { data: accs } = await supabase.from('accounts').select('id, username').in('id', uniqueAccountIds)
+      accounts = (accs || []).map(a => ({ id: a.id, name: a.username || a.id.slice(0, 8) }))
+    }
+
+    return { data: enriched, total, summary, page: pageNum, per_page: lim, total_pages: totalPages, accounts }
   })
 
   // GET /campaigns/:id/activity — real-time activity log (recent jobs)

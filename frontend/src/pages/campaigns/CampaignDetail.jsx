@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Target, ArrowLeft, Play, Pause, Edit, BarChart3, Users, UserPlus, Crosshair, CheckCircle, XCircle, Clock, FileBarChart, TrendingUp, Timer, AlertTriangle, ScrollText, RefreshCw, Loader } from 'lucide-react'
@@ -39,7 +39,7 @@ export default function CampaignDetail() {
   const { data: stats } = useQuery({
     queryKey: ['campaign-stats', id],
     queryFn: () => api.get(`/campaigns/${id}/stats`).then(r => r.data),
-    refetchInterval: 10000,
+    refetchInterval: activeTab === 'overview' ? 10000 : false,
   })
 
   const { data: report, isLoading: reportLoading } = useQuery({
@@ -55,12 +55,7 @@ export default function CampaignDetail() {
     refetchInterval: activeTab === 'activity' ? 5000 : false,
   })
 
-  const { data: detailLogData } = useQuery({
-    queryKey: ['campaign-detail-log', id],
-    queryFn: () => api.get(`/campaigns/${id}/activity-log?limit=200`).then(r => r.data),
-    enabled: activeTab === 'activity',
-    refetchInterval: activeTab === 'activity' ? 10000 : false,
-  })
+  // Detail log is now self-contained in DetailLogView component
 
   const { data: targetsData } = useQuery({
     queryKey: ['campaign-targets', id],
@@ -141,7 +136,7 @@ export default function CampaignDetail() {
 
       {/* Tab Content */}
       {activeTab === 'overview' && <OverviewTab campaign={campaign} stats={stats} />}
-      {activeTab === 'activity' && <ActivityTab data={activityData} loading={activityLoading} onRefresh={refetchActivity} detailLog={detailLogData} />}
+      {activeTab === 'activity' && <ActivityTab data={activityData} loading={activityLoading} onRefresh={refetchActivity} campaignId={id} />}
       {activeTab === 'report' && <ReportTab report={report} loading={reportLoading} />}
       {activeTab === 'roles' && <RolesTab campaign={campaign} />}
       {activeTab === 'targets' && <TargetsTab data={targetsData} />}
@@ -444,7 +439,7 @@ const JOB_TYPE_LABELS = {
   campaign_interact_profile: '👤 Tương tác',
 }
 
-function ActivityTab({ data, loading, onRefresh, detailLog }) {
+function ActivityTab({ data, loading, onRefresh, campaignId }) {
   const [filter, setFilter] = useState(null)
   const [viewMode, setViewMode] = useState('jobs') // 'jobs' or 'details'
 
@@ -473,7 +468,7 @@ function ActivityTab({ data, loading, onRefresh, detailLog }) {
         </button>
       </div>
 
-      {viewMode === 'details' && <DetailLogView data={detailLog} />}
+      {viewMode === 'details' && <DetailLogView campaignId={campaignId} />}
 
       {viewMode === 'jobs' && <>
       {/* Filter pills */}
@@ -565,52 +560,132 @@ function ActivityTab({ data, loading, onRefresh, detailLog }) {
         })}
       </div>
 
+      </>}
+
       {/* Auto-refresh indicator */}
       <p className="text-center text-[10px] text-gray-300">Tự động cập nhật mỗi 5 giây</p>
-      </>}
     </div>
   )
 }
 
 const ACTION_ICONS = {
-  like: '👍', comment: '💬', join_group: '🏠', friend_request: '🤝',
+  like: '👍', comment: '💬', join_group: '🏠', leave_group: '🚪', friend_request: '🤝',
   post: '✍️', visit_group: '👁️', visit_profile: '👤', scan: '🔍',
 }
 const ACTION_LABELS = {
-  like: 'Like', comment: 'Comment', join_group: 'Tham gia nhóm', friend_request: 'Kết bạn',
+  like: 'Like', comment: 'Comment', join_group: 'Tham gia nhóm', leave_group: 'Rời nhóm', friend_request: 'Kết bạn',
   post: 'Đăng bài', visit_group: 'Xem nhóm', visit_profile: 'Xem profile', scan: 'Scan',
 }
 
-function DetailLogView({ data }) {
+function DetailLogView({ campaignId }) {
   const [actionFilter, setActionFilter] = useState(null)
-  const entries = data?.data || []
-  const summary = data?.summary || {}
-  const filtered = actionFilter ? entries.filter(e => e.action_type === actionFilter) : entries
+  const [accountFilter, setAccountFilter] = useState(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [entries, setEntries] = useState([])
+  const [summary, setSummary] = useState({})
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [accounts, setAccounts] = useState([])
+  const [loading, setLoading] = useState(false)
+  const latestTs = useRef(null)
+  const PER_PAGE = 30
 
-  if (!data) return <div className="text-center py-8 text-gray-400">Chưa có dữ liệu chi tiết. Chạy campaign để bắt đầu ghi log.</div>
+  // Fetch page data
+  const fetchPage = useCallback(async (page, action, account) => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ limit: PER_PAGE, page })
+      if (action) params.set('action_type', action)
+      if (account) params.set('account_id', account)
+      const res = await api.get(`/campaigns/${campaignId}/activity-log?${params}`)
+      const d = res.data
+      setEntries(d.data || [])
+      setSummary(d.summary || {})
+      setTotal(d.total || 0)
+      setTotalPages(d.total_pages || 1)
+      if (d.accounts?.length) setAccounts(d.accounts)
+      // Track latest timestamp for polling (page 1 only, no filters)
+      if (page === 1 && !action && !account && d.data?.[0]?.created_at) {
+        latestTs.current = d.data[0].created_at
+      }
+    } catch {}
+    setLoading(false)
+  }, [campaignId])
+
+  // Initial load
+  useEffect(() => {
+    fetchPage(1, null, null)
+    setCurrentPage(1)
+    setActionFilter(null)
+    setAccountFilter(null)
+  }, [campaignId, fetchPage])
+
+  // Poll for new entries (page 1 only, no filters)
+  useEffect(() => {
+    if (currentPage !== 1 || actionFilter || accountFilter) return
+    const timer = setInterval(async () => {
+      if (!latestTs.current) return
+      try {
+        const res = await api.get(`/campaigns/${campaignId}/activity-log?after=${latestTs.current}&limit=20`)
+        const fresh = res.data?.data || []
+        if (fresh.length > 0) {
+          setEntries(prev => {
+            const ids = new Set(prev.map(e => e.id))
+            const newOnes = fresh.filter(e => !ids.has(e.id))
+            return newOnes.length ? [...newOnes, ...prev].slice(0, PER_PAGE) : prev
+          })
+          if (fresh[0].created_at > latestTs.current) latestTs.current = fresh[0].created_at
+          if (res.data?.summary) setSummary(res.data.summary)
+          if (res.data?.total) setTotal(res.data.total)
+        }
+      } catch {}
+    }, 10000)
+    return () => clearInterval(timer)
+  }, [campaignId, currentPage, actionFilter, accountFilter])
+
+  // Handle filter/page change
+  const changePage = (p) => { setCurrentPage(p); fetchPage(p, actionFilter, accountFilter) }
+  const changeAction = (a) => { const v = actionFilter === a ? null : a; setActionFilter(v); setCurrentPage(1); fetchPage(1, v, accountFilter) }
+  const changeAccount = (id) => { const v = accountFilter === id ? null : id; setAccountFilter(v); setCurrentPage(1); fetchPage(1, actionFilter, v) }
+
+  if (!entries.length && !total && !loading) return <div className="text-center py-8 text-gray-400">Chưa có dữ liệu chi tiết. Chạy campaign để bắt đầu ghi log.</div>
 
   return (
     <div className="space-y-3">
-      {/* Summary pills */}
-      <div className="flex gap-1.5 flex-wrap">
-        <button onClick={() => setActionFilter(null)}
-          className={`px-3 py-1.5 rounded-full text-xs font-medium ${!actionFilter ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-          Tất cả ({entries.length})
-        </button>
-        {Object.entries(summary).map(([type, counts]) => (
-          <button key={type} onClick={() => setActionFilter(actionFilter === type ? null : type)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium ${actionFilter === type ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-            {ACTION_ICONS[type] || '•'} {ACTION_LABELS[type] || type} ({counts.total})
+      {/* Filters row */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        {/* Action filter pills */}
+        <div className="flex gap-1.5 flex-wrap">
+          <button onClick={() => changeAction(null)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium ${!actionFilter ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            Tất cả ({total})
           </button>
-        ))}
+          {Object.entries(summary).map(([type, counts]) => (
+            <button key={type} onClick={() => changeAction(type)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${actionFilter === type ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              {ACTION_ICONS[type] || '•'} {ACTION_LABELS[type] || type} ({counts.total})
+            </button>
+          ))}
+        </div>
+        {/* Account filter dropdown */}
+        {accounts.length > 1 && (
+          <select value={accountFilter || ''} onChange={e => changeAccount(e.target.value || null)}
+            className="text-xs border rounded-lg px-2 py-1.5 bg-white text-gray-600">
+            <option value="">Tất cả nick</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        )}
       </div>
 
       {/* Detail entries */}
-      <div className="bg-white rounded-xl border border-gray-200 divide-y max-h-[600px] overflow-y-auto">
-        {filtered.length === 0 && (
+      <div className="bg-white rounded-xl border border-gray-200 divide-y">
+        {loading && !entries.length && (
+          <div className="text-center py-8 text-gray-400"><Loader className="animate-spin inline mr-1" size={14} /> Đang tải...</div>
+        )}
+        {!loading && entries.length === 0 && (
           <div className="text-center py-8 text-gray-400">Không có hoạt động</div>
         )}
-        {filtered.map(entry => (
+        {entries.map(entry => (
           <div key={entry.id} className="px-4 py-2.5 hover:bg-gray-50 transition-colors">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -619,7 +694,9 @@ function DetailLogView({ data }) {
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs font-medium text-gray-700">{ACTION_LABELS[entry.action_type] || entry.action_type}</span>
                     {entry.target_name && (
-                      <span className="text-xs text-gray-500 truncate max-w-[200px]">{entry.target_name}</span>
+                      entry.target_url
+                        ? <a href={entry.target_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate max-w-[200px]">{entry.target_name}</a>
+                        : <span className="text-xs text-gray-500 truncate max-w-[200px]">{entry.target_name}</span>
                     )}
                     <span className="text-[10px] text-gray-300">•</span>
                     <span className="text-[10px] text-gray-400">{entry.account_name}</span>
@@ -629,6 +706,9 @@ function DetailLogView({ data }) {
                   )}
                   {entry.details?.comment_text && (
                     <p className="text-[10px] text-gray-400 mt-0.5 truncate">"{entry.details.comment_text}"</p>
+                  )}
+                  {entry.details?.post_url && (
+                    <a href={entry.details.post_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">[xem bài]</a>
                   )}
                 </div>
               </div>
@@ -642,8 +722,32 @@ function DetailLogView({ data }) {
           </div>
         ))}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1">
+          <button onClick={() => changePage(Math.max(1, currentPage - 1))} disabled={currentPage <= 1}
+            className="px-2 py-1 text-xs rounded border disabled:opacity-30 hover:bg-gray-50">←</button>
+          {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+            let p
+            if (totalPages <= 7) p = i + 1
+            else if (currentPage <= 4) p = i + 1
+            else if (currentPage >= totalPages - 3) p = totalPages - 6 + i
+            else p = currentPage - 3 + i
+            return (
+              <button key={p} onClick={() => changePage(p)}
+                className={`px-2.5 py-1 text-xs rounded border ${p === currentPage ? 'bg-gray-900 text-white border-gray-900' : 'hover:bg-gray-50'}`}>
+                {p}
+              </button>
+            )
+          })}
+          <button onClick={() => changePage(Math.min(totalPages, currentPage + 1))} disabled={currentPage >= totalPages}
+            className="px-2 py-1 text-xs rounded border disabled:opacity-30 hover:bg-gray-50">→</button>
+        </div>
+      )}
+
       <p className="text-center text-[10px] text-gray-300">
-        {data?.total > entries.length ? `Hiển thị ${entries.length}/${data.total}` : `${entries.length} hoạt động`} • Cập nhật mỗi 10 giây
+        {total} hoạt động{currentPage === 1 && !actionFilter && !accountFilter ? ' • Tự động cập nhật' : ''}
       </p>
     </div>
   )

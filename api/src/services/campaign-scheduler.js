@@ -242,27 +242,72 @@ async function executeRoleCampaign(campaign) {
   let jobsSkipped = 0
   let roleDelay = 0
 
-  for (const role of roles) {
+  // ── Role dependency check: sort roles by dependency order ──
+  // scout → nurture → connect (scout must complete before nurture starts)
+  const ROLE_ORDER = { scout: 0, scan_members: 1, nurture: 2, interact: 3, connect: 4, post: 5, custom: 2 }
+  const sortedRoles = [...roles].sort((a, b) => (ROLE_ORDER[a.role_type] || 5) - (ROLE_ORDER[b.role_type] || 5))
+
+  // Check if dependency roles have completed their latest jobs
+  const roleCompletionCache = {}
+  async function isRoleDependencyMet(role) {
+    if (!role.read_from) return true // no dependency
+    const depRoleId = role.read_from
+    if (roleCompletionCache[depRoleId] !== undefined) return roleCompletionCache[depRoleId]
+
+    // Check if dependency role has at least 1 completed job in last 24h
+    const { data: depJobs } = await supabase.from('jobs')
+      .select('id')
+      .filter('payload->>campaign_id', 'eq', campaign.id)
+      .filter('payload->>role_id', 'eq', depRoleId)
+      .eq('status', 'done')
+      .gte('finished_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .limit(1)
+    const met = (depJobs?.length || 0) > 0
+    roleCompletionCache[depRoleId] = met
+    return met
+  }
+
+  // ── Round-robin: track last used account per role ──
+  // Use campaign.meta?.round_robin_state or start fresh
+  const rrState = campaign.meta?.round_robin_state || {}
+
+  const jobTypeMap = {
+    scout: 'campaign_discover_groups',
+    scan_members: 'campaign_scan_members',
+    nurture: 'campaign_nurture',
+    connect: 'campaign_send_friend_request',
+    interact: 'campaign_interact_profile',
+    post: 'campaign_post',
+    custom: 'campaign_nurture',
+  }
+
+  for (const role of sortedRoles) {
     const accountIds = (role.account_ids || []).filter(id => activeAccountSet.has(id))
     if (accountIds.length === 0) {
       console.log(`[SCHEDULER] Role ${role.name || role.role_type} has no active accounts, skipping`)
       continue
     }
 
-    // Map role_type to job type
-    const jobTypeMap = {
-      scout: 'campaign_discover_groups',
-      scan_members: 'campaign_scan_members',
-      nurture: 'campaign_nurture',
-      connect: 'campaign_send_friend_request',
-      interact: 'campaign_interact_profile',
-      post: 'campaign_post',
-      custom: 'campaign_nurture', // fallback
+    // Check role dependency
+    const depMet = await isRoleDependencyMet(role)
+    if (!depMet) {
+      console.log(`[SCHEDULER] Role ${role.name || role.role_type} dependency not met, skipping`)
+      jobsSkipped += accountIds.length
+      continue
     }
+
     const jobType = jobTypeMap[role.role_type] || 'campaign_nurture'
 
+    // Round-robin: pick next account(s) in rotation
+    const lastIdx = rrState[role.id] || 0
+    const orderedAccounts = []
     for (let i = 0; i < accountIds.length; i++) {
-      const accountId = accountIds[i]
+      orderedAccounts.push(accountIds[(lastIdx + i) % accountIds.length])
+    }
+    rrState[role.id] = (lastIdx + orderedAccounts.length) % accountIds.length
+
+    for (let i = 0; i < orderedAccounts.length; i++) {
+      const accountId = orderedAccounts[i]
 
       // Skip if duplicate job already exists
       const jobKey = `${jobType}:${accountId}`
@@ -302,6 +347,11 @@ async function executeRoleCampaign(campaign) {
     roleDelay += (campaign.role_stagger_minutes || 30) * 60
   }
 
+  // Save round-robin state
+  await supabase.from('campaigns').update({
+    meta: { ...(campaign.meta || {}), round_robin_state: rrState }
+  }).eq('id', campaign.id)
+
   // Calculate next run
   const nextRun = calculateNextRun(campaign)
   await supabase.from('campaigns').update({
@@ -312,6 +362,139 @@ async function executeRoleCampaign(campaign) {
   }).eq('id', campaign.id)
 
   console.log(`[SCHEDULER] Role campaign ${campaign.name || campaign.id}: ${jobsCreated} jobs created, ${jobsSkipped} skipped (dup), ${roles.length} roles, next: ${nextRun || 'completed'}`)
+
+  // ── AI Supreme Control: evaluate after every 3rd run ──
+  if ((campaign.total_runs || 0) % 3 === 0 && campaign.total_runs > 0) {
+    aiEvaluateCampaign(campaign, roles).catch(err =>
+      console.warn(`[AI-CTRL] Evaluation failed for ${campaign.id}: ${err.message}`)
+    )
+  }
+}
+
+/**
+ * AI Supreme Control — evaluates campaign results and auto-adjusts
+ * Runs every 3rd campaign execution. Can:
+ * - Adjust parsed_plan counts (increase/decrease actions)
+ * - Pause underperforming roles
+ * - Reallocate nicks between roles
+ * - Log decisions to campaign_activity_log
+ */
+async function aiEvaluateCampaign(campaign, roles) {
+  // Gather results from last 24h
+  const { data: activityStats } = await supabase
+    .from('campaign_activity_log')
+    .select('action_type, result_status, account_id')
+    .eq('campaign_id', campaign.id)
+    .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+
+  if (!activityStats?.length) return
+
+  const summary = {}
+  const accountPerf = {}
+  for (const s of activityStats) {
+    if (!summary[s.action_type]) summary[s.action_type] = { total: 0, success: 0, failed: 0 }
+    summary[s.action_type].total++
+    if (s.result_status === 'success') summary[s.action_type].success++
+    if (s.result_status === 'failed') summary[s.action_type].failed++
+
+    // Per-account performance
+    if (s.account_id) {
+      if (!accountPerf[s.account_id]) accountPerf[s.account_id] = { total: 0, success: 0, failed: 0 }
+      accountPerf[s.account_id].total++
+      if (s.result_status === 'success') accountPerf[s.account_id].success++
+      if (s.result_status === 'failed') accountPerf[s.account_id].failed++
+    }
+  }
+
+  const summaryText = Object.entries(summary).map(([k, v]) =>
+    `${k}: ${v.total} (success: ${v.success}, failed: ${v.failed})`
+  ).join('\n')
+
+  const accountText = Object.entries(accountPerf).map(([id, v]) =>
+    `${id.slice(0, 8)}: ${v.total} actions, ${v.failed} failed`
+  ).join('\n')
+
+  // Call AI for evaluation
+  try {
+    const { getOrchestratorForUser } = require('./ai/orchestrator')
+    const orchestrator = await getOrchestratorForUser(campaign.owner_id, supabase)
+
+    const prompt = `Ban la AI dieu khien chien dich marketing tren Facebook.
+Campaign: "${campaign.name}" (topic: ${campaign.topic})
+Da chay ${campaign.total_runs} lan.
+
+Ket qua 24h qua:
+${summaryText}
+
+Hieu suat per-nick:
+${accountText}
+
+Roles hien tai:
+${roles.map(r => `- ${r.name} (${r.role_type}): ${(r.account_ids || []).length} nick`).join('\n')}
+
+Hay tra loi JSON voi cac quyet dinh:
+{
+  "adjustments": [
+    {"role_id": "...", "action": "increase|decrease|pause|resume", "field": "count_max|count_min", "value": number, "reason": "..."}
+  ],
+  "overall_assessment": "good|warning|critical",
+  "recommendation": "..."
+}
+Chi tra ve JSON, khong giai thich them.`
+
+    const result = await orchestrator.call('caption_gen', [
+      { role: 'user', content: prompt }
+    ], { max_tokens: 500, temperature: 0.2 })
+
+    const text = result?.text || result || ''
+    const match = text.match(/\{[\s\S]*\}/)
+    if (match) {
+      const decisions = JSON.parse(match[0])
+
+      // Apply adjustments
+      for (const adj of (decisions.adjustments || [])) {
+        if (!adj.role_id || !adj.action) continue
+
+        if (adj.action === 'pause') {
+          await supabase.from('campaign_roles').update({ is_active: false }).eq('id', adj.role_id)
+          console.log(`[AI-CTRL] Paused role ${adj.role_id}: ${adj.reason}`)
+        } else if (adj.action === 'resume') {
+          await supabase.from('campaign_roles').update({ is_active: true }).eq('id', adj.role_id)
+          console.log(`[AI-CTRL] Resumed role ${adj.role_id}: ${adj.reason}`)
+        } else if ((adj.action === 'increase' || adj.action === 'decrease') && adj.field && adj.value) {
+          const role = roles.find(r => r.id === adj.role_id)
+          if (role?.parsed_plan) {
+            const plan = typeof role.parsed_plan === 'string' ? JSON.parse(role.parsed_plan) : role.parsed_plan
+            for (const step of plan) {
+              if (step[adj.field] !== undefined) {
+                step[adj.field] = Math.max(1, adj.value)
+              }
+            }
+            await supabase.from('campaign_roles').update({ parsed_plan: plan }).eq('id', adj.role_id)
+            console.log(`[AI-CTRL] Adjusted role ${adj.role_id} ${adj.field}=${adj.value}: ${adj.reason}`)
+          }
+        }
+      }
+
+      // Log AI decision
+      await supabase.from('campaign_activity_log').insert({
+        campaign_id: campaign.id,
+        action_type: 'ai_control',
+        result_status: decisions.overall_assessment || 'success',
+        details: {
+          assessment: decisions.overall_assessment,
+          recommendation: decisions.recommendation,
+          adjustments: decisions.adjustments,
+          run_number: campaign.total_runs,
+        },
+        created_at: new Date().toISOString(),
+      })
+
+      console.log(`[AI-CTRL] Campaign ${campaign.name}: ${decisions.overall_assessment} — ${decisions.recommendation}`)
+    }
+  } catch (err) {
+    console.warn(`[AI-CTRL] AI evaluation error: ${err.message}`)
+  }
 }
 
 // ============================================

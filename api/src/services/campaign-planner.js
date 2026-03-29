@@ -90,11 +90,34 @@ async function parseMission(mission, context, userId, supabase) {
       typeof n === 'object' ? `${n.name} (${n.age_days} ngay, ${n.status})` : String(n)
     ).join(', ')
 
+    // Fetch prior campaign results for AI context
+    let priorContext = ''
+    if (context.campaignId) {
+      try {
+        const { data: priorStats } = await supabase
+          .from('campaign_activity_log')
+          .select('action_type, result_status')
+          .eq('campaign_id', context.campaignId)
+        if (priorStats?.length > 0) {
+          const summary = {}
+          for (const s of priorStats) {
+            if (!summary[s.action_type]) summary[s.action_type] = { total: 0, success: 0 }
+            summary[s.action_type].total++
+            if (s.result_status === 'success') summary[s.action_type].success++
+          }
+          const lines = Object.entries(summary).map(([k, v]) =>
+            `${k}: ${v.total} (thanh cong: ${v.success}/${v.total})`
+          )
+          priorContext = `\nKet qua lan truoc: ${lines.join(', ')}`
+        }
+      } catch {}
+    }
+
     const userPrompt = `Chu de: ${context.topic || 'general'}
 Loai role: ${context.roleType || 'custom'}
 So nick: ${context.accountCount || 1}
 ${context.accountNames ? `Ten nick: ${context.accountNames.join(', ')}` : ''}
-${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}
+${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}${priorContext}
 
 Nhiem vu: ${mission}`
 
