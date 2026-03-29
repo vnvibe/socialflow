@@ -24,16 +24,15 @@ async function getSession(account, opts = {}) {
 
   const existing = sessions.get(id)
   if (existing && !existing.closing) {
-    // Check browser còn sống không
+    // Check context còn sống không
     try {
-      const contexts = existing.browser.contexts()
-      if (contexts.length > 0) {
-        existing.lastUsed = Date.now()
-        console.log(`[SESSION-POOL] Reusing session for ${account.username || id}`)
-        return existing
-      }
+      const pages = existing.context.pages()
+      existing.lastUsed = Date.now()
+      console.log(`[SESSION-POOL] Reusing session for ${account.username || id} (${pages.length} tabs)`)
+      return existing
     } catch {
-      // Browser đã chết, xóa và tạo mới
+      // Browser/context đã chết, xóa và tạo mới
+      console.log(`[SESSION-POOL] Session dead for ${account.username || id}, recreating...`)
       sessions.delete(id)
     }
   }
@@ -54,6 +53,7 @@ async function getSession(account, opts = {}) {
     context: session.context,
     storageFile: session.storageFile,
     profileDir: session.profileDir,
+    isPersistent: true, // launchPersistentContext — browser data tách riêng mỗi nick
     lastUsed: Date.now(),
     closing: false,
     busy: false,
@@ -64,13 +64,35 @@ async function getSession(account, opts = {}) {
   return entry
 }
 
+// Per-account lock to prevent concurrent getPage for same nick
+const sessionLocks = new Map()
+
 /**
  * Tạo page mới với cookies từ account
  * @param {object} account - account record từ DB
  * @param {object} opts - { headless: boolean } - override headless mode
  */
 async function getPage(account, opts = {}) {
-  const session = await getSession(account, opts)
+  const id = account.id || account.account_id
+
+  // Wait for any pending getPage for this account (prevent concurrent access)
+  while (sessionLocks.has(id)) {
+    await sessionLocks.get(id)
+  }
+  let lockResolve
+  sessionLocks.set(id, new Promise(r => { lockResolve = r }))
+
+  try {
+  return await _getPageInternal(account, opts)
+  } finally {
+    sessionLocks.delete(id)
+    lockResolve()
+  }
+}
+
+async function _getPageInternal(account, opts = {}) {
+  let session = await getSession(account, opts)
+  const id = account.id || account.account_id
   session.busy = true
 
   // Reuse tab đang có thay vì mở tab mới
@@ -81,12 +103,26 @@ async function getPage(account, opts = {}) {
     if (page) console.log(`[SESSION-POOL] Reusing existing tab for ${account.username || account.id}`)
   } catch {}
 
+  const isNewPage = !page
   if (!page) {
-    page = await session.context.newPage()
+    try {
+      page = await session.context.newPage()
+    } catch (err) {
+      // Context/browser died — destroy and recreate
+      console.log(`[SESSION-POOL] newPage failed: ${err.message}, recreating session...`)
+      sessions.delete(id)
+      const fresh = await getSession(account, opts)
+      session = fresh // reassign for cookie injection below
+      try {
+        const freshPages = fresh.context.pages()
+        page = freshPages.find(p => !p.isClosed()) || null
+      } catch {}
+      if (!page) page = await fresh.context.newPage()
+    }
   }
 
-  // Set cookies nếu có cookie_string
-  if (account.cookie_string) {
+  // Set cookies — chỉ inject khi session mới (persistent context giữ cookies tự động)
+  if (account.cookie_string && !session._cookiesInjected) {
     const cookies = account.cookie_string.split(';').map(c => {
       const [name, ...rest] = c.trim().split('=')
       return name ? {
@@ -99,7 +135,35 @@ async function getPage(account, opts = {}) {
       } : null
     }).filter(Boolean)
     await session.context.addCookies(cookies)
+    session._cookiesInjected = true
+    console.log(`[SESSION-POOL] Cookies injected for ${account.username || account.id} (${cookies.length} cookies)`)
   }
+
+  // Warmup: navigate FB nếu page đang blank hoặc chưa ở facebook
+  const currentUrl = page.url()
+  const needsWarmup = !currentUrl || currentUrl === 'about:blank' || !currentUrl.includes('facebook.com')
+  if (needsWarmup) {
+    try {
+      console.log(`[SESSION-POOL] Warming up ${account.username || id} (was: ${currentUrl})`)
+      await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 })
+      await page.waitForTimeout(2000)
+      const url = page.url()
+      if (url.includes('/login') || url.includes('checkpoint')) {
+        console.warn(`[SESSION-POOL] Session not logged in for ${account.username || id}: ${url}`)
+      }
+    } catch (err) {
+      console.warn(`[SESSION-POOL] FB warmup failed for ${account.username || id}: ${err.message}`)
+    }
+  }
+
+  // Dismiss any lingering dialogs from previous job (e.g. open composer)
+  try {
+    const hasDialog = await page.locator('[role="dialog"]').first().isVisible({ timeout: 500 }).catch(() => false)
+    if (hasDialog) {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(300)
+    }
+  } catch {}
 
   return { page, session }
 }
@@ -126,10 +190,8 @@ async function closeSession(accountId) {
   console.log(`[SESSION-POOL] Closing session for ${accountId}`)
 
   try {
-    await session.context.storageState({ path: session.storageFile })
-  } catch {}
-  try {
-    await session.browser.close()
+    // Persistent context: close context = close browser
+    await session.context.close()
   } catch {}
 
   sessions.delete(accountId)

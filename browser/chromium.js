@@ -9,6 +9,8 @@ async function launchChromium(options = {}) {
       '--no-sandbox',
       '--disable-infobars',
       '--disable-dev-shm-usage',
+      '--disable-session-crashed-bubble',
+      '--hide-crash-restore-bubble',
       ...(options.args || [])
     ],
     ...(options.proxy && { proxy: options.proxy })

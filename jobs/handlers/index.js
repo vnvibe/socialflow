@@ -2,7 +2,6 @@ const postPageHandler = require('./post-page')
 const postPageGraphHandler = require('./post-page-graph')
 const postGroupHandler = require('./post-group')
 const postProfileHandler = require('./post-profile')
-const processVideoHandler = require('./process-video')
 const checkHealthHandler = require('./check-health')
 const fetchPagesHandler = require('./fetch-pages')
 const fetchGroupsHandler = require('./fetch-groups')
@@ -22,6 +21,8 @@ const campaignScanMembersHandler = require('./campaign-scan-members')
 const campaignNurtureHandler = require('./campaign-nurture')
 const campaignSendFriendRequestHandler = require('./campaign-send-friend-request')
 const campaignInteractProfileHandler = require('./campaign-interact-profile')
+const campaignPostHandler = require('./campaign-post')
+const campaignCleanupGroupsHandler = require('./campaign-cleanup-groups')
 const watchMyPostsHandler = require('./watch-my-posts')
 
 module.exports = {
@@ -29,7 +30,6 @@ module.exports = {
   post_page_graph: postPageGraphHandler,
   post_group: postGroupHandler,
   post_profile: postProfileHandler,
-  process_video: processVideoHandler,
   check_health: checkHealthHandler,
   fetch_pages: fetchPagesHandler,
   fetch_groups: fetchGroupsHandler,
@@ -49,5 +49,7 @@ module.exports = {
   campaign_nurture: campaignNurtureHandler,
   campaign_send_friend_request: campaignSendFriendRequestHandler,
   campaign_interact_profile: campaignInteractProfileHandler,
+  campaign_post: campaignPostHandler,
+  campaign_cleanup_groups: campaignCleanupGroupsHandler,
   watch_my_posts: watchMyPostsHandler,
 }

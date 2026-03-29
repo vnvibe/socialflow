@@ -102,14 +102,14 @@ async function campaignPost(payload, supabase) {
   let targetFbId = null
 
   if (targetType === 'page' && targetId) {
-    const { data: page } = await supabase.from('fanpages').select('*').eq('id', targetId).single()
+    const { data: page } = await supabase.from('fanpages').select('*').eq('id', targetId).eq('account_id', account_id).single()
     if (page) {
       targetUrl = page.url || `https://www.facebook.com/${page.fb_page_id}`
       targetName = page.name
       targetFbId = page.fb_page_id
     }
   } else if (targetType === 'group' && targetId) {
-    const { data: group } = await supabase.from('fb_groups').select('*').eq('id', targetId).single()
+    const { data: group } = await supabase.from('fb_groups').select('*').eq('id', targetId).eq('account_id', account_id).single()
     if (group) {
       targetUrl = group.url || `https://www.facebook.com/groups/${group.fb_group_id}`
       targetName = group.name
@@ -221,7 +221,7 @@ async function campaignPost(payload, supabase) {
     throw err
   } finally {
     await logger.flush().catch(() => {})
-    if (page) await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
+    if (page) // Keep page on FB for session reuse
     releaseSession(account_id)
   }
 }

@@ -33,7 +33,11 @@ const pool = new NickPool()
 const nickCooldowns = new Map()        // account_id → { lastPostAt, cooldownMs }
 const nickBudgetCache = new Map()      // account_id → { budget, fetchedAt }
 const nickActionTimestamps = new Map() // `${accId}:${actionType}` → lastActionAt
+const nickHourlyActions = new Map()    // account_id → { count, resetAt }
+const accountStatusCache = new Map()   // account_id → { is_active, status, fetchedAt }
 const BUDGET_CACHE_TTL = 60000         // 1 min
+const STATUS_CACHE_TTL = 60000         // 1 min
+const MAX_HOURLY_ACTIONS = 50          // cumulative across all types
 
 const JOB_ACTION_MAP = {
   post_page: 'post', post_page_graph: 'post', post_group: 'post', post_profile: 'post',
@@ -117,6 +121,28 @@ async function poll() {
         }
       }
 
+      // Per-nick account status check (skip disabled/checkpoint/expired accounts)
+      if (accId) {
+        const statusOk = await checkAccountActive(accId)
+        if (!statusOk) {
+          console.log(`[POLLER] Nick ${accId.slice(0,8)} not active, skipping job ${job.id}`)
+          continue
+        }
+      }
+
+      // Per-nick hourly rate limit (max 50 actions/hour across all types)
+      if (accId) {
+        const hourly = nickHourlyActions.get(accId)
+        if (hourly) {
+          if (Date.now() > hourly.resetAt) {
+            nickHourlyActions.set(accId, { count: 0, resetAt: Date.now() + 3600000 })
+          } else if (hourly.count >= MAX_HOURLY_ACTIONS) {
+            console.log(`[POLLER] Nick ${accId.slice(0,8)} hit hourly limit (${MAX_HOURLY_ACTIONS}), skipping`)
+            continue
+          }
+        }
+      }
+
       // Per-nick budget pre-check (avoid claiming if daily limit already reached)
       if (actionType && accId) {
         const budgetOk = await checkBudgetBeforeClaim(accId, actionType)
@@ -126,29 +152,58 @@ async function poll() {
         }
       }
 
-      // Claim job
+      // ATOMIC: Acquire pool slot BEFORE claiming in DB
+      // This prevents race: two poll cycles both see nick as free
+      if (accId) pool.acquire(accId, job.id)
+
+      // Claim job in DB (atomic via WHERE status='pending')
       const { error } = await supabase.from('jobs')
         .update({ status: 'claimed', agent_id: AGENT_ID, started_at: new Date() })
         .eq('id', job.id)
         .eq('status', 'pending')
 
-      if (error) continue  // another agent claimed it first
+      if (error) {
+        // Another agent claimed it — release pool slot
+        if (accId) pool.release(accId, job.id)
+        continue
+      }
 
-      pool.acquire(accId, job.id)
+      // Set pessimistic cooldown + timestamps AT CLAIM TIME (not after completion)
+      // This prevents next poll from picking up another job for this nick
+      if (isPostJob && accId) {
+        nickCooldowns.set(accId, { lastPostAt: Date.now(), cooldownMs: 10 * 60000 }) // pessimistic 10min
+      }
+      if (actionType && accId) {
+        nickActionTimestamps.set(`${accId}:${actionType}`, Date.now())
+      }
+      // Optimistic budget increment (prevents race: 2 jobs same nick in 1 poll cycle)
+      if (actionType && accId) {
+        const cached = nickBudgetCache.get(accId)
+        if (cached?.budget?.[actionType]) {
+          cached.budget[actionType].used = (cached.budget[actionType].used || 0) + 1
+        }
+      }
+      // Increment hourly counter
+      if (accId) {
+        const hourly = nickHourlyActions.get(accId) || { count: 0, resetAt: Date.now() + 3600000 }
+        hourly.count++
+        nickHourlyActions.set(accId, hourly)
+      }
+
       console.log(`[JOB] Claimed ${job.type} (${job.id}) [${pool.running.size}/${MAX_CONCURRENT} slots]`)
 
       // Fire & forget — don't await, allows concurrent execution
       executeJob(job).finally(() => {
         pool.release(accId, job.id)
 
-        // Per-nick post cooldown
+        // Update cooldown with actual value (overwrite pessimistic)
         if (isPostJob && accId) {
           const cd = postCooldown()
           nickCooldowns.set(accId, { lastPostAt: Date.now(), cooldownMs: cd })
           console.log(`[POLLER] Nick ${accId.slice(0,8)} post done, cooldown: ${(cd / 60000).toFixed(1)}min`)
         }
 
-        // Track action timestamp for gap enforcement
+        // Update action timestamp (overwrite claim-time value)
         if (actionType && accId) {
           nickActionTimestamps.set(`${accId}:${actionType}`, Date.now())
         }
@@ -184,6 +239,17 @@ async function executeJob(job) {
   try {
     await updateJobStatus(job.id, 'running')
     console.log(`[JOB] Running ${handlerKey} (${job.id})`)
+
+    // Check campaign still active (for campaign jobs only)
+    if (job.payload?.campaign_id && handlerKey.startsWith('campaign_')) {
+      const { data: camp } = await supabase.from('campaigns')
+        .select('status').eq('id', job.payload.campaign_id).single()
+      if (camp && camp.status !== 'active') {
+        console.log(`[JOB] Campaign ${job.payload.campaign_id} is ${camp.status}, skipping job`)
+        await updateJobStatus(job.id, 'done', { skipped: true, reason: `campaign_${camp.status}` })
+        return
+      }
+    }
 
     // Re-check in case user cancelled after claim
     const { data: statusRow } = await supabase
@@ -247,6 +313,8 @@ async function executeJob(job) {
         .update({ status: newStatus, is_active: false })
         .eq('id', job.payload.account_id)
       console.log(`[JOB] Account ${job.payload.account_id} marked as ${newStatus}`)
+      // Invalidate status cache immediately
+      accountStatusCache.delete(job.payload.account_id)
 
       // Auto-queue health check to try refreshing cookie (only for SESSION_EXPIRED, not CHECKPOINT)
       if (classified.type === 'SESSION_EXPIRED') {
@@ -399,6 +467,28 @@ function startPoller() {
 let stopPoller = async () => {} // set by startPoller
 
 function getPool() { return pool }
+
+// ─── Per-nick account status check ──────────────────────
+async function checkAccountActive(accountId) {
+  try {
+    const cached = accountStatusCache.get(accountId)
+    if (cached && Date.now() - cached.fetchedAt < STATUS_CACHE_TTL) {
+      return cached.is_active === true
+    }
+    const { data } = await supabase
+      .from('accounts')
+      .select('is_active, status')
+      .eq('id', accountId)
+      .single()
+    if (data) {
+      accountStatusCache.set(accountId, { ...data, fetchedAt: Date.now() })
+      return data.is_active === true
+    }
+    return true // account not found — let handler deal with it
+  } catch {
+    return true
+  }
+}
 
 // ─── Per-nick budget pre-check ───────────────────────────
 async function checkBudgetBeforeClaim(accountId, actionType) {

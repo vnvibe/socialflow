@@ -8,7 +8,7 @@
 const { getPage, releaseSession } = require('../../browser/session-pool')
 const { delay, humanScroll, humanMouseMove } = require('../../browser/human')
 const { checkAccountStatus, saveDebugScreenshot } = require('./post-utils')
-const { checkHardLimit } = require('../../lib/hard-limits')
+const { checkHardLimit, SessionTracker, applyAgeFactor } = require('../../lib/hard-limits')
 const R = require('../../lib/randomizer')
 const { getActionParams } = require('../../lib/plan-executor')
 const { generateComment } = require('../../lib/ai-comment')
@@ -36,8 +36,15 @@ async function campaignNurture(payload, supabase) {
   const likeBudget = account.daily_budget?.like || { used: 0, max: 80 }
   const commentBudget = account.daily_budget?.comment || { used: 0, max: 25 }
 
+  const tracker = new SessionTracker()
+  const nickAge = Math.floor((Date.now() - new Date(account.created_at).getTime()) / 86400000)
+
   const likeCheck = checkHardLimit('like', likeBudget.used, 0)
   const commentCheck = checkHardLimit('comment', commentBudget.used, 0)
+
+  // Apply age factor for newer accounts
+  const maxLikesSession = applyAgeFactor(likeCheck.remaining, nickAge)
+  const maxCommentsSession = applyAgeFactor(commentCheck.remaining, nickAge)
 
   if (!likeCheck.allowed && !commentCheck.allowed) {
     throw new Error('SKIP_nurture_budget_exceeded')
@@ -79,43 +86,72 @@ async function campaignNurture(payload, supabase) {
   }
 
   if (!groups.length) {
-    // Lấy groups của account — ưu tiên filter theo campaign topic
-    const { data: dbGroups } = await supabase
-      .from('fb_groups')
-      .select('fb_group_id, name, url')
+    // Step 1: Priority — groups joined FOR THIS campaign (exact match via topic column)
+    let dbQuery = supabase.from('fb_groups')
+      .select('fb_group_id, name, url, member_count, topic, joined_via_campaign_id')
       .eq('account_id', account_id)
 
-    if (topic && dbGroups?.length) {
-      // Filter groups liên quan đến topic bằng keyword matching đơn giản
-      const keywords = topic.toLowerCase().split(/[\s,]+/).filter(k => k.length > 2)
-      const relevant = dbGroups.filter(g => {
-        const name = (g.name || '').toLowerCase()
-        return keywords.some(kw => name.includes(kw))
-      })
-      if (relevant.length > 0) {
-        groups = relevant
-        console.log(`[NURTURE] Filtered ${relevant.length}/${dbGroups.length} groups matching topic: ${topic}`)
+    if (topic && campaign_id) {
+      // First try: groups joined by this campaign
+      const { data: campaignGroups } = await dbQuery.eq('joined_via_campaign_id', campaign_id)
+      if (campaignGroups?.length) {
+        groups = campaignGroups
+        console.log(`[NURTURE] Using ${groups.length} groups joined by this campaign`)
+      }
+    }
+
+    // Step 2: If no campaign-specific groups, try topic-matched groups
+    if (!groups.length) {
+      const { data: allGroups } = await supabase.from('fb_groups')
+        .select('fb_group_id, name, url, member_count, topic, joined_via_campaign_id')
+        .eq('account_id', account_id)
+
+      if (!allGroups?.length) {
+        // Không có nhóm nào — sẽ chạy scout bên dưới
+      } else if (!topic) {
+        groups = allGroups
+        console.log(`[NURTURE] No topic filter — using all ${groups.length} groups`)
       } else {
-        // Nếu không match keyword nào → dùng AI filter (nếu có)
-        try {
-          const { filterRelevantGroups } = require('../../lib/ai-filter')
-          const aiFiltered = await filterRelevantGroups(dbGroups, topic, payload.owner_id)
-          if (aiFiltered.length > 0) {
-            groups = aiFiltered
-            console.log(`[NURTURE] AI filtered ${aiFiltered.length}/${dbGroups.length} groups for topic: ${topic}`)
-          } else {
-            console.log(`[NURTURE] No groups match topic "${topic}" — skipping to avoid visiting unrelated groups`)
+        // DB topic match first (nhóm đã được tag topic khi join)
+        const topicMatched = allGroups.filter(g => g.topic && topic.toLowerCase().includes(g.topic.toLowerCase()))
+        if (topicMatched.length > 0) {
+          groups = topicMatched
+          console.log(`[NURTURE] Found ${groups.length} groups with matching topic tag`)
+        } else {
+          // Fallback: AI filter
+          try {
+            const { filterRelevantGroups } = require('../../lib/ai-filter')
+            const aiFiltered = await filterRelevantGroups(allGroups, topic, payload.owner_id, account_id)
+            // Log AI filter decision to activity log
+            const meta = aiFiltered._filterMeta || {}
+            logger.log('ai_filter', {
+              target_type: 'group', target_name: topic,
+              result_status: aiFiltered.length > 0 ? 'success' : 'skipped',
+              details: { ...meta, topic },
+            })
+            if (aiFiltered.length > 0) {
+              groups = aiFiltered
+              console.log(`[NURTURE] AI filtered ${aiFiltered.length}/${allGroups.length} groups for topic: ${topic}`)
+            } else {
+              console.log(`[NURTURE] AI says 0/${allGroups.length} groups match "${topic}" — skipping`)
+            }
+          } catch (err) {
+            // AI unavailable — keyword fallback only
+            const keywords = topic.toLowerCase().split(/[\s,]+/).filter(k => k.length > 2)
+            const kwMatched = allGroups.filter(g => keywords.some(kw => (g.name || '').toLowerCase().includes(kw)))
+            if (kwMatched.length > 0) {
+              groups = kwMatched
+              console.log(`[NURTURE] AI unavailable, using ${kwMatched.length} keyword-matched groups`)
+            } else {
+              console.log(`[NURTURE] No matching groups for "${topic}" — skipping`)
+            }
           }
-        } catch {
-          console.log(`[NURTURE] No groups match topic "${topic}" — skipping`)
         }
       }
-    } else {
-      groups = dbGroups || []
     }
   }
 
-  // If no groups and parsed_plan has join_group step → run scout inline first
+  // No groups → run scout inline if plan has join_group step
   if (!groups?.length && parsed_plan?.some(s => s.action === 'join_group')) {
     console.log(`[NURTURE] No groups joined — running inline scout for topic: ${topic}`)
     try {
@@ -123,12 +159,23 @@ async function campaignNurture(payload, supabase) {
       const scoutResult = await discoverHandler(payload, supabase)
       console.log(`[NURTURE] Scout done: joined ${scoutResult.groups_joined} groups`)
 
-      // Re-fetch groups after scout
+      // Re-fetch + re-filter after scout
       const { data: newGroups } = await supabase
         .from('fb_groups')
-        .select('fb_group_id, name, url')
+        .select('fb_group_id, name, url, member_count')
         .eq('account_id', account_id)
-      groups = newGroups || []
+
+      if (topic && newGroups?.length) {
+        try {
+          const { filterRelevantGroups } = require('../../lib/ai-filter')
+          groups = await filterRelevantGroups(newGroups, topic, payload.owner_id)
+          console.log(`[NURTURE] Post-scout AI filtered: ${groups.length}/${newGroups.length}`)
+        } catch {
+          groups = newGroups || []
+        }
+      } else {
+        groups = newGroups || []
+      }
     } catch (err) {
       console.warn(`[NURTURE] Inline scout failed: ${err.message}`)
     }
@@ -203,7 +250,7 @@ async function campaignNurture(payload, supabase) {
         } catch (e) { console.warn('[NURTURE] DOM debug failed:', e.message) }
 
         // ===== LIKE POSTS (desktop, JS-based) =====
-        if (likeCheck.allowed && totalLikes < likeCheck.remaining) {
+        if (likeCheck.allowed && tracker.get('like') < maxLikesSession) {
           const maxLikes = getActionParams(parsed_plan, 'like', { countMin: 3, countMax: 5 }).count
           let likesInGroup = 0
 
@@ -211,27 +258,33 @@ async function campaignNurture(payload, supabase) {
           // This avoids Playwright selector issues with changing aria-labels
           const likeableInfo = await page.evaluate(() => {
             const results = []
-            // Find all elements that act as like buttons
-            // Strategy: look for the reaction toolbar in each post
             const articles = document.querySelectorAll('[role="article"]')
             for (const article of [...articles].slice(0, 15)) {
-              // Find the action bar area (Like / Comment / Share row)
               const allBtns = article.querySelectorAll('[role="button"]')
               for (const btn of allBtns) {
                 const label = btn.getAttribute('aria-label') || ''
                 const text = (btn.innerText || '').trim()
                 const pressed = btn.getAttribute('aria-pressed')
-                // Match like button: aria-label contains Like/Thích, or text is exactly Like/Thích
                 if (
                   (/^(Like|Thích|Thich)$/i.test(label) || /^(Like|Thích|Thich)$/i.test(text)) &&
                   pressed !== 'true'
                 ) {
-                  // Get a unique path to this element for re-selection
-                  results.push({
-                    label, text, pressed,
-                    // Create a data-nurture-id for re-selection
-                    index: results.length
-                  })
+                  // Extract post permalink from article (multiple strategies)
+                  let postUrl = null
+                  const selectors = [
+                    'a[href*="/posts/"]', 'a[href*="/permalink/"]', 'a[href*="story_fbid"]',
+                    'a[href*="/groups/"][role="link"]'
+                  ]
+                  for (const sel of selectors) {
+                    if (postUrl) break
+                    for (const link of article.querySelectorAll(sel)) {
+                      const href = link.href || ''
+                      if (href.match(/\/(posts|permalink)\/\d+/) || href.includes('story_fbid')) {
+                        postUrl = href.split('?')[0]; break
+                      }
+                    }
+                  }
+                  results.push({ label, text, pressed, index: results.length, postUrl })
                   btn.setAttribute('data-nurture-like', results.length - 1)
                 }
               }
@@ -242,7 +295,7 @@ async function campaignNurture(payload, supabase) {
           result.posts_found = likeableInfo.length
           console.log(`[NURTURE] Found ${likeableInfo.length} likeable posts in DOM`)
 
-          const likesToDo = Math.min(maxLikes, likeableInfo.length, likeCheck.remaining - totalLikes)
+          const likesToDo = Math.min(maxLikes, likeableInfo.length, maxLikesSession - tracker.get('like'))
 
           for (let i = 0; i < likesToDo; i++) {
             try {
@@ -272,12 +325,13 @@ async function campaignNurture(payload, supabase) {
               // Count as success — strict verification unreliable (FB re-renders)
               likesInGroup++
               totalLikes++
+              tracker.increment('like')
               await supabase.rpc('increment_budget', {
                 p_account_id: account_id,
                 p_action_type: 'like',
               })
-              console.log(`[NURTURE] Liked #${totalLikes}`)
-              logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name })
+              console.log(`[NURTURE] Liked #${totalLikes} (session: ${tracker.get('like')}/${maxLikesSession})`)
+              logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { post_url: likeableInfo[i]?.postUrl || null } })
 
               // Human delay between likes (minGapSeconds: 2)
               await R.sleepRange(2000, 5000)
@@ -289,34 +343,47 @@ async function campaignNurture(payload, supabase) {
         }
 
         // ===== COMMENT ON POSTS (desktop — click comment button in feed) =====
-        if (commentCheck.allowed && totalComments < commentCheck.remaining) {
+        if (commentCheck.allowed && tracker.get('comment') < maxCommentsSession) {
           const maxComments = getActionParams(parsed_plan, 'comment', { countMin: 1, countMax: 2 }).count
 
-          // Find comment buttons in articles and tag them
-          const commentableCount = await page.evaluate(() => {
+          // Find comment buttons in articles, tag them, extract post URLs
+          const commentableInfo = await page.evaluate(() => {
             const articles = document.querySelectorAll('[role="article"]')
-            let count = 0
+            const results = []
             for (const article of [...articles].slice(0, 10)) {
-              // Search all interactive elements (buttons, links, spans with role)
               const candidates = article.querySelectorAll('[role="button"], span[role], div[tabindex], a')
               for (const el of candidates) {
                 const label = (el.getAttribute('aria-label') || '').toLowerCase()
                 const text = (el.innerText || '').trim().toLowerCase()
-                // Match broadly: comment, bình luận, leave/write a comment
                 if (label.includes('comment') || label.includes('bình luận') ||
                     label.includes('leave a comment') || label.includes('write a comment') ||
                     /^(comment|bình luận)$/.test(text)) {
-                  el.setAttribute('data-nurture-comment', count)
-                  count++
+                  // Extract post permalink (multiple strategies)
+                  let postUrl = null
+                  const selectors = [
+                    'a[href*="/posts/"]', 'a[href*="/permalink/"]', 'a[href*="story_fbid"]',
+                    'a[href*="/groups/"][role="link"]'
+                  ]
+                  for (const sel of selectors) {
+                    if (postUrl) break
+                    for (const link of article.querySelectorAll(sel)) {
+                      const href = link.href || ''
+                      if (href.match(/\/(posts|permalink)\/\d+/) || href.includes('story_fbid')) {
+                        postUrl = href.split('?')[0]; break
+                      }
+                    }
+                  }
+                  el.setAttribute('data-nurture-comment', results.length)
+                  results.push({ index: results.length, postUrl })
                   break // one per article
                 }
               }
             }
-            return count
+            return results
           })
 
-          const commentsToDo = Math.min(maxComments, commentableCount, commentCheck.remaining - totalComments)
-          console.log(`[NURTURE] Found ${commentableCount} commentable posts, will comment on ${commentsToDo}`)
+          const commentsToDo = Math.min(maxComments, commentableInfo.length, maxCommentsSession - tracker.get('comment'))
+          console.log(`[NURTURE] Found ${commentableInfo.length} commentable posts, will comment on ${commentsToDo}`)
 
           for (let i = 0; i < commentsToDo; i++) {
             try {
@@ -378,6 +445,7 @@ async function campaignNurture(payload, supabase) {
               await R.sleepRange(2000, 4000)
 
               totalComments++
+              tracker.increment('comment')
               result.comments_done++
               await supabase.rpc('increment_budget', { p_account_id: account_id, p_action_type: 'comment' })
 
@@ -390,7 +458,7 @@ async function campaignNurture(payload, supabase) {
               } catch {}
 
               console.log(`[NURTURE] Commented #${totalComments}: "${commentText.substring(0, 50)}..."`)
-              logger.log('comment', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, details: { comment_text: commentText.substring(0, 200) } })
+              logger.log('comment', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { comment_text: commentText.substring(0, 200), post_url: commentableInfo[i]?.postUrl || null, ai_generated: commentText._ai === true } })
               await R.sleepRange(10000, 20000)
             } catch (err) {
               result.errors.push(`comment: ${err.message}`)
@@ -434,7 +502,7 @@ async function campaignNurture(payload, supabase) {
     throw err
   } finally {
     await logger.flush().catch(() => {})
-    if (page) await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
+    if (page) // Keep page on FB for session reuse
     releaseSession(account_id)
   }
 }

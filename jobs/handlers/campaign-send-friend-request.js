@@ -212,7 +212,7 @@ async function campaignSendFriendRequest(payload, supabase) {
     throw err
   } finally {
     await logger.flush().catch(() => {})
-    if (page) await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
+    if (page) // Keep page on FB for session reuse
     releaseSession(account_id)
   }
 }

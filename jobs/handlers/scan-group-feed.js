@@ -103,7 +103,7 @@ async function scanGroupFeedHandler(payload, supabase) {
         // Get group name
         let groupName = null
         const { data: groupData } = await supabase.from('fb_groups').select('name')
-          .eq('fb_group_id', groupId).limit(1).single()
+          .eq('fb_group_id', groupId).eq('account_id', account_id).limit(1).single()
         groupName = groupData?.name
 
         // AI Review if topics available
@@ -210,7 +210,7 @@ async function scanGroupFeedHandler(payload, supabase) {
     if (browserPage) await saveDebugScreenshot(browserPage, `scan-feed-error-${account_id}`)
     throw err
   } finally {
-    if (browserPage) await browserPage.goto('about:blank', { timeout: 3000 }).catch(() => {})
+    // Keep page on FB for session reuse
     releaseSession(account_id)
   }
 }
