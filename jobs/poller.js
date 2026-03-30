@@ -318,15 +318,17 @@ async function poll() {
             const durationMin = Math.round((Date.now() - sessionStart) / 60000)
             console.log(`[POLLER] Nick ${accId.slice(0,8)} session ended after ${durationMin}min`)
             nickSessionStart.delete(accId)
-            // Only rest after interaction jobs, not utility jobs
+            // Only rest after interaction jobs that actually did work (> 1 min)
             const isInteraction = (job.type || '').startsWith('campaign_') ||
               ['comment_post', 'post_page', 'post_group', 'post_profile', 'join_group'].includes(job.type)
-            if (isInteraction) {
+            if (isInteraction && durationMin >= 1) {
               const restMs = randRestMs()
               const restMin = Math.round(restMs / 60000)
               nickRestUntil.set(accId, { until: Date.now() + restMs, durationMin: restMin })
               nickSessionStart.delete(`${accId}_max`)
-              console.log(`[POLLER] Nick ${accId.slice(0,8)} → rest ${restMin}min (random)`)
+              console.log(`[POLLER] Nick ${accId.slice(0,8)} → rest ${restMin}min (after ${durationMin}min work)`)
+            } else if (isInteraction && durationMin < 1) {
+              console.log(`[POLLER] Nick ${accId.slice(0,8)} → no rest (session was ${durationMin}min, skipped/failed)`)
             }
           }
         }
