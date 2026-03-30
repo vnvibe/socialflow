@@ -35,7 +35,7 @@ export default function CampaignForm() {
 
   const [form, setForm] = useState({
     name: '', topic: '', requirement: '',
-    schedule_type: 'recurring', cron_expression: '0 9 * * *',
+    schedule_type: 'recurring', cron_expression: `${Math.floor(Math.random()*25)+5} 6,10,14,18,22 * * *`,
     interval_minutes: 60,
   })
   const [selectedAccountIds, setSelectedAccountIds] = useState([])
@@ -43,7 +43,7 @@ export default function CampaignForm() {
   const [planConfirmed, setPlanConfirmed] = useState(false)
 
   // Lịch chạy state
-  const [scheduleMode, setScheduleMode] = useState('daily') // daily | twice | weekday | every4h | custom
+  const [scheduleMode, setScheduleMode] = useState('allday') // allday | twice | daily | weekday | every3h | custom
   const [presetHour, setPresetHour] = useState(9)
   const [presetHour2, setPresetHour2] = useState(18)
   const [customHour, setCustomHour] = useState(9)
@@ -101,23 +101,33 @@ export default function CampaignForm() {
 
   // Cập nhật cron khi thay đổi preset/hour
   const updateCron = (mode, h1, h2, cH, cM, cDays) => {
-    let cron = '0 9 * * *'
-    const randomMin = Math.floor(Math.random() * 25) + 5  // 5-29 phút, tránh :00 và :30
-    if (mode === 'daily') cron = `${randomMin} ${h1} * * *`
-    else if (mode === 'twice') cron = `${randomMin} ${h1},${h2} * * *`
-    else if (mode === 'weekday') cron = `${randomMin} ${h1} * * 1-5`
-    else if (mode === 'every4h') cron = '0 */4 * * *'
-    else if (mode === 'custom') cron = `${cM} ${cH} * * ${cDays.length === 7 ? '*' : cDays.join(',')}`
+    const preset = DEFAULT_PRESETS.find(p => p.key === mode)
+    let cron
+    if (preset?.buildCron) {
+      cron = preset.defaultHours ? preset.buildCron(h1 || preset.defaultHours[0], h2 || preset.defaultHours[1])
+           : preset.defaultHour ? preset.buildCron(h1 || preset.defaultHour)
+           : preset.buildCron()
+    } else if (mode === 'custom') {
+      cron = `${cM} ${cH} * * ${cDays?.length === 7 ? '*' : (cDays || []).join(',')}`
+    } else {
+      cron = `${randMin()} 6,10,14,18,22 * * *` // fallback allday
+    }
     setForm(f => ({ ...f, schedule_type: 'recurring', cron_expression: cron }))
   }
 
   const selectMode = (mode) => {
     setScheduleMode(mode)
-    if (mode === 'daily') { setPresetHour(9); updateCron(mode, 9) }
-    else if (mode === 'twice') { setPresetHour(6); setPresetHour2(18); updateCron(mode, 6, 18) }
-    else if (mode === 'weekday') { setPresetHour(8); updateCron(mode, 8) }
-    else if (mode === 'every4h') { updateCron(mode) }
-    else if (mode === 'custom') { updateCron(mode, null, null, customHour, customMinute, customDays) }
+    const preset = DEFAULT_PRESETS.find(p => p.key === mode)
+    if (!preset) { updateCron(mode, null, null, customHour, customMinute, customDays); return }
+    if (preset.defaultHours) {
+      setPresetHour(preset.defaultHours[0]); setPresetHour2(preset.defaultHours[1])
+      updateCron(mode, preset.defaultHours[0], preset.defaultHours[1])
+    } else if (preset.defaultHour) {
+      setPresetHour(preset.defaultHour)
+      updateCron(mode, preset.defaultHour)
+    } else {
+      updateCron(mode)
+    }
   }
 
   const handleDayToggle = (day) => {
