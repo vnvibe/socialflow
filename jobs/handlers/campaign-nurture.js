@@ -519,153 +519,138 @@ async function campaignNurture(payload, supabase) {
             .limit(200)
           const commentedUrls = new Set((prevComments || []).map(c => c.post_url).filter(Boolean))
 
-          // Find comment buttons in articles, tag them, extract post URLs
+          // Extract ALL posts with content + tag comment buttons
           const commentableInfo = await page.evaluate(() => {
             const articles = document.querySelectorAll('[role="article"]')
             const results = []
             for (const article of [...articles].slice(0, 10)) {
-              const candidates = article.querySelectorAll('[role="button"], span[role], div[tabindex], a')
-              for (const el of candidates) {
-                const label = (el.getAttribute('aria-label') || '').toLowerCase()
-                const text = (el.innerText || '').trim().toLowerCase()
-                if (label.includes('comment') || label.includes('bình luận') ||
-                    label.includes('leave a comment') || label.includes('write a comment') ||
-                    /^(comment|bình luận)$/.test(text)) {
-                  // Extract post permalink (multiple strategies)
-                  let postUrl = null
-                  const selectors = [
-                    'a[href*="/posts/"]', 'a[href*="/permalink/"]', 'a[href*="story_fbid"]',
-                    'a[href*="/groups/"][role="link"]'
-                  ]
-                  for (const sel of selectors) {
-                    if (postUrl) break
-                    for (const link of article.querySelectorAll(sel)) {
-                      const href = link.href || ''
-                      if (href.match(/\/(posts|permalink)\/\d+/) || href.includes('story_fbid')) {
-                        postUrl = href.split('?')[0]; break
-                      }
-                    }
-                  }
-                  // Extract post timestamp (look for time/abbr elements)
-                  let postTime = null
-                  const timeEl = article.querySelector('abbr[data-utime], span[id*="jsc"] a time, a[href*="/posts/"] + span, [data-testid="story-subtitle"] span')
-                  if (timeEl) {
-                    const utime = timeEl.getAttribute('data-utime')
-                    if (utime) postTime = parseInt(utime) * 1000
-                  }
-                  // Fallback: check aria-label of timestamp links (e.g. "March 28 at 10:00 AM")
-                  if (!postTime) {
-                    const timeLinks = article.querySelectorAll('a[role="link"]')
-                    for (const tl of timeLinks) {
-                      const label = tl.getAttribute('aria-label') || ''
-                      if (label.match(/\d{1,2}.*\d{4}|ago|trước|giờ|phút|ngày/i)) {
-                        // Rough check: if contains "ago" or Vietnamese time words, it's recent
-                        postTime = Date.now() - 86400000 // assume ~1 day ago as fallback
-                        break
-                      }
-                    }
-                  }
+              // Skip nested (comment articles)
+              const parent = article.parentElement?.closest('[role="article"]')
+              if (parent && parent !== article) continue
 
-                  el.setAttribute('data-nurture-comment', results.length)
-                  results.push({ index: results.length, postUrl, postTime })
-                  break // one per article
+              // Extract post body
+              let body = ''
+              const bodyEl = article.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]')
+              if (bodyEl) body = bodyEl.innerText.trim()
+              if (!body || body.length < 10) {
+                for (const d of article.querySelectorAll('div[dir="auto"]')) {
+                  const t = d.innerText.trim()
+                  if (t.length > body.length && t.length < 2000) body = t
                 }
               }
+              if (body.length < 10) continue
+
+              // Extract author
+              const authorEl = article.querySelector('a[role="link"] strong, h2 a, h3 a')
+              const author = authorEl ? authorEl.textContent.trim() : ''
+
+              // Extract post URL
+              let postUrl = null
+              for (const link of article.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"]')) {
+                const href = link.href || ''
+                if (href.match(/\/(posts|permalink)\/\d+/) || href.includes('story_fbid')) {
+                  postUrl = href.split('?')[0]; break
+                }
+              }
+
+              // Check translated
+              const isTranslated = /ẩn bản gốc|xem bản gốc|see original|đã dịch|bản dịch/i.test(article.innerText || '')
+
+              // Tag comment button
+              const toolbar = article.querySelector('[role="group"]') || article
+              for (const btn of toolbar.querySelectorAll('[role="button"], a')) {
+                const l = (btn.getAttribute('aria-label') || '').toLowerCase()
+                const t = (btn.innerText || '').trim().toLowerCase()
+                if (l.includes('comment') || l.includes('bình luận') || /^(comment|bình luận)$/i.test(t)) {
+                  btn.setAttribute('data-nurture-comment', results.length)
+                  break
+                }
+              }
+
+              results.push({ index: results.length, postUrl, body: body.substring(0, 400), author, isTranslated })
             }
             return results
           })
 
-          const commentsToDo = Math.min(maxComments, commentableInfo.length, maxCommentsSession - tracker.get('comment'))
-          console.log(`[NURTURE] Found ${commentableInfo.length} commentable posts, will comment on ${commentsToDo}`)
+          // Filter: skip translated, already commented, spam
+          const eligible = commentableInfo.filter(p => {
+            if (p.isTranslated) return false
+            if (p.postUrl && commentedUrls.has(p.postUrl)) return false
+            const lower = p.body.toLowerCase()
+            const spamWords = ['inbox', 'liên hệ ngay', 'giảm giá', 'mua ngay', 'chuyên cung cấp']
+            if (spamWords.filter(w => lower.includes(w)).length >= 2) return false
+            return true
+          })
 
-          for (let i = 0; i < commentableInfo.length && tracker.get('comment') < maxCommentsSession; i++) {
+          console.log(`[NURTURE] Extracted ${commentableInfo.length} posts, ${eligible.length} eligible for comment`)
+
+          // === AI SELECTS which posts to comment ===
+          let aiSelected = eligible
+          if (eligible.length > 1) {
             try {
-              // Skip already-commented posts
-              const thisPostUrl = commentableInfo[i]?.postUrl
-              if (thisPostUrl && commentedUrls.has(thisPostUrl)) {
-                console.log(`[NURTURE] Skip comment #${i} — already commented this post`)
-                continue
-              }
+              const postList = eligible.map((p, i) =>
+                `${i + 1}. [${p.author}] "${p.body.substring(0, 150)}"`
+              ).join('\n')
 
-              // Skip posts older than 7 days
-              const postTime = commentableInfo[i]?.postTime
-              if (postTime && Date.now() - postTime > 7 * 24 * 3600 * 1000) {
-                console.log(`[NURTURE] Skip comment #${i} — post older than 7 days`)
-                continue
-              }
+              const { data: aiRes } = await axios.post(`${process.env.API_URL || 'http://localhost:3000'}/ai/generate`, {
+                function_name: 'caption_gen',
+                provider: 'deepseek',
+                messages: [{
+                  role: 'user',
+                  content: `Nhóm Facebook: "${group.name}" | Chủ đề: ${topic}
+Account ID: ${account_id.slice(0, 8)}
 
-              const commentBtn = await page.$(`[data-nurture-comment="${i}"]`)
+Danh sách bài viết:
+${postList}
+
+Chọn ${Math.min(maxComments, eligible.length)} bài ĐÁNG comment nhất.
+Ưu tiên: bài HỎI câu hỏi, bài THẢO LUẬN, bài mới có ít comment.
+Bỏ qua: bài quảng cáo, bài chỉ đăng link, bài không liên quan.
+Trả về JSON array số thứ tự. VD: [1, 3]`
+                }],
+                max_tokens: 50,
+                temperature: 0.1,
+              }, {
+                timeout: 10000,
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(process.env.SUPABASE_SERVICE_ROLE_KEY && { Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` }),
+                },
+              })
+
+              const text = aiRes?.text || aiRes?.result || ''
+              const match = text.match(/\[[\d\s,]*\]/)
+              if (match) {
+                const indices = JSON.parse(match[0]).filter(i => i >= 1 && i <= eligible.length)
+                aiSelected = indices.map(i => eligible[i - 1]).filter(Boolean)
+                console.log(`[NURTURE] AI selected ${aiSelected.length}/${eligible.length} posts to comment:`)
+                aiSelected.forEach(p => console.log(`  → [${p.author}] "${p.body.substring(0, 60)}..."`))
+              }
+            } catch (err) {
+              console.warn(`[NURTURE] AI post selection failed: ${err.message}, using all eligible`)
+            }
+          }
+
+          const commentsToDo = Math.min(maxComments, aiSelected.length, maxCommentsSession - tracker.get('comment'))
+          console.log(`[NURTURE] Will comment on ${commentsToDo} posts`)
+
+          let commented = 0
+          for (const post of aiSelected) {
+            if (commented >= commentsToDo) break
+
+            try {
+              const thisPostUrl = post.postUrl
+              if (thisPostUrl && commentedUrls.has(thisPostUrl)) continue
+
+              const commentBtn = await page.$(`[data-nurture-comment="${post.index}"]`)
               if (!commentBtn) continue
 
-              // Extract post text for AI — get clean post content, not sidebar/ads
-              let postText = ''
-              let postAuthor = ''
-              try {
-                const extracted = await page.evaluate((idx) => {
-                  const btn = document.querySelector(`[data-nurture-comment="${idx}"]`)
-                  const article = btn?.closest('[role="article"]')
-                  if (!article) return { text: '', author: '' }
+              // Post text already extracted during AI selection
+              const postText = post.body || ''
+              const postAuthor = post.author || ''
 
-                  // Get author name (first h2/h3 or strong link in article)
-                  const authorEl = article.querySelector('a[role="link"] strong, h2 a, h3 a')
-                  const author = authorEl ? authorEl.textContent.trim() : ''
-
-                  // Get post body text — try specific selectors first
-                  let text = ''
-                  // Strategy 1: FB data-ad-preview or story body div
-                  const bodyEl = article.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]')
-                  if (bodyEl) {
-                    text = bodyEl.innerText.trim()
-                  }
-                  // Strategy 2: Find the main text block (usually the largest <div> with text)
-                  if (!text || text.length < 20) {
-                    const divs = article.querySelectorAll('div[dir="auto"]')
-                    for (const d of divs) {
-                      const t = d.innerText.trim()
-                      if (t.length > text.length && t.length < 2000 && !t.includes('Thích') && !t.includes('Bình luận')) {
-                        text = t
-                      }
-                    }
-                  }
-                  // Strategy 3: Fallback to full article text (cleaned)
-                  if (!text || text.length < 20) {
-                    text = (article.innerText || '')
-                      .replace(/Thích|Bình luận|Chia sẻ|Like|Comment|Share|lượt thích|bình luận/gi, '')
-                      .substring(0, 500)
-                  }
-
-                  return { text: text.substring(0, 500), author }
-                }, i)
-                postText = extracted.text
-                postAuthor = extracted.author
-              } catch {}
-
-              // Skip spam/ads posts
-              if (postText.length > 20) {
-                const lower = postText.toLowerCase()
-                const spamWords = ['inbox', 'liên hệ ngay', 'giảm giá', 'mua ngay', 'đặt hàng', 'chuyên cung cấp', 'dịch vụ giá rẻ', 'khuyến mãi']
-                const spamScore = spamWords.filter(w => lower.includes(w)).length
-                if (spamScore >= 2) {
-                  console.log(`[NURTURE] Skip comment #${i} — spam/ads post`)
-                  continue
-                }
-              }
-
-              // Skip non-Vietnamese posts (detect translated + diacritics)
-              if (postText.length > 20) {
-                // Check if this post is auto-translated by Facebook
-                const isTranslated = /ẩn bản gốc|xem bản gốc|see original|translated from|đã dịch|bản dịch/i.test(postText)
-                if (isTranslated) {
-                  console.log(`[NURTURE] Skip comment #${i} — translated post (originally foreign)`)
-                  continue
-                }
-                const viDiacritics = (postText.match(/[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/gi) || []).length
-                const viWords = (postText.match(/\b(của|này|trong|không|được|những|một|các|có|cho|với|đang|và|là|mình|bạn|anh|chị|em|ơi|nhé|sao|gì|nào|ạ|rồi|cũng|bác|mấy)\b/gi) || []).length
-                if (viDiacritics < 2 && viWords < 2 && postText.length > 50) {
-                  console.log(`[NURTURE] Skip comment #${i} — non-Vietnamese post`)
-                  continue
-                }
-              }
+              // Final safety: skip if too short
+              if (postText.length < 15) { continue }
 
               await commentBtn.scrollIntoViewIfNeeded()
               await R.sleepRange(500, 1000)
@@ -719,7 +704,7 @@ async function campaignNurture(payload, supabase) {
               await supabase.rpc('increment_budget', { p_account_id: account_id, p_action_type: 'comment' })
 
               // Extract fb_post_id from URL for dedup
-              const thisUrl = commentableInfo[i]?.postUrl || null
+              const thisUrl = post.postUrl || null
               let fbPostId = null
               if (thisUrl) {
                 const m = thisUrl.match(/(?:posts|permalink)\/(\d+)/) || thisUrl.match(/story_fbid=(\d+)/)
@@ -738,10 +723,11 @@ async function campaignNurture(payload, supabase) {
               } catch {}
 
               // Add to dedup set so same post won't be commented again this session
-              if (thisPostUrl) commentedUrls.add(thisPostUrl)
+              if (thisUrl) commentedUrls.add(thisUrl)
+              commented++
 
               console.log(`[NURTURE] Commented #${totalComments} (${isAI ? 'AI' : 'template'}): "${commentText.substring(0, 50)}..."`)
-              logger.log('comment', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { comment_text: commentText.substring(0, 200), post_url: commentableInfo[i]?.postUrl || null, ai_generated: isAI } })
+              logger.log('comment', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { comment_text: commentText.substring(0, 200), post_url: thisUrl, ai_generated: isAI, post_author: postAuthor } })
               await R.sleepRange(10000, 20000)
             } catch (err) {
               result.errors.push(`comment: ${err.message}`)
