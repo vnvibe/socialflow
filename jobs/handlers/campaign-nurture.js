@@ -391,13 +391,26 @@ async function campaignNurture(payload, supabase) {
           const maxLikes = getActionParams(parsed_plan, 'like', { countMin: 3, countMax: 5 }).count
           let likesInGroup = 0
 
-          // Use page.evaluate() to find like buttons via DOM inspection
-          // This avoids Playwright selector issues with changing aria-labels
+          // Find MAIN POST like buttons only (NOT comment like buttons)
+          // Key: only look in article toolbar area, skip nested comment articles
           const likeableInfo = await page.evaluate(() => {
             const results = []
             const articles = document.querySelectorAll('[role="article"]')
             for (const article of [...articles].slice(0, 15)) {
-              const allBtns = article.querySelectorAll('[role="button"]')
+              // Skip nested articles (comments inside posts)
+              const parentArticle = article.parentElement?.closest('[role="article"]')
+              if (parentArticle && parentArticle !== article) continue
+
+              // Skip spam/ads: check post content
+              const postBody = (article.querySelector('div[dir="auto"]')?.innerText || '').toLowerCase()
+              const spamWords = ['inbox', 'liên hệ ngay', 'giảm giá', 'mua ngay', 'đặt hàng', 'chuyên cung cấp', 'dịch vụ giá rẻ']
+              const spamScore = spamWords.filter(w => postBody.includes(w)).length
+              if (spamScore >= 2) continue // skip spam posts
+
+              // Find like button in toolbar area (not in comment sections)
+              const toolbar = article.querySelector('[role="group"]')
+              const searchArea = toolbar || article
+              const allBtns = searchArea.querySelectorAll('[role="button"]')
               for (const btn of allBtns) {
                 const label = btn.getAttribute('aria-label') || ''
                 const text = (btn.innerText || '').trim()
@@ -626,6 +639,17 @@ async function campaignNurture(payload, supabase) {
                 postText = extracted.text
                 postAuthor = extracted.author
               } catch {}
+
+              // Skip spam/ads posts
+              if (postText.length > 20) {
+                const lower = postText.toLowerCase()
+                const spamWords = ['inbox', 'liên hệ ngay', 'giảm giá', 'mua ngay', 'đặt hàng', 'chuyên cung cấp', 'dịch vụ giá rẻ', 'khuyến mãi']
+                const spamScore = spamWords.filter(w => lower.includes(w)).length
+                if (spamScore >= 2) {
+                  console.log(`[NURTURE] Skip comment #${i} — spam/ads post`)
+                  continue
+                }
+              }
 
               // Skip non-Vietnamese posts (detect translated + diacritics)
               if (postText.length > 20) {
