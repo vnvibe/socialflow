@@ -349,6 +349,27 @@ async function campaignDiscoverGroups(payload, supabase) {
         await R.sleepRange(2000, 4000)
         await humanMouseMove(page)
 
+        // Quick language check — read first 2 posts, skip if non-Vietnamese/English
+        const langCheck = await page.evaluate(() => {
+          const articles = document.querySelectorAll('[role="article"]')
+          const texts = []
+          for (const a of [...articles].slice(0, 3)) {
+            const t = (a.innerText || '').substring(0, 200)
+            if (t.length > 20) texts.push(t)
+          }
+          return texts.join(' ').substring(0, 500)
+        }).catch(() => '')
+
+        if (langCheck.length > 30) {
+          // Detect CJK characters (Chinese/Japanese/Korean)
+          const cjkRatio = (langCheck.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g) || []).length / langCheck.length
+          if (cjkRatio > 0.15) {
+            console.log(`[CAMPAIGN-SCOUT] ⚠️ Skipping "${group.name}" — non-Vietnamese content (${Math.round(cjkRatio * 100)}% CJK)`)
+            logger.log('visit_group', { target_type: 'group', target_name: group.name, result_status: 'skipped', details: { reason: 'foreign_language', cjk_ratio: cjkRatio } })
+            continue
+          }
+        }
+
         // Find join button — try aria-label first, then text match via locator
         let joinBtn = await page.$('div[aria-label="Join group"], div[aria-label="Tham gia nhóm"], div[aria-label="Join Group"], div[aria-label="Tham gia"]')
         if (!joinBtn) {
