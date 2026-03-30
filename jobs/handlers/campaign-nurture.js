@@ -96,7 +96,7 @@ async function campaignNurture(payload, supabase) {
   if (!groups.length) {
     // Step 1: Priority — groups joined FOR THIS campaign (exact match via topic column)
     let dbQuery = supabase.from('fb_groups')
-      .select('fb_group_id, name, url, member_count, topic, joined_via_campaign_id')
+      .select('id, fb_group_id, name, url, member_count, topic, joined_via_campaign_id, ai_relevance')
       .eq('account_id', account_id)
 
     if (topic && campaign_id) {
@@ -111,7 +111,7 @@ async function campaignNurture(payload, supabase) {
     // Step 2: If no campaign-specific groups, try topic-matched groups
     if (!groups.length) {
       const { data: allGroups } = await supabase.from('fb_groups')
-        .select('fb_group_id, name, url, member_count, topic, joined_via_campaign_id')
+        .select('id, fb_group_id, name, url, member_count, topic, joined_via_campaign_id, ai_relevance')
         .eq('account_id', account_id)
 
       if (!allGroups?.length) {
@@ -135,7 +135,7 @@ async function campaignNurture(payload, supabase) {
           // Fallback: AI filter
           try {
             const { filterRelevantGroups } = require('../../lib/ai-filter')
-            const aiFiltered = await filterRelevantGroups(allGroups, topic, payload.owner_id, account_id)
+            const aiFiltered = await filterRelevantGroups(allGroups, topic, payload.owner_id, account_id, supabase)
             // Log AI filter decision to activity log
             const meta = aiFiltered._filterMeta || {}
             logger.log('ai_filter', {
@@ -176,13 +176,13 @@ async function campaignNurture(payload, supabase) {
       // Re-fetch + re-filter after scout
       const { data: newGroups } = await supabase
         .from('fb_groups')
-        .select('fb_group_id, name, url, member_count')
+        .select('id, fb_group_id, name, url, member_count, ai_relevance')
         .eq('account_id', account_id)
 
       if (topic && newGroups?.length) {
         try {
           const { filterRelevantGroups } = require('../../lib/ai-filter')
-          groups = await filterRelevantGroups(newGroups, topic, payload.owner_id, account_id)
+          groups = await filterRelevantGroups(newGroups, topic, payload.owner_id, account_id, supabase)
           console.log(`[NURTURE] Post-scout AI filtered: ${groups.length}/${newGroups.length}`)
         } catch {
           groups = newGroups || []

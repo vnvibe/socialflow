@@ -316,7 +316,7 @@ async function campaignDiscoverGroups(payload, supabase) {
     // AI relevance filter on BOTH toJoin + toTag (all potential candidates)
     const allCandidates = [...toJoin, ...toTag]
     const relevant = allCandidates.length > 0
-      ? await filterRelevantGroups(allCandidates, topic, payload.owner_id, account_id)
+      ? await filterRelevantGroups(allCandidates, topic, payload.owner_id, account_id, supabase)
       : []
     console.log(`[CAMPAIGN-SCOUT] After AI filter: ${allCandidates.length} → ${relevant.length} relevant`)
 

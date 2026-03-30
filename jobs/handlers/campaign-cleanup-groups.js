@@ -33,7 +33,7 @@ async function campaignCleanupGroups(payload, supabase) {
   console.log(`[CLEANUP] Evaluating ${allGroups.length} groups for account ${account_id.slice(0, 8)}`)
 
   // AI evaluates which groups are relevant
-  const relevant = await filterRelevantGroups(allGroups, topic, owner_id, account_id)
+  const relevant = await filterRelevantGroups(allGroups, topic, owner_id, account_id, supabase)
   const relevantIds = new Set(relevant.map(g => g.fb_group_id))
 
   // Groups to leave = not relevant AND not joined by this campaign
