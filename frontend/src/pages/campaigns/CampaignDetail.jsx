@@ -288,7 +288,7 @@ function ReportTab({ report, loading }) {
     const csv = rows.map(r => r.map(escapeCell).join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `campaign-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
+    const a = document.createElement('a'); a.href = url; a.download = `campaign-report-${new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10)}.csv`; a.click()
   }
 
   const ACTION_ICONS = { like: '👍', comment: '💬', join_group: '🏠', friend_request: '🤝', visit_group: '👁️', scan: '🔍', browse: '📱', post: '✍️' }
@@ -656,7 +656,7 @@ const ACTION_LABELS = {
 function DetailLogView({ campaignId }) {
   const [actionFilter, setActionFilter] = useState(null)
   const [accountFilter, setAccountFilter] = useState(null)
-  const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10)) // default today
+  const [dateFilter, setDateFilter] = useState(new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10)) // default today
   const [currentPage, setCurrentPage] = useState(1)
   const [entries, setEntries] = useState([])
   const [summary, setSummary] = useState({})
@@ -694,7 +694,7 @@ function DetailLogView({ campaignId }) {
   }, [campaignId])
 
   // Initial load — default to today
-  const today = new Date().toISOString().slice(0, 10)
+  const today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10)
   useEffect(() => {
     setDateFilter(today)
     fetchPage(1, null, null, today)
