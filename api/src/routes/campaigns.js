@@ -882,14 +882,35 @@ module.exports = async (fastify) => {
 function extractJobSummary(job) {
   const r = job.result
   if (!r) return null
+  if (r.skipped) return `⏭️ ${r.reason?.replace('SKIP_', '') || 'skipped'}`
+
   const parts = []
-  if (r.groups_visited != null) parts.push(`${r.groups_visited} nhom`)
-  if (r.liked != null) parts.push(`${r.liked} like`)
-  if (r.commented != null) parts.push(`${r.commented} comment`)
-  if (r.friends_sent != null) parts.push(`${r.friends_sent} ket ban`)
-  if (r.groups_joined != null) parts.push(`${r.groups_joined} tham gia`)
-  if (r.groups_discovered != null) parts.push(`${r.groups_discovered} tim thay`)
-  if (r.posts_scanned != null) parts.push(`${r.posts_scanned} bai scan`)
+
+  // Group names from details
+  const groupNames = (r.details || []).map(d => d.group_name).filter(Boolean)
+  if (groupNames.length > 0) parts.push(groupNames.slice(0, 2).join(', '))
+
+  // Counts — handle both key formats (likes/liked, comments/commented)
+  const likes = r.likes ?? r.liked ?? 0
+  const comments = r.comments ?? r.commented ?? 0
+  const friendsSent = r.friends_sent ?? r.requests_sent ?? 0
+  const groupsJoined = r.groups_joined ?? 0
+  const groupsVisited = r.groups_visited ?? 0
+
+  const counts = []
+  if (groupsJoined > 0) counts.push(`+${groupsJoined} nhóm`)
+  if (groupsVisited > 0 && !groupsJoined) counts.push(`${groupsVisited} nhóm`)
+  if (likes > 0) counts.push(`${likes} like`)
+  if (comments > 0) counts.push(`${comments} cmt`)
+  if (friendsSent > 0) counts.push(`${friendsSent} kết bạn`)
+  if (r.posts_scanned) counts.push(`${r.posts_scanned} bài scan`)
+
+  if (counts.length > 0) parts.push(counts.join(', '))
+
+  // Duration
+  const dur = r.duration_seconds
+  if (dur) parts.push(dur < 60 ? `${dur}s` : `${Math.round(dur / 60)}m`)
+
   if (r.message) parts.push(r.message)
-  return parts.length > 0 ? parts.join(', ') : null
+  return parts.length > 0 ? parts.join(' · ') : null
 }

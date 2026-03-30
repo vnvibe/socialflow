@@ -597,8 +597,14 @@ function ActivityTab({ data, loading, onRefresh, campaignId }) {
                       )}
                     </div>
                     {/* Summary or error */}
-                    {entry.status === 'done' && entry.summary && (
+                    {entry.status === 'done' && entry.summary && !entry.summary.startsWith('⏭️') && (
                       <p className="text-xs text-green-600 mt-0.5">✓ {entry.summary}</p>
+                    )}
+                    {entry.status === 'done' && entry.summary?.startsWith('⏭️') && (
+                      <p className="text-xs text-yellow-600 mt-0.5">{entry.summary}</p>
+                    )}
+                    {entry.status === 'done' && !entry.summary && (
+                      <p className="text-xs text-gray-400 mt-0.5">Hoàn thành (không có dữ liệu)</p>
                     )}
                     {entry.status === 'failed' && entry.error_message && (
                       <p className="text-xs text-red-500 mt-0.5 line-clamp-2">✗ {entry.error_message}</p>
