@@ -253,167 +253,229 @@ function TargetsTab({ data }) {
 }
 
 function ReportTab({ report, loading }) {
-  if (loading) return <div className="text-center py-12 text-gray-400">Dang tai bao cao...</div>
-  if (!report) return <div className="text-center py-12 text-gray-400">Khong co du lieu</div>
+  const [section, setSection] = useState('overview')
+  if (loading) return <div className="text-center py-12 text-gray-400"><Loader className="animate-spin inline mr-2" size={16} />Đang tải báo cáo...</div>
+  if (!report) return <div className="text-center py-12 text-gray-400">Không có dữ liệu</div>
 
   const s = report.summary
-  const hasData = s.total_jobs > 0
+  const hasData = s.total_jobs > 0 || s.total_activities > 0
+  const fmtDur = (sec) => sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.round(sec / 60)}m` : `${Math.floor(sec / 3600)}h ${Math.round((sec % 3600) / 60)}m`
+  const fmtDate = (d) => d ? format(new Date(d), 'dd/MM HH:mm') : '-'
+  const chartData = (report.daily || []).map(d => ({ ...d, date: d.date.slice(5) }))
 
-  const formatDuration = (sec) => {
-    if (sec < 60) return `${sec}s`
-    if (sec < 3600) return `${Math.round(sec / 60)}m`
-    return `${Math.round(sec / 3600)}h ${Math.round((sec % 3600) / 60)}m`
+  const SECTIONS = [
+    { key: 'overview', label: 'Tổng quan' },
+    { key: 'nicks', label: 'Theo Nick' },
+    { key: 'comments', label: `Comments (${report.recent_comments?.length || 0})` },
+    { key: 'likes', label: `Likes (${report.recent_likes?.length || 0})` },
+    { key: 'groups', label: `Nhóm (${report.groups_joined?.length || 0})` },
+    { key: 'errors', label: `Lỗi (${report.checkpoint_events?.length || 0})` },
+  ]
+
+  const exportCSV = () => {
+    const rows = [['Thời gian', 'Nick', 'Hành động', 'Nhóm/Đối tượng', 'Nội dung', 'Link bài', 'Kết quả']]
+    const all = [
+      ...(report.recent_comments || []).map(c => [fmtDate(c.created_at), c.account_name, 'Comment', c.group_name, `"${(c.comment_text || '').replace(/"/g, '""')}"`, c.post_url || '', 'OK']),
+      ...(report.recent_likes || []).map(l => [fmtDate(l.created_at), l.account_name, 'Like', l.group_name, '', l.post_url || '', 'OK']),
+      ...(report.groups_joined || []).map(g => [fmtDate(g.created_at), g.account_name, 'Join Group', g.group_name, `${g.member_count || '?'} members`, g.group_url || '', 'OK']),
+      ...(report.checkpoint_events || []).map(e => [fmtDate(e.created_at), e.account_name || '-', e.event_type, e.target || e.type || '-', e.error || e.error_message || '', '', 'FAIL']),
+    ]
+    rows.push(...all)
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `campaign-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
   }
 
-  // Chart data: only show days with activity
-  const chartData = (report.daily || []).map(d => ({
-    ...d,
-    date: d.date.slice(5), // MM-DD
-  }))
+  const ACTION_ICONS = { like: '👍', comment: '💬', join_group: '🏠', friend_request: '🤝', visit_group: '👁️', scan: '🔍', browse: '📱', post: '✍️' }
 
   return (
-    <div className="space-y-6">
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Tong jobs" value={s.total_jobs} icon={BarChart3} color="bg-blue-100 text-blue-700" />
-        <StatCard title="Thanh cong" value={`${s.success_rate}%`} icon={TrendingUp} color="bg-green-100 text-green-700" />
-        <StatCard title="Targets xu ly" value={`${s.targets_done}/${s.total_targets}`} icon={Crosshair} color="bg-purple-100 text-purple-700" />
-        <StatCard title="Friends gui" value={s.friends_sent} icon={UserPlus} color="bg-indigo-100 text-indigo-700" />
+    <div className="space-y-4">
+      {/* Section nav + export */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {SECTIONS.map(sec => (
+            <button key={sec.key} onClick={() => setSection(sec.key)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${section === sec.key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+              {sec.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={exportCSV} className="flex items-center gap-1 px-3 py-1.5 text-xs border rounded-lg hover:bg-gray-50">
+          📥 Xuất CSV
+        </button>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Jobs done" value={s.jobs_done} icon={CheckCircle} color="bg-green-100 text-green-700" />
-        <StatCard title="Jobs failed" value={s.jobs_failed} icon={XCircle} color="bg-red-100 text-red-700" />
-        <StatCard title="Friends chap nhan" value={s.friends_accepted > 0 ? `${s.friends_accepted} (${s.accept_rate}%)` : '0'} icon={Users} color="bg-teal-100 text-teal-700" />
-        <StatCard title="Thoi gian TB" value={formatDuration(s.avg_job_duration_sec)} icon={Timer} color="bg-orange-100 text-orange-700" />
-      </div>
 
-      {/* Daily chart */}
-      {hasData && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="font-semibold text-gray-900 mb-4">Hoat dong 14 ngay qua</h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={chartData} barGap={2}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9ca3af' }} />
-              <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} allowDecimals={false} />
-              <Tooltip
-                contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 12 }}
-                labelFormatter={(v) => `Ngay ${v}`}
-              />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="jobs_done" name="Done" fill="#22c55e" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="jobs_failed" name="Failed" fill="#ef4444" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="friends_sent" name="Friends" fill="#6366f1" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+      {/* === OVERVIEW === */}
+      {section === 'overview' && <>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard title="Tổng hoạt động" value={s.total_activities || 0} icon={BarChart3} color="bg-blue-100 text-blue-700" />
+          <StatCard title="Tỉ lệ thành công" value={`${s.success_rate}%`} icon={TrendingUp} color="bg-green-100 text-green-700" />
+          <StatCard title="Kết bạn" value={`${s.friends_sent} (${s.accept_rate}% chấp nhận)`} icon={UserPlus} color="bg-indigo-100 text-indigo-700" />
+          <StatCard title="Thời gian TB" value={fmtDur(s.avg_job_duration_sec)} icon={Timer} color="bg-orange-100 text-orange-700" />
         </div>
-      )}
 
-      {/* By Role */}
-      {report.by_role?.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-3 border-b bg-gray-50">
-            <h3 className="font-semibold text-gray-900">Theo Role</h3>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Role</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Type</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Total</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Done</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Failed</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Rate</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {report.by_role.map(r => {
-                const rate = r.total > 0 ? Math.round((r.jobs_done / r.total) * 100) : 0
-                return (
-                  <tr key={r.role_id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 font-medium">{r.role_name}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{r.role_type}</td>
-                    <td className="px-4 py-2.5 text-right">{r.total}</td>
-                    <td className="px-4 py-2.5 text-right text-green-600">{r.jobs_done}</td>
-                    <td className="px-4 py-2.5 text-right text-red-600">{r.jobs_failed}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <span className={rate >= 80 ? 'text-green-600' : rate >= 50 ? 'text-yellow-600' : 'text-red-600'}>
-                        {rate}%
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* By Account */}
-      {report.by_account?.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-3 border-b bg-gray-50">
-            <h3 className="font-semibold text-gray-900">Theo Account</h3>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Account</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Total</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Done</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Failed</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-500">Rate</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {report.by_account.map(a => {
-                const rate = a.total > 0 ? Math.round((a.jobs_done / a.total) * 100) : 0
-                return (
-                  <tr key={a.account_id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 font-medium">{a.account_name || a.account_id?.slice(0, 8)}</td>
-                    <td className="px-4 py-2.5 text-right">{a.total}</td>
-                    <td className="px-4 py-2.5 text-right text-green-600">{a.jobs_done}</td>
-                    <td className="px-4 py-2.5 text-right text-red-600">{a.jobs_failed}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <span className={rate >= 80 ? 'text-green-600' : rate >= 50 ? 'text-yellow-600' : 'text-red-600'}>
-                        {rate}%
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Recent Errors */}
-      {report.recent_errors?.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-3 border-b bg-gray-50 flex items-center gap-2">
-            <AlertTriangle size={16} className="text-red-500" />
-            <h3 className="font-semibold text-gray-900">Loi gan day</h3>
-          </div>
-          <div className="divide-y">
-            {report.recent_errors.map(e => (
-              <div key={e.job_id} className="px-5 py-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-mono bg-red-50 text-red-700 px-1.5 py-0.5 rounded">{e.type}</span>
-                  <span className="text-xs text-gray-400">{e.created_at ? format(new Date(e.created_at), 'dd/MM HH:mm') : ''}</span>
+        {/* Action summary pills */}
+        {report.action_summary && (
+          <div className="bg-white rounded-xl border p-4">
+            <h3 className="font-semibold text-gray-900 text-sm mb-3">Tổng hợp theo loại</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {Object.entries(report.action_summary).map(([type, counts]) => (
+                <div key={type} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                  <span className="text-lg">{ACTION_ICONS[type] || '•'}</span>
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 capitalize">{type.replace(/_/g, ' ')}</p>
+                    <p className="text-sm font-bold">{counts.success}<span className="text-xs text-gray-400 font-normal">/{counts.total}</span>
+                      {counts.failed > 0 && <span className="text-xs text-red-400 ml-1">({counts.failed} lỗi)</span>}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-sm text-gray-600 line-clamp-2">{e.error_message}</p>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
+        )}
+
+        {/* Chart */}
+        {hasData && chartData.length > 0 && (
+          <div className="bg-white rounded-xl border p-5">
+            <h3 className="font-semibold text-gray-900 text-sm mb-4">Hoạt động 14 ngày qua</h3>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={chartData} barGap={2}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9ca3af' }} />
+                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} allowDecimals={false} />
+                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="jobs_done" name="Thành công" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="jobs_failed" name="Thất bại" fill="#ef4444" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </>}
+
+      {/* === PER-NICK BREAKDOWN === */}
+      {section === 'nicks' && (
+        <div className="space-y-3">
+          {(report.nick_actions || []).map(nick => (
+            <div key={nick.account_id} className="bg-white rounded-xl border overflow-hidden">
+              <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
+                <span className="font-semibold text-sm">👤 {nick.account_name}</span>
+                <span className="text-[10px] text-gray-400 font-mono">{nick.account_id?.slice(0, 8)}</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-3">
+                {Object.entries(nick.actions || {}).map(([type, c]) => (
+                  <div key={type} className="flex items-center gap-2 p-2 rounded-lg bg-gray-50">
+                    <span>{ACTION_ICONS[type] || '•'}</span>
+                    <div>
+                      <p className="text-[10px] text-gray-500 capitalize">{type.replace(/_/g, ' ')}</p>
+                      <p className="text-sm font-bold text-green-600">{c.success}<span className="text-gray-400 font-normal text-xs">/{c.total}</span>
+                        {c.failed > 0 && <span className="text-red-400 text-xs ml-1">❌{c.failed}</span>}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {(!report.nick_actions?.length) && <div className="text-center py-8 text-gray-400">Chưa có dữ liệu</div>}
         </div>
       )}
 
-      {/* Empty state */}
+      {/* === COMMENTS with links === */}
+      {section === 'comments' && (
+        <div className="bg-white rounded-xl border divide-y">
+          {(report.recent_comments || []).map((c, i) => (
+            <div key={i} className="px-4 py-2.5 hover:bg-gray-50">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="text-sm">💬</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {c.group_url
+                        ? <a href={c.group_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline font-medium truncate max-w-[200px]">{c.group_name}</a>
+                        : <span className="text-xs font-medium text-gray-700 truncate max-w-[200px]">{c.group_name}</span>}
+                      <span className="text-[10px] text-gray-300">•</span>
+                      <span className="text-[10px] text-gray-400">{c.account_name}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">"{c.comment_text}"</p>
+                    {c.post_url && <a href={c.post_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">🔗 Xem bài viết</a>}
+                  </div>
+                </div>
+                <span className="text-[10px] text-gray-300 flex-shrink-0">{fmtDate(c.created_at)}</span>
+              </div>
+            </div>
+          ))}
+          {!report.recent_comments?.length && <div className="text-center py-8 text-gray-400">Chưa có comment nào</div>}
+        </div>
+      )}
+
+      {/* === LIKES with links === */}
+      {section === 'likes' && (
+        <div className="bg-white rounded-xl border divide-y">
+          {(report.recent_likes || []).map((l, i) => (
+            <div key={i} className="px-4 py-2 hover:bg-gray-50 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span>👍</span>
+                {l.group_url
+                  ? <a href={l.group_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate max-w-[200px]">{l.group_name}</a>
+                  : <span className="text-xs text-gray-700 truncate max-w-[200px]">{l.group_name}</span>}
+                <span className="text-[10px] text-gray-400">{l.account_name}</span>
+                {l.post_url && <a href={l.post_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">🔗</a>}
+              </div>
+              <span className="text-[10px] text-gray-300 flex-shrink-0">{fmtDate(l.created_at)}</span>
+            </div>
+          ))}
+          {!report.recent_likes?.length && <div className="text-center py-8 text-gray-400">Chưa có like nào</div>}
+        </div>
+      )}
+
+      {/* === GROUPS JOINED === */}
+      {section === 'groups' && (
+        <div className="bg-white rounded-xl border divide-y">
+          {(report.groups_joined || []).map((g, i) => (
+            <div key={i} className="px-4 py-2.5 hover:bg-gray-50 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span>🏠</span>
+                {g.group_url
+                  ? <a href={g.group_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline font-medium">{g.group_name}</a>
+                  : <span className="text-xs font-medium text-gray-700">{g.group_name}</span>}
+                {g.member_count && <span className="text-[10px] text-gray-400">({g.member_count.toLocaleString()} thành viên)</span>}
+                <span className="text-[10px] text-gray-400">{g.account_name}</span>
+              </div>
+              <span className="text-[10px] text-gray-300 flex-shrink-0">{fmtDate(g.created_at)}</span>
+            </div>
+          ))}
+          {!report.groups_joined?.length && <div className="text-center py-8 text-gray-400">Chưa join nhóm nào</div>}
+        </div>
+      )}
+
+      {/* === ERRORS & CHECKPOINTS === */}
+      {section === 'errors' && (
+        <div className="bg-white rounded-xl border divide-y">
+          {(report.checkpoint_events || []).map((e, i) => (
+            <div key={i} className="px-4 py-3 hover:bg-red-50/30">
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${e.event_type === 'job_error' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                  {e.event_type === 'job_error' ? '❌ JOB' : '⚠️ ACTION'}
+                </span>
+                {e.account_name && <span className="text-xs text-gray-500">{e.account_name}</span>}
+                {e.action && <span className="text-[10px] text-gray-400">{e.action}</span>}
+                {e.target && <span className="text-[10px] text-gray-400 truncate max-w-[150px]">{e.target}</span>}
+              </div>
+              <p className="text-xs text-red-600 line-clamp-2">{e.error || e.error_message}</p>
+              <span className="text-[10px] text-gray-300">{fmtDate(e.created_at)}</span>
+            </div>
+          ))}
+          {!report.checkpoint_events?.length && <div className="text-center py-8 text-green-500">✅ Không có lỗi nào</div>}
+        </div>
+      )}
+
       {!hasData && (
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+        <div className="bg-white rounded-xl border p-12 text-center">
           <FileBarChart size={48} className="mx-auto mb-3 text-gray-300" />
-          <p className="text-gray-500">Chua co du lieu bao cao.</p>
-          <p className="text-sm text-gray-400 mt-1">Chay campaign de bat dau thu thap du lieu.</p>
+          <p className="text-gray-500">Chưa có dữ liệu báo cáo.</p>
+          <p className="text-sm text-gray-400 mt-1">Chạy campaign để bắt đầu thu thập.</p>
         </div>
       )}
     </div>

@@ -547,6 +547,94 @@ module.exports = async (fastify) => {
         .slice(0, 10)
         .map(j => ({ job_id: j.id, type: j.type, error_message: j.error_message, created_at: j.created_at }))
 
+      // === PER-ACTION STATS from activity_log ===
+      const { data: activityRows } = await supabase
+        .from('campaign_activity_log')
+        .select('action_type, result_status, account_id, target_name, target_url, details, created_at')
+        .eq('campaign_id', cid)
+        .order('created_at', { ascending: false })
+        .limit(5000)
+
+      const activities = activityRows || []
+
+      // Action summary
+      const actionSummary = {}
+      for (const a of activities) {
+        if (!actionSummary[a.action_type]) actionSummary[a.action_type] = { total: 0, success: 0, failed: 0 }
+        actionSummary[a.action_type].total++
+        if (a.result_status === 'success') actionSummary[a.action_type].success++
+        if (a.result_status === 'failed') actionSummary[a.action_type].failed++
+      }
+
+      // Per-nick action breakdown
+      const nickActions = {}
+      for (const a of activities) {
+        const aid = a.account_id
+        if (!aid) continue
+        if (!nickActions[aid]) nickActions[aid] = { account_id: aid, actions: {} }
+        if (!nickActions[aid].actions[a.action_type]) nickActions[aid].actions[a.action_type] = { total: 0, success: 0, failed: 0 }
+        nickActions[aid].actions[a.action_type].total++
+        if (a.result_status === 'success') nickActions[aid].actions[a.action_type].success++
+        if (a.result_status === 'failed') nickActions[aid].actions[a.action_type].failed++
+      }
+      // Enrich with account names
+      for (const aid of Object.keys(nickActions)) {
+        nickActions[aid].account_name = accountMap[aid]?.account_name || aid.slice(0, 8)
+      }
+
+      // Recent comments with links (for report detail)
+      const recentComments = activities
+        .filter(a => a.action_type === 'comment' && a.result_status === 'success')
+        .slice(0, 50)
+        .map(a => ({
+          group_name: a.target_name,
+          group_url: a.target_url,
+          post_url: a.details?.post_url || null,
+          comment_text: a.details?.comment_text || '',
+          account_id: a.account_id,
+          account_name: accountMap[a.account_id]?.account_name || a.account_id?.slice(0, 8),
+          created_at: a.created_at,
+        }))
+
+      // Recent likes with links
+      const recentLikes = activities
+        .filter(a => a.action_type === 'like' && a.result_status === 'success')
+        .slice(0, 50)
+        .map(a => ({
+          group_name: a.target_name,
+          group_url: a.target_url,
+          post_url: a.details?.post_url || null,
+          account_name: accountMap[a.account_id]?.account_name || a.account_id?.slice(0, 8),
+          created_at: a.created_at,
+        }))
+
+      // Groups joined
+      const groupsJoined = activities
+        .filter(a => a.action_type === 'join_group' && a.result_status === 'success')
+        .map(a => ({
+          group_name: a.target_name,
+          group_url: a.target_url,
+          member_count: a.details?.member_count || null,
+          account_name: accountMap[a.account_id]?.account_name || a.account_id?.slice(0, 8),
+          created_at: a.created_at,
+        }))
+
+      // Checkpoint/error events
+      const checkpointEvents = [
+        ...recentErrors.map(e => ({ ...e, event_type: 'job_error' })),
+        ...activities
+          .filter(a => a.result_status === 'failed')
+          .slice(0, 20)
+          .map(a => ({
+            event_type: 'action_error',
+            action: a.action_type,
+            error: a.details?.error || 'Unknown',
+            target: a.target_name,
+            account_name: accountMap[a.account_id]?.account_name || a.account_id?.slice(0, 8),
+            created_at: a.created_at,
+          })),
+      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 20)
+
       return {
         summary: {
           total_jobs: totalJobs,
@@ -563,10 +651,17 @@ module.exports = async (fastify) => {
           total_runs: campaign.total_runs || 0,
           first_run_at: firstJob,
           last_run_at: campaign.last_run_at,
+          total_activities: activities.length,
         },
         daily: Object.values(dailyMap),
         by_role: Object.values(roleMap),
         by_account: Object.values(accountMap),
+        action_summary: actionSummary,
+        nick_actions: Object.values(nickActions),
+        recent_comments: recentComments,
+        recent_likes: recentLikes,
+        groups_joined: groupsJoined,
+        checkpoint_events: checkpointEvents,
         recent_errors: recentErrors,
       }
     } catch (err) {
