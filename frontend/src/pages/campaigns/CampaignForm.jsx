@@ -6,11 +6,13 @@ import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
 // Presets với giờ mặc định có thể chỉnh
+const randMin = () => Math.floor(Math.random() * 25) + 5 // 5-29, avoid :00/:30
 const DEFAULT_PRESETS = [
-  { key: 'daily', label: 'Hằng ngày', defaultHour: 9, buildCron: (h) => `0 ${h} * * *`, descFn: (h) => `Mỗi ngày lúc ${h}:00` },
-  { key: 'twice', label: 'Sáng & chiều', defaultHours: [6, 18], buildCron: (h1, h2) => `0 ${h1},${h2} * * *`, descFn: (h1, h2) => `Lúc ${h1}:00 và ${h2}:00` },
-  { key: 'weekday', label: 'Ngày làm việc', defaultHour: 8, buildCron: (h) => `0 ${h} * * 1-5`, descFn: (h) => `T2-T6 lúc ${h}:00` },
-  { key: 'every4h', label: 'Mỗi 4 tiếng', buildCron: () => '0 */4 * * *', descFn: () => '6h, 10h, 14h, 18h, 22h' },
+  { key: 'allday', label: '6h-23h', runs: 5, buildCron: () => `${randMin()} 6,10,14,18,22 * * *`, descFn: () => '6h, 10h, 14h, 18h, 22h (5 lần)' },
+  { key: 'twice', label: '2 lần/ngày', runs: 2, defaultHours: [8, 18], buildCron: (h1, h2) => `${randMin()} ${h1},${h2} * * *`, descFn: (h1, h2) => `Lúc ${h1}h và ${h2}h` },
+  { key: 'daily', label: '1 lần/ngày', runs: 1, defaultHour: 9, buildCron: (h) => `${randMin()} ${h} * * *`, descFn: (h) => `Mỗi ngày lúc ${h}h` },
+  { key: 'weekday', label: 'T2-T6', runs: 1, defaultHour: 8, buildCron: (h) => `${randMin()} ${h} * * 1-5`, descFn: (h) => `T2-T6 lúc ${h}h` },
+  { key: 'every3h', label: 'Mỗi 3 tiếng', runs: 6, buildCron: () => `${randMin()} 6,9,12,15,18,21 * * *`, descFn: () => '6h, 9h, 12h, 15h, 18h, 21h (6 lần)' },
 ]
 
 const ACTION_ICONS = {
@@ -141,10 +143,10 @@ export default function CampaignForm() {
   // AI Preview Plan
   const previewMut = useMutation({
     mutationFn: () => {
-      const runsMap = { daily: 1, twice: 2, weekday: 1, every4h: 6, custom: 1 }
+      const preset = DEFAULT_PRESETS.find(p => p.key === scheduleMode)
       return api.post('/campaigns/preview-plan', {
         requirement: form.requirement, topic: form.topic, account_ids: selectedAccountIds,
-        runs_per_day: runsMap[scheduleMode] || 2,
+        runs_per_day: preset?.runs || 2,
       }).then(r => r.data)
     },
     onSuccess: (data) => { setAiPlan(data.plan); setPlanConfirmed(false) },
