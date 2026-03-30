@@ -263,10 +263,19 @@ async function campaignNurture(payload, supabase) {
           const descVi = (descText.match(VI_DIACRITICS) || []).length + (descText.match(VI_WORDS) || []).length
           const descIsVi = descVi > 3
 
+          let translatedCount = 0
           for (const a of [...articles].slice(0, 8)) {
-            const text = (a.innerText || '').substring(0, 300)
+            const text = (a.innerText || '').substring(0, 500)
             if (text.length < 20) continue
             totalPosts++
+
+            // CRITICAL: detect auto-translated posts (FB translates EN→VN for VN users)
+            const isTranslated = /ẩn bản gốc|xem bản gốc|see original|translated from|đã dịch|bản dịch/i.test(text)
+            if (isTranslated) {
+              translatedCount++
+              enPosts++ // translated = originally foreign language
+              continue
+            }
 
             const viDiacritics = (text.match(VI_DIACRITICS) || []).length
             const viWords = (text.match(VI_WORDS) || []).length
@@ -286,11 +295,11 @@ async function campaignNurture(payload, supabase) {
           // Override: if description is clearly Vietnamese, give benefit of doubt
           if (lang !== 'vi' && descIsVi && viRatio >= 0.3) lang = 'vi'
 
-          return { totalPosts, viPosts, enPosts, otherPosts, viRatio, lang, descIsVi }
+          return { totalPosts, viPosts, enPosts, otherPosts, translatedCount, viRatio, lang, descIsVi }
         }).catch(() => ({ totalPosts: 0, viPosts: 0, enPosts: 0, otherPosts: 0, viRatio: 0, lang: 'unknown', descIsVi: false }))
 
         if (groupAnalysis.lang !== 'vi') {
-          console.log(`[NURTURE] ⚠️ Skip group "${group.name}" — ${groupAnalysis.lang} (${groupAnalysis.viPosts}vi/${groupAnalysis.enPosts}en/${groupAnalysis.totalPosts}total, desc_vi:${groupAnalysis.descIsVi})`)
+          console.log(`[NURTURE] ⚠️ Skip group "${group.name}" — ${groupAnalysis.lang} (${groupAnalysis.viPosts}vi/${groupAnalysis.enPosts}en/${groupAnalysis.totalPosts}total, translated:${groupAnalysis.translatedCount || 0}, desc_vi:${groupAnalysis.descIsVi})`)
           logger.log('visit_group', { target_type: 'group', target_name: group.name, result_status: 'skipped',
             details: { reason: 'non_vietnamese_group', lang: groupAnalysis.lang, vi_posts: groupAnalysis.viPosts, en_posts: groupAnalysis.enPosts, total_posts: groupAnalysis.totalPosts } })
 
@@ -554,10 +563,16 @@ async function campaignNurture(payload, supabase) {
                 }, i)
               } catch {}
 
-              // Skip non-Vietnamese posts (detect by diacritics + common VN words)
+              // Skip non-Vietnamese posts (detect translated + diacritics)
               if (postText.length > 20) {
+                // Check if this post is auto-translated by Facebook
+                const isTranslated = /ẩn bản gốc|xem bản gốc|see original|translated from|đã dịch|bản dịch/i.test(postText)
+                if (isTranslated) {
+                  console.log(`[NURTURE] Skip comment #${i} — translated post (originally foreign)`)
+                  continue
+                }
                 const viDiacritics = (postText.match(/[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/gi) || []).length
-                const viWords = (postText.match(/\b(của|này|trong|không|được|những|một|các|có|cho|với|đang|và|là|mình|bạn|anh|chị|em|ơi|nhé|sao|gì|nào|ạ)\b/gi) || []).length
+                const viWords = (postText.match(/\b(của|này|trong|không|được|những|một|các|có|cho|với|đang|và|là|mình|bạn|anh|chị|em|ơi|nhé|sao|gì|nào|ạ|rồi|cũng|bác|mấy)\b/gi) || []).length
                 if (viDiacritics < 2 && viWords < 2 && postText.length > 50) {
                   console.log(`[NURTURE] Skip comment #${i} — non-Vietnamese post`)
                   continue
