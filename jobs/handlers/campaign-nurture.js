@@ -584,14 +584,47 @@ async function campaignNurture(payload, supabase) {
               const commentBtn = await page.$(`[data-nurture-comment="${i}"]`)
               if (!commentBtn) continue
 
-              // Extract post text for AI
+              // Extract post text for AI — get clean post content, not sidebar/ads
               let postText = ''
+              let postAuthor = ''
               try {
-                postText = await page.evaluate((idx) => {
+                const extracted = await page.evaluate((idx) => {
                   const btn = document.querySelector(`[data-nurture-comment="${idx}"]`)
                   const article = btn?.closest('[role="article"]')
-                  return (article?.innerText || '').substring(0, 300)
+                  if (!article) return { text: '', author: '' }
+
+                  // Get author name (first h2/h3 or strong link in article)
+                  const authorEl = article.querySelector('a[role="link"] strong, h2 a, h3 a')
+                  const author = authorEl ? authorEl.textContent.trim() : ''
+
+                  // Get post body text — try specific selectors first
+                  let text = ''
+                  // Strategy 1: FB data-ad-preview or story body div
+                  const bodyEl = article.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]')
+                  if (bodyEl) {
+                    text = bodyEl.innerText.trim()
+                  }
+                  // Strategy 2: Find the main text block (usually the largest <div> with text)
+                  if (!text || text.length < 20) {
+                    const divs = article.querySelectorAll('div[dir="auto"]')
+                    for (const d of divs) {
+                      const t = d.innerText.trim()
+                      if (t.length > text.length && t.length < 2000 && !t.includes('Thích') && !t.includes('Bình luận')) {
+                        text = t
+                      }
+                    }
+                  }
+                  // Strategy 3: Fallback to full article text (cleaned)
+                  if (!text || text.length < 20) {
+                    text = (article.innerText || '')
+                      .replace(/Thích|Bình luận|Chia sẻ|Like|Comment|Share|lượt thích|bình luận/gi, '')
+                      .substring(0, 500)
+                  }
+
+                  return { text: text.substring(0, 500), author }
                 }, i)
+                postText = extracted.text
+                postAuthor = extracted.author
               } catch {}
 
               // Skip non-Vietnamese posts (detect translated + diacritics)
