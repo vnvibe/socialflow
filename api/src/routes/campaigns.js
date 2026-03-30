@@ -141,20 +141,25 @@ module.exports = async (fastify) => {
         }
       })
 
-      // Compute daily budget summary
-      const dailyBudget = {}
+      // Compute daily budget summary PER NICK (steps are already per-run counts)
+      const runsPerDay = runs_per_day || 2
+      const perNickDaily = {}
       for (const step of steps) {
         const key = step.quota_key || step.action
         const max = step.count_max || step.count_min || 1
-        dailyBudget[key] = (dailyBudget[key] || 0) + max * accounts.length
+        perNickDaily[key] = (perNickDaily[key] || 0) + max * runsPerDay
       }
 
-      // Safety warnings
+      // Daily budget display: per-nick × runs (NOT multiplied by nick count)
+      // Because hard limits are PER NICK PER DAY
+      const dailyBudget = { ...perNickDaily }
+
+      // Safety warnings: compare per-nick daily total vs hard limit
       const warnings = []
-      for (const [key, total] of Object.entries(dailyBudget)) {
+      for (const [key, perNick] of Object.entries(perNickDaily)) {
         const limit = HARD_LIMITS[key]
-        if (limit && total > limit) {
-          warnings.push(`${key}: ${total}/ngay vuot gioi han ${limit}/ngay`)
+        if (limit && perNick > limit) {
+          warnings.push(`${key}: ${perNick}/nick/ngay vuot gioi han ${limit}/nick/ngay`)
         }
       }
 
