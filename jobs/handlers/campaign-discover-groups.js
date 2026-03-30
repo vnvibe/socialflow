@@ -292,7 +292,7 @@ async function campaignDiscoverGroups(payload, supabase) {
     // Check which groups nick is already a member of (in fb_groups table)
     const { data: existingGroups } = await supabase
       .from('fb_groups')
-      .select('fb_group_id, joined_via_campaign_id')
+      .select('fb_group_id, joined_via_campaign_id, ai_relevance')
       .eq('account_id', account_id)
     const existingMap = new Map((existingGroups || []).map(g => [g.fb_group_id, g]))
 
@@ -303,6 +303,7 @@ async function campaignDiscoverGroups(payload, supabase) {
 
     for (const g of allGroups) {
       const existing = existingMap.get(g.fb_group_id)
+      if (existing) g.ai_relevance = existing.ai_relevance // propagate cache
       if (!existing) {
         toJoin.push(g)
       } else if (!existing.joined_via_campaign_id) {
@@ -349,6 +350,17 @@ async function campaignDiscoverGroups(payload, supabase) {
         console.log(`[CAMPAIGN-SCOUT] Visited ${visited} groups, joined ${joined}/${maxJoin} — stopping to save time`)
         break
       }
+      // Skip groups already evaluated as irrelevant for this topic (cached)
+      const topicKey_ = topic.toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
+      const cachedEval = group.ai_relevance?.[topicKey_]
+      if (cachedEval && !cachedEval.relevant && cachedEval.evaluated_at) {
+        const ageMs = Date.now() - new Date(cachedEval.evaluated_at).getTime()
+        if (ageMs < 7 * 24 * 3600 * 1000) { // Cache valid 7 days
+          console.log(`[CAMPAIGN-SCOUT] ⏭️ Cache skip "${group.name}" (score: ${cachedEval.score}, cached ${Math.round(ageMs / 3600000)}h ago)`)
+          continue
+        }
+      }
+
       visited++
 
       try {
@@ -366,6 +378,21 @@ async function campaignDiscoverGroups(payload, supabase) {
 
         // AI per-group evaluation: name + desc + posts → join or skip?
         const evaluation = await evaluateGroup(groupInfo, topic, payload.owner_id)
+
+        // Cache AI eval result to DB (both accept and reject)
+        const topicKey = topic.toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
+        const existingRelevance = group.ai_relevance || {}
+        existingRelevance[topicKey] = {
+          relevant: evaluation.relevant,
+          score: evaluation.score,
+          reason: (evaluation.reason || '').slice(0, 200),
+          lang: evaluation.language,
+          evaluated_at: new Date().toISOString(),
+        }
+        // Async save — don't block
+        supabase.from('fb_groups').update({ ai_relevance: existingRelevance })
+          .eq('fb_group_id', group.fb_group_id).eq('account_id', account_id)
+          .then(() => {}).catch(() => {})
 
         if (!evaluation.relevant) {
           console.log(`[CAMPAIGN-SCOUT] ❌ Skip "${group.name}" — ${evaluation.reason} (score: ${evaluation.score}, lang: ${evaluation.language})`)
