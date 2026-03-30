@@ -604,13 +604,22 @@ async function campaignNurture(payload, supabase) {
               result.comments_done++
               await supabase.rpc('increment_budget', { p_account_id: account_id, p_action_type: 'comment' })
 
+              // Extract fb_post_id from URL for dedup
+              const thisUrl = commentableInfo[i]?.postUrl || null
+              let fbPostId = null
+              if (thisUrl) {
+                const m = thisUrl.match(/(?:posts|permalink)\/(\d+)/) || thisUrl.match(/story_fbid=(\d+)/)
+                if (m) fbPostId = m[1]
+              }
+
               try {
                 await supabase.from('comment_logs').insert({
                   owner_id: payload.owner_id || payload.created_by, account_id,
+                  fb_post_id: fbPostId,
                   comment_text: commentText, source_name: group.name,
                   status: 'done', campaign_id,
                   ai_generated: isAI,
-                  post_url: commentableInfo[i]?.postUrl || null,
+                  post_url: thisUrl,
                 })
               } catch {}
 
