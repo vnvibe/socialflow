@@ -8,50 +8,45 @@ const { getOrchestratorForUser } = require('./ai/orchestrator')
 const SYSTEM_PROMPT = `Ban la AI planner cho he thong tu dong hoa Facebook.
 Phan tich CHINH XAC yeu cau nguoi dung → tra ve JSON array cac buoc thuc thi.
 
-QUAN TRONG: Doc ky yeu cau va trich xuat SO LIEU CU THE tu prompt.
-Vi du: "binh luan 5 bai" → count_min: 5, count_max: 5
-Vi du: "ket 5 ban moi" → count_min: 5, count_max: 5
-Vi du: "tim 4-6 nhom" → count_min: 4, count_max: 6
+=== QUY TAC TICH XUAT SO LIEU ===
+CHI tao buoc cho nhung gi NGUOI DUNG YEU CAU. KHONG tu them action.
+- Neu nguoi dung noi "binh luan 5 bai" → CHI co comment, count = 5/ngay
+- Neu nguoi dung KHONG noi "like" → KHONG co buoc like
+- Neu nguoi dung KHONG noi "dang bai" → KHONG co buoc post
+- Luon giu DUNG so lieu: "5 bai" = 5, "4-6 nhom" = 4-6, "5 ban" = 5
 
-Moi buoc la 1 object:
+=== CHIA COUNT CHO SO LAN CHAY ===
+So lieu trong prompt la TONG MOI NGAY, chia cho so lan chay.
+VD: "binh luan 5 bai/ngay", chay 2 lan → count_per_run = ceil(5/2) = 3
+VD: "ket 5 ban/ngay", chay 2 lan → count_per_run = ceil(5/2) = 3
+VD: "tim 4-6 nhom" (1 lan duy nhat, KHONG chia) → count_min: 2, count_max: 3 (chia cho 2 runs)
+
+=== GIOI HAN AN TOAN PER NICK PER NGAY ===
+join_group: 3 | comment: 15 | like: 50 | friend_request: 10 | post: 3
+Neu count vuot limit → giam xuong = limit. VD: join 6 nhom → giam con 3.
+
+=== FORMAT ===
+Moi buoc:
 {
-  "action": string,       // browse|like|comment|join_group|scan_members|send_friend_request|post|reply
-  "description": string,  // mo ta CU THE, bao gom topic va so luong. VD: "Binh luan 5 bai trong nhom VPS hosting"
-  "params": object,       // tham so cu the
-  "quota_key": string,    // like|comment|friend_request|join_group|post|scan
-  "count_mode": string,   // "fixed"|"range"
-  "count_min": number,    // lay TU PROMPT, khong phai tu nghi
-  "count_max": number,    // lay TU PROMPT
-  "priority": number      // 1 = thuc hien truoc
+  "action": "browse|join_group|comment|send_friend_request|like|scan_members|post",
+  "description": "Mo ta CU THE bao gom: hanh dong + so luong/ngay + topic + ghi chu chia runs",
+  "params": {},
+  "quota_key": "scan|join_group|comment|friend_request|like|post",
+  "count_mode": "fixed|range",
+  "count_min": number,  // SO LIEU MOI LAN CHAY (da chia cho runs)
+  "count_max": number,
+  "priority": number    // 1 = lam truoc
 }
 
-Cac action:
-- browse: Xem feed nhom/trang (warm up truoc khi tuong tac)
-- like: Like bai viet (params.topic: chu de)
-- comment: Binh luan (params.style: "natural"|"expert"|"casual", params.topic: chu de, params.context: "binh luan lien quan den [topic]")
-- join_group: Tim va tham gia nhom (params.keywords: MANG CAC TU KHOA tim kiem, trich xuat TU PROMPT. VD: prompt "nhom ve vps hosting, openclaw" → params.keywords: ["vps hosting", "openclaw", "cloud server"]. params.min_members: 100)
-- scan_members: Scan thanh vien nhom (params.max_results: 30, params.active_only: true)
-- send_friend_request: Ket ban (params.source: "group_members"|"commenters")
-- post: Dang bai (params.content_source: "ai_gen")
+=== PARAMS QUAN TRONG ===
+- join_group: params.keywords = MANG tu khoa trich tu prompt. VD: "nhom vps hosting, openclaw" → ["vps hosting", "openclaw"]. params.min_members: 100
+- comment: params.style = "natural"|"expert"|"casual", params.topic = chu de
+- send_friend_request: params.source = "group_members"
 
-GIOI HAN AN TOAN (PER NICK PER NGAY — count KHONG DUOC vuot):
-- join_group: toi da 3/ngay → chia deu cho cac lan chay
-- comment: toi da 15/ngay
-- like: toi da 50/ngay
-- friend_request: toi da 10/ngay
-- post: toi da 3/ngay
-
-CHIA COUNT CHO SO LAN CHAY: Neu lich chay 2 lan/ngay (6h + 18h), chia count cho 2.
-VD: "binh luan 5 bai/ngay", chay 2 lan → count_min: 2, count_max: 3 (moi lan)
-
-QUY TAC:
-1. PHAI doc so lieu tu prompt nguoi dung, KHONG tu nghi ra con so
-2. Sap xep: browse → join_group → scan → like → comment → friend_request
-3. description phai cu the: bao gom topic + so luong + doi tuong
-4. Toi da 8 buoc
-5. Luon co buoc browse dau tien de warm up
-
-CHI tra ve JSON array, KHONG giai thich.`
+=== THU TU ===
+browse (warm up) → join_group → scan_members → comment → send_friend_request
+CHI them like neu nguoi dung YEU CAU. browse LUON la buoc dau tien.
+Toi da 6 buoc. CHI tra ve JSON array, KHONG giai thich.`
 
 // Fallback plans when AI is unavailable or fails
 const FALLBACK_PLANS = {
@@ -130,14 +125,19 @@ async function parseMission(mission, context, userId, supabase) {
     const runsPerDay = context.runsPerDay || 2
     const userPrompt = `Chu de: ${context.topic || 'general'}
 So nick: ${context.accountCount || 1}
-So lan chay/ngay: ${runsPerDay} (chia count cho ${runsPerDay})
+So lan chay moi ngay: ${runsPerDay}
 ${context.accountNames ? `Ten nick: ${context.accountNames.join(', ')}` : ''}
 ${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}${priorContext}
 
-Yeu cau NGUYEN VAN cua nguoi dung:
+=== YEU CAU NGUYEN VAN ===
 "${mission}"
 
-Hay phan tich yeu cau tren va tao plan CU THE voi so lieu DUNG NHU NGUOI DUNG YEU CAU.`
+=== HUONG DAN ===
+1. Doc prompt tren, trich xuat CHINH XAC cac hanh dong va SO LIEU
+2. CHI tao buoc cho nhung gi nguoi dung YEU CAU, KHONG tu them
+3. So luong trong prompt la TONG/NGAY → chia cho ${runsPerDay} lan chay → count_per_run
+4. Neu so lieu vuot gioi han an toan → giam xuong bang gioi han
+5. join_group params.keywords: trich TRUC TIEP tu khoa tu prompt`
 
     const aiResult = await orchestrator.call('caption_gen', [
       { role: 'system', content: SYSTEM_PROMPT },
