@@ -381,6 +381,16 @@ async function campaignNurture(payload, supabase) {
         if (commentCheck.allowed && tracker.get('comment') < maxCommentsSession) {
           const maxComments = getActionParams(parsed_plan, 'comment', { countMin: 1, countMax: 2 }).count
 
+          // Get already-commented post URLs for this account (dedup — never comment same post twice)
+          const { data: prevComments } = await supabase
+            .from('comment_logs')
+            .select('post_url')
+            .eq('account_id', account_id)
+            .not('post_url', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(200)
+          const commentedUrls = new Set((prevComments || []).map(c => c.post_url).filter(Boolean))
+
           // Find comment buttons in articles, tag them, extract post URLs
           const commentableInfo = await page.evaluate(() => {
             const articles = document.querySelectorAll('[role="article"]')
@@ -408,8 +418,28 @@ async function campaignNurture(payload, supabase) {
                       }
                     }
                   }
+                  // Extract post timestamp (look for time/abbr elements)
+                  let postTime = null
+                  const timeEl = article.querySelector('abbr[data-utime], span[id*="jsc"] a time, a[href*="/posts/"] + span, [data-testid="story-subtitle"] span')
+                  if (timeEl) {
+                    const utime = timeEl.getAttribute('data-utime')
+                    if (utime) postTime = parseInt(utime) * 1000
+                  }
+                  // Fallback: check aria-label of timestamp links (e.g. "March 28 at 10:00 AM")
+                  if (!postTime) {
+                    const timeLinks = article.querySelectorAll('a[role="link"]')
+                    for (const tl of timeLinks) {
+                      const label = tl.getAttribute('aria-label') || ''
+                      if (label.match(/\d{1,2}.*\d{4}|ago|trước|giờ|phút|ngày/i)) {
+                        // Rough check: if contains "ago" or Vietnamese time words, it's recent
+                        postTime = Date.now() - 86400000 // assume ~1 day ago as fallback
+                        break
+                      }
+                    }
+                  }
+
                   el.setAttribute('data-nurture-comment', results.length)
-                  results.push({ index: results.length, postUrl })
+                  results.push({ index: results.length, postUrl, postTime })
                   break // one per article
                 }
               }
@@ -420,8 +450,22 @@ async function campaignNurture(payload, supabase) {
           const commentsToDo = Math.min(maxComments, commentableInfo.length, maxCommentsSession - tracker.get('comment'))
           console.log(`[NURTURE] Found ${commentableInfo.length} commentable posts, will comment on ${commentsToDo}`)
 
-          for (let i = 0; i < commentsToDo; i++) {
+          for (let i = 0; i < commentableInfo.length && tracker.get('comment') < maxCommentsSession; i++) {
             try {
+              // Skip already-commented posts
+              const thisPostUrl = commentableInfo[i]?.postUrl
+              if (thisPostUrl && commentedUrls.has(thisPostUrl)) {
+                console.log(`[NURTURE] Skip comment #${i} — already commented this post`)
+                continue
+              }
+
+              // Skip posts older than 7 days
+              const postTime = commentableInfo[i]?.postTime
+              if (postTime && Date.now() - postTime > 7 * 24 * 3600 * 1000) {
+                console.log(`[NURTURE] Skip comment #${i} — post older than 7 days`)
+                continue
+              }
+
               const commentBtn = await page.$(`[data-nurture-comment="${i}"]`)
               if (!commentBtn) continue
 
@@ -495,6 +539,9 @@ async function campaignNurture(payload, supabase) {
                   post_url: commentableInfo[i]?.postUrl || null,
                 })
               } catch {}
+
+              // Add to dedup set so same post won't be commented again this session
+              if (thisPostUrl) commentedUrls.add(thisPostUrl)
 
               console.log(`[NURTURE] Commented #${totalComments} (${isAI ? 'AI' : 'template'}): "${commentText.substring(0, 50)}..."`)
               logger.log('comment', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { comment_text: commentText.substring(0, 200), post_url: commentableInfo[i]?.postUrl || null, ai_generated: isAI } })
