@@ -644,6 +644,84 @@ async function campaignNurture(payload, supabase) {
         }
       }
 
+      // Opportunistic friend request — if plan has send_friend_request, scan active members in this group
+      const hasFriendTask = (parsed_plan || []).some(s => s.action === 'send_friend_request')
+      const friendCheck = hasFriendTask ? tracker.check('friend_request', account.daily_budget?.friend_request?.used || 0) : { allowed: false }
+      if (hasFriendTask && friendCheck.allowed && result.comments_done > 0) {
+        try {
+          // Extract commenters/likers from current page (people who interacted = active members)
+          const activeMembers = await page.evaluate(() => {
+            const members = []
+            const seen = new Set()
+            // Find profile links in comment sections and reaction lists
+            const profileLinks = document.querySelectorAll('a[href*="facebook.com/"][role="link"]')
+            for (const link of profileLinks) {
+              const href = link.href || ''
+              const match = href.match(/facebook\.com\/(?:profile\.php\?id=(\d+)|([a-zA-Z0-9._]+))/)
+              if (!match) continue
+              const uid = match[1] || match[2]
+              if (!uid || seen.has(uid) || uid === 'groups' || uid === 'pages' || uid.length < 3) continue
+              seen.add(uid)
+              const name = (link.textContent || '').trim()
+              if (name && name.length > 1 && name.length < 50) {
+                members.push({ fb_user_id: uid, name, profile_url: href.split('?')[0] })
+              }
+            }
+            return members.slice(0, 10) // max 10 candidates
+          }).catch(() => [])
+
+          if (activeMembers.length > 0) {
+            const maxFR = Math.min(2, friendCheck.remaining) // max 2 opportunistic FR per group
+            let frSent = 0
+            for (const member of activeMembers.slice(0, maxFR + 2)) { // check a few extra in case some fail
+              if (frSent >= maxFR) break
+              try {
+                // Check if already friends or already sent request
+                const { data: existing } = await supabase.from('friend_request_log')
+                  .select('id').eq('account_id', account_id).eq('target_fb_id', member.fb_user_id).limit(1)
+                if (existing?.length) continue
+
+                // Navigate to profile, find Add Friend button
+                await page.goto(member.profile_url, { waitUntil: 'domcontentloaded', timeout: 15000 })
+                await R.sleepRange(1500, 3000)
+
+                let addBtn = await page.$('div[aria-label="Add friend"], div[aria-label="Thêm bạn bè"], div[aria-label="Add Friend"]')
+                if (!addBtn) {
+                  const loc = page.locator('div[role="button"]:has-text("Add friend"), div[role="button"]:has-text("Thêm bạn")').first()
+                  if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) addBtn = await loc.elementHandle()
+                }
+
+                if (addBtn) {
+                  await humanClick(page, addBtn)
+                  await R.sleepRange(1000, 2500)
+                  frSent++
+                  tracker.increment('friend_request')
+                  await supabase.rpc('increment_budget', { p_account_id: account_id, p_action_type: 'friend_request' })
+                  await supabase.from('friend_request_log').insert({
+                    account_id, campaign_id,
+                    target_fb_id: member.fb_user_id, target_name: member.name,
+                    target_profile_url: member.profile_url,
+                    status: 'sent', sent_at: new Date(),
+                  }).catch(() => {})
+                  logger.log('friend_request', { target_type: 'profile', target_id: member.fb_user_id, target_name: member.name, target_url: member.profile_url })
+                  console.log(`[NURTURE] 🤝 Friend request sent to ${member.name} (active in ${group.name})`)
+                  await R.sleepRange(3000, 8000) // random gap between friend requests
+                }
+              } catch {}
+            }
+            if (frSent > 0) result.friends_sent = frSent
+          }
+
+          // Navigate back to group feed for next group
+          if (activeMembers.length > 0) {
+            await page.goto(`https://www.facebook.com/groups/${group.fb_group_id}`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {})
+            await R.sleepRange(1000, 2000)
+          }
+        } catch (frErr) {
+          console.warn(`[NURTURE] Opportunistic FR failed: ${frErr.message}`)
+        }
+      }
+
       groupResults.push(result)
 
       if (groupsToVisit.indexOf(group) < groupsToVisit.length - 1) {
