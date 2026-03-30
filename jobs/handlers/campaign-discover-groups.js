@@ -289,23 +289,58 @@ async function campaignDiscoverGroups(payload, supabase) {
       .not('joined_via_campaign_id', 'is', null)
     const joinedSet = new Set((campaignJoined || []).map(g => g.fb_group_id))
 
-    // Filter: not already campaign-joined, > minMembers
-    const minMembers = config?.min_members || 100
-    const notJoined = allGroups.filter(g =>
-      !joinedSet.has(g.fb_group_id) && (g.member_count >= minMembers || g.member_count === 0)
-    )
-    console.log(`[CAMPAIGN-SCOUT] Total: ${allGroups.length}, already campaign-joined: ${joinedSet.size}, candidates: ${notJoined.length}`)
+    // Check which groups nick is already a member of (in fb_groups table)
+    const { data: existingGroups } = await supabase
+      .from('fb_groups')
+      .select('fb_group_id, joined_via_campaign_id')
+      .eq('account_id', account_id)
+    const existingMap = new Map((existingGroups || []).map(g => [g.fb_group_id, g]))
 
-    // AI relevance filter on candidates
-    const candidates = notJoined.length > 0
-      ? await filterRelevantGroups(notJoined, topic, payload.owner_id, account_id)
+    // Separate: new groups to join vs already-member groups to tag
+    const toJoin = []       // not in fb_groups → need to join
+    const toTag = []        // already member but not tagged for this campaign → just tag
+    const alreadyTagged = [] // already tagged for a campaign → skip
+
+    for (const g of allGroups) {
+      const existing = existingMap.get(g.fb_group_id)
+      if (!existing) {
+        toJoin.push(g)
+      } else if (!existing.joined_via_campaign_id) {
+        toTag.push(g)  // member but no campaign tag → can claim for this campaign
+      } else {
+        alreadyTagged.push(g)
+      }
+    }
+    console.log(`[CAMPAIGN-SCOUT] Total: ${allGroups.length}, to-join: ${toJoin.length}, to-tag: ${toTag.length}, already-tagged: ${alreadyTagged.length}`)
+
+    // AI relevance filter on BOTH toJoin + toTag (all potential candidates)
+    const allCandidates = [...toJoin, ...toTag]
+    const relevant = allCandidates.length > 0
+      ? await filterRelevantGroups(allCandidates, topic, payload.owner_id, account_id)
       : []
-    console.log(`[CAMPAIGN-SCOUT] After AI filter: ${notJoined.length} → ${candidates.length} relevant`)
+    console.log(`[CAMPAIGN-SCOUT] After AI filter: ${allCandidates.length} → ${relevant.length} relevant`)
 
+    // Step 1: Tag already-member groups for this campaign (no browser action needed)
+    const relevantIds = new Set(relevant.map(g => g.fb_group_id))
+    let tagged = 0
+    for (const g of toTag) {
+      if (!relevantIds.has(g.fb_group_id)) continue
+      await supabase.from('fb_groups')
+        .update({ joined_via_campaign_id: campaign_id, topic: topic })
+        .eq('account_id', account_id)
+        .eq('fb_group_id', g.fb_group_id)
+      tagged++
+      logger.log('visit_group', { target_type: 'group', target_id: g.fb_group_id, target_name: g.name, target_url: g.url, details: { action: 'tagged_existing', campaign_id } })
+      console.log(`[CAMPAIGN-SCOUT] ✓ Tagged existing: ${g.name}`)
+    }
+    if (tagged > 0) console.log(`[CAMPAIGN-SCOUT] Tagged ${tagged} existing groups for campaign`)
+
+    // Step 2: Join NEW groups (need browser action)
     let joined = 0
     const joinedGroups = []
+    const relevantToJoin = relevant.filter(g => toJoin.some(tj => tj.fb_group_id === g.fb_group_id))
 
-    for (const group of candidates) {
+    for (const group of relevantToJoin) {
       if (joined >= maxJoin) break
 
       try {
@@ -436,6 +471,8 @@ async function campaignDiscoverGroups(payload, supabase) {
       success: true,
       groups_found: allGroups.length,
       groups_joined: joined,
+      groups_tagged: tagged,
+      groups_relevant: relevant.length,
       topic,
     }
   } catch (err) {
