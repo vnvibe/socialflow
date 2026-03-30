@@ -4,7 +4,7 @@ const os = require('os')
 const { closeAll } = require('../browser/session-pool')
 const { classifyError, shouldDisableAccount, isRetryable, getRetryDelayMs } = require('../lib/error-classifier')
 const { postCooldown } = require('../lib/randomizer')
-const { getMinGapMs } = require('../lib/hard-limits')
+const { getMinGapMs, checkWarmup } = require('../lib/hard-limits')
 
 const AGENT_ID = process.env.AGENT_ID || `${os.hostname()}-${process.pid}`
 const AGENT_USER_ID = process.env.AGENT_USER_ID || null  // set when user logs in via Electron
@@ -189,6 +189,19 @@ async function poll() {
         if (!statusOk) {
           console.log(`[POLLER] Nick ${accId.slice(0,8)} not active, skipping job ${job.id}`)
           continue
+        }
+      }
+
+      // Per-nick warm-up check (block certain actions for young nicks)
+      if (accId && actionType && actionType !== 'utility') {
+        const cached = accountStatusCache.get(accId)
+        if (cached?.created_at) {
+          const ageDays = Math.floor((Date.now() - new Date(cached.created_at).getTime()) / 86400000)
+          const warmup = checkWarmup(actionType, ageDays)
+          if (!warmup.allowed) {
+            console.log(`[POLLER] Nick ${accId.slice(0,8)} warm-up: ${warmup.reason}`)
+            continue
+          }
         }
       }
 
@@ -638,7 +651,7 @@ async function checkAccountActive(accountId) {
     }
     const { data } = await supabase
       .from('accounts')
-      .select('is_active, status')
+      .select('is_active, status, created_at')
       .eq('id', accountId)
       .single()
     if (data) {
