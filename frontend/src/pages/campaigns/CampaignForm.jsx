@@ -277,79 +277,15 @@ export default function CampaignForm() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
-            {/* Hằng ngày — cho đổi giờ (UI-010 fix) */}
-            <button onClick={() => selectMode('daily')}
-              className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                scheduleMode === 'daily' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}>
-              <div className="flex items-center gap-1">
-                Hằng ngày
-                {scheduleMode === 'daily' && (
-                  <select value={presetHour} onClick={e => e.stopPropagation()}
-                    onChange={e => { const h = parseInt(e.target.value); setPresetHour(h); updateCron('daily', h) }}
-                    className="bg-transparent text-blue-700 font-bold border-0 p-0 text-xs w-10 cursor-pointer focus:ring-0">
-                    {Array.from({ length: 17 }, (_, i) => i + 6).map(h => <option key={h} value={h}>{h}h</option>)}
-                  </select>
-                )}
-                {scheduleMode !== 'daily' && <span>9h</span>}
-              </div>
-              <div className="text-[10px] text-gray-400 mt-0.5">{scheduleMode === 'daily' ? `Lúc ${presetHour}:00` : 'Mỗi ngày lúc 9:00'}</div>
-            </button>
-
-            {/* Sáng & chiều — cho đổi 2 giờ */}
-            <button onClick={() => selectMode('twice')}
-              className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                scheduleMode === 'twice' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}>
-              <div className="flex items-center gap-1">
-                {scheduleMode === 'twice' ? (
-                  <>
-                    <select value={presetHour} onClick={e => e.stopPropagation()}
-                      onChange={e => { const h = parseInt(e.target.value); setPresetHour(h); updateCron('twice', h, presetHour2) }}
-                      className="bg-transparent text-blue-700 font-bold border-0 p-0 text-xs w-10 cursor-pointer focus:ring-0">
-                      {Array.from({ length: 12 }, (_, i) => i + 5).map(h => <option key={h} value={h}>{h}h</option>)}
-                    </select>
-                    <span>&</span>
-                    <select value={presetHour2} onClick={e => e.stopPropagation()}
-                      onChange={e => { const h = parseInt(e.target.value); setPresetHour2(h); updateCron('twice', presetHour, h) }}
-                      className="bg-transparent text-blue-700 font-bold border-0 p-0 text-xs w-10 cursor-pointer focus:ring-0">
-                      {Array.from({ length: 12 }, (_, i) => i + 12).map(h => <option key={h} value={h}>{h}h</option>)}
-                    </select>
-                  </>
-                ) : '6h & 18h'}
-              </div>
-              <div className="text-[10px] text-gray-400 mt-0.5">{scheduleMode === 'twice' ? `Lúc ${presetHour}:00 và ${presetHour2}:00` : 'Sáng & chiều'}</div>
-            </button>
-
-            {/* Ngày làm việc — cho đổi giờ */}
-            <button onClick={() => selectMode('weekday')}
-              className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                scheduleMode === 'weekday' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}>
-              <div className="flex items-center gap-1">
-                Ngày làm việc
-                {scheduleMode === 'weekday' && (
-                  <select value={presetHour} onClick={e => e.stopPropagation()}
-                    onChange={e => { const h = parseInt(e.target.value); setPresetHour(h); updateCron('weekday', h) }}
-                    className="bg-transparent text-blue-700 font-bold border-0 p-0 text-xs w-10 cursor-pointer focus:ring-0">
-                    {Array.from({ length: 17 }, (_, i) => i + 6).map(h => <option key={h} value={h}>{h}h</option>)}
-                  </select>
-                )}
-                {scheduleMode !== 'weekday' && <span>8h</span>}
-              </div>
-              <div className="text-[10px] text-gray-400 mt-0.5">{scheduleMode === 'weekday' ? `T2-T6 lúc ${presetHour}:00` : 'T2-T6 lúc 8:00'}</div>
-            </button>
-
-            {/* Mỗi 4 tiếng — hiện giờ cụ thể (UI-012 fix) */}
-            <button onClick={() => selectMode('every4h')}
-              className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                scheduleMode === 'every4h' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}>
-              <div>Mỗi 4 tiếng</div>
-              <div className="text-[10px] text-gray-400 mt-0.5">6h, 10h, 14h, 18h, 22h</div>
-            </button>
-
-            {/* Tùy chỉnh */}
+            {DEFAULT_PRESETS.map(p => (
+              <button key={p.key} onClick={() => selectMode(p.key)}
+                className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                  scheduleMode === p.key ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}>
+                <div>{p.label}</div>
+                <div className="text-[10px] text-gray-400 mt-0.5">{p.descFn(p.defaultHours?.[0] || p.defaultHour, p.defaultHours?.[1])}</div>
+              </button>
+            ))}
             <button onClick={() => selectMode('custom')}
               className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
                 scheduleMode === 'custom' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
