@@ -280,22 +280,27 @@ async function campaignDiscoverGroups(payload, supabase) {
       console.log(`[CAMPAIGN-SCOUT] Debug: ${debugHtml} group links in DOM`)
     }
 
-    // Get already joined groups
-    const { data: existingGroups } = await supabase
+    // Get groups ACTUALLY joined by campaign (not auto-fetched bulk data)
+    // Only exclude groups that were joined via a campaign (have joined_via_campaign_id)
+    const { data: campaignJoined } = await supabase
       .from('fb_groups')
       .select('fb_group_id')
       .eq('account_id', account_id)
-    const joinedSet = new Set((existingGroups || []).map(g => g.fb_group_id))
+      .not('joined_via_campaign_id', 'is', null)
+    const joinedSet = new Set((campaignJoined || []).map(g => g.fb_group_id))
 
-    // Filter: not joined, > minMembers (skip minMembers check if member_count unknown)
+    // Filter: not already campaign-joined, > minMembers
     const minMembers = config?.min_members || 100
     const notJoined = allGroups.filter(g =>
       !joinedSet.has(g.fb_group_id) && (g.member_count >= minMembers || g.member_count === 0)
     )
+    console.log(`[CAMPAIGN-SCOUT] Total: ${allGroups.length}, already campaign-joined: ${joinedSet.size}, candidates: ${notJoined.length}`)
 
-    // AI relevance filter
-    const candidates = await filterRelevantGroups(notJoined, topic, payload.owner_id, account_id)
-    console.log(`[CAMPAIGN-SCOUT] After filter: ${notJoined.length} not joined → ${candidates.length} relevant`)
+    // AI relevance filter on candidates
+    const candidates = notJoined.length > 0
+      ? await filterRelevantGroups(notJoined, topic, payload.owner_id, account_id)
+      : []
+    console.log(`[CAMPAIGN-SCOUT] After AI filter: ${notJoined.length} → ${candidates.length} relevant`)
 
     let joined = 0
     const joinedGroups = []

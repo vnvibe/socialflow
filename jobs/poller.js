@@ -280,7 +280,14 @@ async function poll() {
             const durationMin = Math.round((Date.now() - sessionStart) / 60000)
             console.log(`[POLLER] Nick ${accId.slice(0,8)} session ended after ${durationMin}min`)
             nickSessionStart.delete(accId)
-            nickLastSession.set(accId, Date.now())
+            // Only rest after interaction jobs (campaign_*, comment, post, join)
+            // Utility jobs (fetch_*, check_*, scan_*, resolve_*) don't need rest
+            const isInteraction = (job.type || '').startsWith('campaign_') ||
+              ['comment_post', 'post_page', 'post_group', 'post_profile', 'join_group'].includes(job.type)
+            if (isInteraction) {
+              nickLastSession.set(accId, Date.now())
+              console.log(`[POLLER] Nick ${accId.slice(0,8)} → rest ${Math.round(MIN_REST_MS / 60000)}min`)
+            }
           }
         }
       })
