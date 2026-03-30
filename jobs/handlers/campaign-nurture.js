@@ -247,24 +247,40 @@ async function campaignNurture(payload, supabase) {
         const status = await checkAccountStatus(page, supabase, account_id)
         if (status.blocked) throw new Error(`Account blocked: ${status.detail}`)
 
-        // Language check — skip entire group if not Vietnamese
-        const groupLang = await page.evaluate(() => {
+        // Language + engagement check — analyze first 5 posts
+        const groupAnalysis = await page.evaluate(() => {
           const articles = document.querySelectorAll('[role="article"]')
-          let viCount = 0, totalCount = 0
-          for (const a of [...articles].slice(0, 5)) {
-            const text = (a.innerText || '').substring(0, 200)
-            if (text.length < 20) continue
-            totalCount++
-            const viChars = (text.match(/[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/gi) || []).length
-            if (viChars > 2) viCount++
-          }
-          return totalCount > 0 ? viCount / totalCount : 0
-        }).catch(() => 0)
+          let viPosts = 0, enPosts = 0, otherPosts = 0, totalPosts = 0
+          const VI_DIACRITICS = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/gi
+          const VI_WORDS = /\b(của|này|trong|không|được|những|cái|một|các|có|cho|với|đang|và|là|tôi|bạn|mình|anh|chị|em|ơi|nhé|nhỉ|vậy|sao|thế|gì|nào|ạ|ừ)\b/gi
+          const CJK = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g
 
-        if (groupLang < 0.3) {
-          console.log(`[NURTURE] ⚠️ Skip group "${group.name}" — not Vietnamese (${Math.round(groupLang * 100)}% VN posts)`)
-          logger.log('visit_group', { target_type: 'group', target_name: group.name, result_status: 'skipped', details: { reason: 'non_vietnamese_group', vi_ratio: groupLang } })
-          result.errors.push('skipped: non-Vietnamese group')
+          for (const a of [...articles].slice(0, 5)) {
+            const text = (a.innerText || '').substring(0, 300)
+            if (text.length < 20) continue
+            totalPosts++
+
+            const viDiacritics = (text.match(VI_DIACRITICS) || []).length
+            const viWords = (text.match(VI_WORDS) || []).length
+            const cjkChars = (text.match(CJK) || []).length
+
+            if (cjkChars > 5) { otherPosts++; continue }
+            if (viDiacritics > 3 || viWords > 2) { viPosts++; continue }
+            enPosts++
+          }
+
+          return {
+            totalPosts, viPosts, enPosts, otherPosts,
+            viRatio: totalPosts > 0 ? viPosts / totalPosts : 0,
+            lang: viPosts >= enPosts ? 'vi' : enPosts > viPosts ? 'en' : 'unknown'
+          }
+        }).catch(() => ({ totalPosts: 0, viPosts: 0, enPosts: 0, otherPosts: 0, viRatio: 0, lang: 'unknown' }))
+
+        if (groupAnalysis.lang !== 'vi' && groupAnalysis.viRatio < 0.3) {
+          console.log(`[NURTURE] ⚠️ Skip group "${group.name}" — ${groupAnalysis.lang} (${groupAnalysis.viPosts}/${groupAnalysis.totalPosts} VN posts)`)
+          logger.log('visit_group', { target_type: 'group', target_name: group.name, result_status: 'skipped',
+            details: { reason: 'non_vietnamese_group', lang: groupAnalysis.lang, vi_posts: groupAnalysis.viPosts, total_posts: groupAnalysis.totalPosts } })
+          result.errors.push(`skipped: ${groupAnalysis.lang} group`)
           groupResults.push(result)
           continue
         }
@@ -341,7 +357,20 @@ async function campaignNurture(payload, supabase) {
                       }
                     }
                   }
-                  results.push({ label, text, pressed, index: results.length, postUrl })
+                  // Extract engagement counts from article
+                  let reactions = 0, commentCount = 0
+                  const engText = article.innerText || ''
+                  const reactMatch = engText.match(/(\d+[\d,.]*[KkMm]?)\s*(reactions?|lượt thích|người đã bày tỏ)/i)
+                  if (reactMatch) {
+                    let raw = reactMatch[1].replace(/[,.]/g, '')
+                    if (/[Kk]/.test(raw)) reactions = Math.round(parseFloat(raw) * 1000)
+                    else if (/[Mm]/.test(raw)) reactions = Math.round(parseFloat(raw) * 1000000)
+                    else reactions = parseInt(raw) || 0
+                  }
+                  const cmtMatch = engText.match(/(\d+[\d,.]*)\s*(comments?|bình luận)/i)
+                  if (cmtMatch) commentCount = parseInt(cmtMatch[1].replace(/[,.]/g, '')) || 0
+
+                  results.push({ label, text, pressed, index: results.length, postUrl, reactions, commentCount })
                   btn.setAttribute('data-nurture-like', results.length - 1)
                 }
               }
@@ -388,7 +417,7 @@ async function campaignNurture(payload, supabase) {
                 p_action_type: 'like',
               })
               console.log(`[NURTURE] Liked #${totalLikes} (session: ${tracker.get('like')}/${maxLikesSession})`)
-              logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { post_url: likeableInfo[i]?.postUrl || null } })
+              logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { post_url: likeableInfo[i]?.postUrl || null, reactions: likeableInfo[i]?.reactions || 0, comments: likeableInfo[i]?.commentCount || 0 } })
 
               // Human delay between likes (minGapSeconds: 2)
               await R.sleepRange(2000, 5000)
@@ -501,13 +530,12 @@ async function campaignNurture(payload, supabase) {
                 }, i)
               } catch {}
 
-              // Skip non-Vietnamese posts (detect by character ratio)
+              // Skip non-Vietnamese posts (detect by diacritics + common VN words)
               if (postText.length > 20) {
-                const viChars = (postText.match(/[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/gi) || []).length
-                const totalAlpha = (postText.match(/[a-zA-Zàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/gi) || []).length
-                const viRatio = totalAlpha > 0 ? viChars / totalAlpha : 0
-                if (viRatio < 0.02 && totalAlpha > 30) {
-                  console.log(`[NURTURE] Skip comment #${i} — non-Vietnamese post (vi ratio: ${Math.round(viRatio * 100)}%)`)
+                const viDiacritics = (postText.match(/[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/gi) || []).length
+                const viWords = (postText.match(/\b(của|này|trong|không|được|những|một|các|có|cho|với|đang|và|là|mình|bạn|anh|chị|em|ơi|nhé|sao|gì|nào|ạ)\b/gi) || []).length
+                if (viDiacritics < 2 && viWords < 2 && postText.length > 50) {
+                  console.log(`[NURTURE] Skip comment #${i} — non-Vietnamese post`)
                   continue
                 }
               }
