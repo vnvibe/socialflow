@@ -654,7 +654,7 @@ const ACTION_LABELS = {
 function DetailLogView({ campaignId }) {
   const [actionFilter, setActionFilter] = useState(null)
   const [accountFilter, setAccountFilter] = useState(null)
-  const [dateFilter, setDateFilter] = useState('')
+  const [dateFilter, setDateFilter] = useState(new Date().toISOString().slice(0, 10)) // default today
   const [currentPage, setCurrentPage] = useState(1)
   const [entries, setEntries] = useState([])
   const [summary, setSummary] = useState({})
@@ -691,9 +691,11 @@ function DetailLogView({ campaignId }) {
     setLoading(false)
   }, [campaignId])
 
-  // Initial load
+  // Initial load — default to today
+  const today = new Date().toISOString().slice(0, 10)
   useEffect(() => {
-    fetchPage(1, null, null, '')
+    setDateFilter(today)
+    fetchPage(1, null, null, today)
     setCurrentPage(1)
     setActionFilter(null)
     setAccountFilter(null)
@@ -759,6 +761,10 @@ function DetailLogView({ campaignId }) {
           )}
           <input type="date" value={dateFilter} onChange={e => changeDate(e.target.value)}
             className="text-xs border rounded-lg px-2 py-1.5 bg-white text-gray-600" />
+          <button onClick={() => fetchPage(currentPage, actionFilter, accountFilter, dateFilter)}
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 px-2 py-1.5 border rounded-lg hover:bg-gray-50">
+            <RefreshCw size={12} /> Làm mới
+          </button>
         </div>
       </div>
 
