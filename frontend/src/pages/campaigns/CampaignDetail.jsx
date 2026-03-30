@@ -580,6 +580,7 @@ const ACTION_LABELS = {
 function DetailLogView({ campaignId }) {
   const [actionFilter, setActionFilter] = useState(null)
   const [accountFilter, setAccountFilter] = useState(null)
+  const [dateFilter, setDateFilter] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [entries, setEntries] = useState([])
   const [summary, setSummary] = useState({})
@@ -591,12 +592,16 @@ function DetailLogView({ campaignId }) {
   const PER_PAGE = 30
 
   // Fetch page data
-  const fetchPage = useCallback(async (page, action, account) => {
+  const fetchPage = useCallback(async (page, action, account, date) => {
     setLoading(true)
     try {
       const params = new URLSearchParams({ limit: PER_PAGE, page })
       if (action) params.set('action_type', action)
       if (account) params.set('account_id', account)
+      if (date) {
+        params.set('date_from', `${date}T00:00:00`)
+        params.set('date_to', `${date}T23:59:59`)
+      }
       const res = await api.get(`/campaigns/${campaignId}/activity-log?${params}`)
       const d = res.data
       setEntries(d.data || [])
@@ -614,15 +619,16 @@ function DetailLogView({ campaignId }) {
 
   // Initial load
   useEffect(() => {
-    fetchPage(1, null, null)
+    fetchPage(1, null, null, '')
     setCurrentPage(1)
     setActionFilter(null)
     setAccountFilter(null)
+    setDateFilter('')
   }, [campaignId, fetchPage])
 
   // Poll for new entries (page 1 only, no filters)
   useEffect(() => {
-    if (currentPage !== 1 || actionFilter || accountFilter) return
+    if (currentPage !== 1 || actionFilter || accountFilter || dateFilter) return
     const timer = setInterval(async () => {
       if (!latestTs.current) return
       try {
@@ -641,12 +647,13 @@ function DetailLogView({ campaignId }) {
       } catch {}
     }, 10000)
     return () => clearInterval(timer)
-  }, [campaignId, currentPage, actionFilter, accountFilter])
+  }, [campaignId, currentPage, actionFilter, accountFilter, dateFilter])
 
   // Handle filter/page change
-  const changePage = (p) => { setCurrentPage(p); fetchPage(p, actionFilter, accountFilter) }
-  const changeAction = (a) => { const v = actionFilter === a ? null : a; setActionFilter(v); setCurrentPage(1); fetchPage(1, v, accountFilter) }
-  const changeAccount = (id) => { const v = accountFilter === id ? null : id; setAccountFilter(v); setCurrentPage(1); fetchPage(1, actionFilter, v) }
+  const changePage = (p) => { setCurrentPage(p); fetchPage(p, actionFilter, accountFilter, dateFilter) }
+  const changeAction = (a) => { const v = actionFilter === a ? null : a; setActionFilter(v); setCurrentPage(1); fetchPage(1, v, accountFilter, dateFilter) }
+  const changeAccount = (id) => { const v = accountFilter === id ? null : id; setAccountFilter(v); setCurrentPage(1); fetchPage(1, actionFilter, v, dateFilter) }
+  const changeDate = (d) => { setDateFilter(d); setCurrentPage(1); fetchPage(1, actionFilter, accountFilter, d) }
 
   if (!entries.length && !total && !loading) return <div className="text-center py-8 text-gray-400">Chưa có dữ liệu chi tiết. Chạy campaign để bắt đầu ghi log.</div>
 
@@ -667,14 +674,18 @@ function DetailLogView({ campaignId }) {
             </button>
           ))}
         </div>
-        {/* Account filter dropdown */}
-        {accounts.length > 1 && (
-          <select value={accountFilter || ''} onChange={e => changeAccount(e.target.value || null)}
-            className="text-xs border rounded-lg px-2 py-1.5 bg-white text-gray-600">
-            <option value="">Tất cả nick</option>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-        )}
+        {/* Nick + Date filters */}
+        <div className="flex gap-2 items-center">
+          {accounts.length > 0 && (
+            <select value={accountFilter || ''} onChange={e => changeAccount(e.target.value || null)}
+              className="text-xs border rounded-lg px-2 py-1.5 bg-white text-gray-600">
+              <option value="">Tất cả nick</option>
+              {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          )}
+          <input type="date" value={dateFilter} onChange={e => changeDate(e.target.value)}
+            className="text-xs border rounded-lg px-2 py-1.5 bg-white text-gray-600" />
+        </div>
       </div>
 
       {/* Detail entries */}
@@ -707,8 +718,12 @@ function DetailLogView({ campaignId }) {
                   {entry.details?.comment_text && (
                     <p className="text-[10px] text-gray-400 mt-0.5 truncate">"{entry.details.comment_text}"</p>
                   )}
-                  {entry.details?.post_url && (
-                    <a href={entry.details.post_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">[xem bài]</a>
+                  {(entry.action_type === 'like' || entry.action_type === 'comment') && (
+                    entry.details?.post_url
+                      ? <a href={entry.details.post_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">↗ xem bài</a>
+                      : entry.target_url
+                        ? <a href={entry.target_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-gray-400 hover:underline">↗ xem nhóm</a>
+                        : null
                   )}
                 </div>
               </div>
@@ -716,7 +731,7 @@ function DetailLogView({ campaignId }) {
                 {entry.result_status === 'success' && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
                 {entry.result_status === 'failed' && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
                 {entry.result_status === 'skipped' && <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />}
-                <span className="text-[10px] text-gray-300">{entry.created_at ? format(new Date(entry.created_at), 'HH:mm:ss') : ''}</span>
+                <span className="text-[10px] text-gray-300">{entry.created_at ? format(new Date(entry.created_at), 'dd/MM HH:mm') : ''}</span>
               </div>
             </div>
           </div>

@@ -430,7 +430,7 @@ module.exports = async (fastify) => {
         if (fbError?.code === 190 || fbError?.error_subcode === 463 || errorMsg.includes('expired')) {
           userError = 'Access token đã hết hạn. Vui lòng cập nhật token mới trong Quản lý Fanpage.'
           // Mark page token as expired
-          await supabase.from('fanpages').update({ token_status: 'expired' }).eq('id', target.id).catch(() => {})
+          try { await supabase.from('fanpages').update({ token_status: 'expired' }).eq('id', target.id) } catch {}
         } else if (fbError?.code === 200 || fbError?.code === 10) {
           userError = 'Không có quyền đăng bài. Kiểm tra quyền Page token (pages_manage_posts).'
         }

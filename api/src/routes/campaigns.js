@@ -650,8 +650,8 @@ module.exports = async (fastify) => {
     const accountIds = [...new Set(entries.map(d => d.account_id).filter(Boolean))]
     let accountMap = {}
     if (accountIds.length) {
-      const { data: accounts } = await supabase.from('accounts').select('id, name').in('id', accountIds)
-      accountMap = Object.fromEntries((accounts || []).map(a => [a.id, a.name]))
+      const { data: accounts } = await supabase.from('accounts').select('id, username').in('id', accountIds)
+      accountMap = Object.fromEntries((accounts || []).map(a => [a.id, a.username]))
     }
 
     const enriched = entries.map(d => ({
@@ -660,7 +660,11 @@ module.exports = async (fastify) => {
     }))
 
     // Summary: aggregate over ENTIRE campaign (not just this page)
-    const { data: sumRows } = await supabase.rpc('campaign_activity_summary', { p_campaign_id: req.params.id }).catch(() => ({ data: null }))
+    let sumRows = null
+    try {
+      const { data } = await supabase.rpc('campaign_activity_summary', { p_campaign_id: req.params.id })
+      sumRows = data
+    } catch {}
     const summary = {}
     if (sumRows) {
       for (const r of sumRows) {
@@ -728,11 +732,11 @@ module.exports = async (fastify) => {
     const roleIds = [...new Set((jobs || []).map(j => j.payload?.role_id).filter(Boolean))]
 
     const [accountsRes, rolesRes] = await Promise.all([
-      accountIds.length ? supabase.from('accounts').select('id, name').in('id', accountIds) : { data: [] },
+      accountIds.length ? supabase.from('accounts').select('id, username').in('id', accountIds) : { data: [] },
       roleIds.length ? supabase.from('campaign_roles').select('id, name, role_type').in('id', roleIds) : { data: [] },
     ])
 
-    const accountMap = Object.fromEntries((accountsRes.data || []).map(a => [a.id, a.name]))
+    const accountMap = Object.fromEntries((accountsRes.data || []).map(a => [a.id, a.username]))
     const roleMap = Object.fromEntries((rolesRes.data || []).map(r => [r.id, { name: r.name, type: r.role_type }]))
 
     const enriched = (jobs || []).map(j => ({
@@ -753,7 +757,11 @@ module.exports = async (fastify) => {
     }))
 
     // Count by status for filter pills
-    const { data: statusCounts } = await supabase.rpc('count_by_status_jsonb', { cid: req.params.id }).catch(() => ({ data: null }))
+    let statusCounts = null
+    try {
+      const { data } = await supabase.rpc('count_by_status_jsonb', { cid: req.params.id })
+      statusCounts = data
+    } catch {}
 
     // Fallback count
     let counts = statusCounts

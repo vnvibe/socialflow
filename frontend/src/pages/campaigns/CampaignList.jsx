@@ -52,8 +52,8 @@ export default function CampaignList() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <Target size={24} className="text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-900">Chien Dich</h1>
+          <Target size={24} className="text-purple-600" />
+          <h1 className="text-2xl font-bold text-gray-900">AI Pilot</h1>
         </div>
         <button
           onClick={() => navigate('/campaigns/new')}

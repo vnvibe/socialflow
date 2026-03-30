@@ -17,18 +17,6 @@ function createOpenAICompatible({ apiKey, baseURL }) {
       }
     },
 
-    async whisper(audioBuffer, language = 'vi') {
-      const { File } = await import('node:buffer')
-      const audioFile = new File([audioBuffer], 'audio.mp3', { type: 'audio/mpeg' })
-      const response = await client.audio.transcriptions.create({
-        file: audioFile,
-        model: 'whisper-large-v3',
-        language,
-        response_format: 'verbose_json',
-        timestamp_granularities: ['segment']
-      })
-      return response
-    }
   }
 }
 

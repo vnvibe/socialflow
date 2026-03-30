@@ -12,7 +12,7 @@ module.exports = async (fastify) => {
       supabase
         .from('agent_heartbeats')
         .select('agent_id, last_seen, hostname, platform, user_id')
-        .gte('last_seen', new Date(Date.now() - 15000).toISOString())
+        .gte('last_seen', new Date(Date.now() - 60000).toISOString())
         .or(`user_id.is.null,user_id.eq.${userId}`)
         .order('last_seen', { ascending: false }),
       supabase

@@ -13,7 +13,7 @@ export default function AgentStatus() {
   const { data, refetch, isRefetching } = useQuery({
     queryKey: ['agent-status'],
     queryFn: () => api.get('/agent/status').then(r => r.data),
-    refetchInterval: 15000,
+    refetchInterval: 30000,
     retry: false,
   })
 

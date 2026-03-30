@@ -3,8 +3,10 @@
  */
 
 module.exports = async function (app) {
+  const auth = { preHandler: app.authenticate }
+
   // GET /notifications — list notifications
-  app.get('/', async (req, reply) => {
+  app.get('/', auth, async (req, reply) => {
     const userId = req.user.id
     const { is_read, type, limit = 50, offset = 0 } = req.query
 
@@ -28,7 +30,7 @@ module.exports = async function (app) {
   })
 
   // GET /notifications/unread-count
-  app.get('/unread-count', async (req, reply) => {
+  app.get('/unread-count', auth, async (req, reply) => {
     const { count, error } = await app.supabase
       .from('notifications')
       .select('id', { count: 'exact', head: true })
@@ -40,7 +42,7 @@ module.exports = async function (app) {
   })
 
   // PUT /notifications/:id/read — mark single as read
-  app.put('/:id/read', async (req, reply) => {
+  app.put('/:id/read', auth, async (req, reply) => {
     const { error } = await app.supabase
       .from('notifications')
       .update({ is_read: true })
@@ -52,7 +54,7 @@ module.exports = async function (app) {
   })
 
   // PUT /notifications/read-all — mark all as read
-  app.put('/read-all', async (req, reply) => {
+  app.put('/read-all', auth, async (req, reply) => {
     const { error } = await app.supabase
       .from('notifications')
       .update({ is_read: true })
@@ -64,7 +66,7 @@ module.exports = async function (app) {
   })
 
   // DELETE /notifications/:id — delete single
-  app.delete('/:id', async (req, reply) => {
+  app.delete('/:id', auth, async (req, reply) => {
     const { error } = await app.supabase
       .from('notifications')
       .delete()
