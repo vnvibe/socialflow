@@ -732,11 +732,11 @@ function DetailLogView({ campaignId }) {
   const changeAccount = (id) => { const v = accountFilter === id ? null : id; setAccountFilter(v); setCurrentPage(1); fetchPage(1, actionFilter, v, dateFilter) }
   const changeDate = (d) => { setDateFilter(d); setCurrentPage(1); fetchPage(1, actionFilter, accountFilter, d) }
 
-  if (!entries.length && !total && !loading) return <div className="text-center py-8 text-gray-400">Chưa có dữ liệu chi tiết. Chạy campaign để bắt đầu ghi log.</div>
+  const isEmpty = !entries.length && !total && !loading
 
   return (
     <div className="space-y-3">
-      {/* Filters row */}
+      {/* Filters row — always visible so user can change date */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         {/* Action filter pills */}
         <div className="flex gap-1.5 flex-wrap">
@@ -770,7 +770,10 @@ function DetailLogView({ campaignId }) {
       </div>
 
       {/* Detail entries */}
-      <div className="bg-white rounded-xl border border-gray-200 divide-y">
+      {isEmpty && (
+        <div className="text-center py-8 text-gray-400">Không có dữ liệu ngày {dateFilter || 'này'}. Chọn ngày khác hoặc chạy campaign.</div>
+      )}
+      {!isEmpty && <div className="bg-white rounded-xl border border-gray-200 divide-y">
         {loading && !entries.length && (
           <div className="text-center py-8 text-gray-400"><Loader className="animate-spin inline mr-1" size={14} /> Đang tải...</div>
         )}
@@ -817,7 +820,7 @@ function DetailLogView({ campaignId }) {
             </div>
           </div>
         ))}
-      </div>
+      </div>}
 
       {/* Pagination */}
       {totalPages > 1 && (
