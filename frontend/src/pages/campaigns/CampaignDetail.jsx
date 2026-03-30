@@ -622,7 +622,7 @@ function ActivityTab({ data, loading, onRefresh, campaignId }) {
                 {/* Right: time + duration */}
                 <div className="text-right flex-shrink-0">
                   <p className="text-xs text-gray-400">
-                    {entry.created_at ? format(new Date(entry.created_at), 'HH:mm') : ''}
+                    {entry.created_at ? format(new Date(entry.created_at), 'dd/MM HH:mm:ss') : ''}
                   </p>
                   {duration != null && (
                     <p className="text-[10px] text-gray-300">{duration}s</p>
@@ -805,7 +805,7 @@ function DetailLogView({ campaignId }) {
                 {entry.result_status === 'success' && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
                 {entry.result_status === 'failed' && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
                 {entry.result_status === 'skipped' && <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />}
-                <span className="text-[10px] text-gray-300">{entry.created_at ? format(new Date(entry.created_at), 'dd/MM HH:mm') : ''}</span>
+                <span className="text-[10px] text-gray-300">{entry.created_at ? format(new Date(entry.created_at), 'dd/MM HH:mm:ss') : ''}</span>
               </div>
             </div>
           </div>
