@@ -611,20 +611,23 @@ A colossal glass server tower floating in the sky above clouds, bathed in warm g
       enthusiastic: 'Nhiệt tình, hào hứng, tích cực',
     }
 
-    const prompt = `Viết MỘT bình luận Facebook ngắn gọn bằng ${lang}.
+    const prompt = `Viết MỘT bình luận Facebook bằng ${lang}.
 
-Bài viết trong nhóm "${group_name || 'chung'}":
-"${(post_snippet || '').substring(0, 300)}"
-${topic ? `Chủ đề: ${topic}` : ''}
+=== BÀI VIẾT GỐC (trong nhóm "${group_name || 'chung'}") ===
+"${(post_snippet || '').substring(0, 500)}"
 
-Yêu cầu:
-- Giọng: ${styleGuides[commentStyle] || styleGuides.casual}
-- Tối đa 1-2 câu ngắn
-- Tối đa 1 emoji (hoặc không)
-- KHÔNG hashtag, KHÔNG link
-- Phải liên quan đến nội dung bài viết
-- Tự nhiên, không giống bot
-- Mỗi lần viết khác nhau
+=== QUY TẮC BẮT BUỘC ===
+1. ĐỌC KỸ bài viết trên, HIỂU nội dung người đăng muốn nói gì
+2. Bình luận PHẢI TRẢ LỜI/PHẢN HỒI đúng nội dung bài viết:
+   - Nếu họ HỎI → trả lời hoặc chia sẻ kinh nghiệm liên quan
+   - Nếu họ CHIA SẺ → bình luận về điều họ chia sẻ, hỏi thêm chi tiết
+   - Nếu họ QUẢNG CÁO → bình luận quan tâm hoặc hỏi giá/chi tiết
+3. KHÔNG viết comment chung chung kiểu "hay quá", "tuyệt vời"
+4. KHÔNG đề cập chủ đề "${topic}" nếu bài viết KHÔNG liên quan trực tiếp
+5. Giọng: ${styleGuides[commentStyle] || styleGuides.casual}
+6. Tối đa 1-2 câu, tối đa 1 emoji
+7. KHÔNG hashtag, KHÔNG link
+8. Tự nhiên như người thật đang nói chuyện
 
 Chỉ trả về NỘI DUNG bình luận, không giải thích.`
 
