@@ -77,13 +77,21 @@ module.exports = async (fastify) => {
     }
   })
 
-  // POST /ai/generate - Generic AI generation
-  fastify.post('/generate', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // POST /ai/generate - Generic AI generation (supports service-role key for agent)
+  fastify.post('/generate', async (req, reply) => {
     const { function_name, messages, provider, model } = req.body
     if (!messages?.length) return reply.code(400).send({ error: 'messages required' })
 
+    // Allow service-role key OR authenticated user
+    const authHeader = req.headers.authorization || ''
+    const isServiceKey = authHeader.includes(process.env.SUPABASE_SERVICE_ROLE_KEY || '___none___')
+    if (!isServiceKey) {
+      try { await fastify.authenticate(req, reply) } catch { return }
+    }
+    const userId = req.user?.id || req.headers['x-user-id'] || (isServiceKey ? '274868cf-742d-4d8a-89e8-bf1c37766b77' : null)
+
     try {
-      const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
+      const orchestrator = await getOrchestratorForUser(userId, supabase)
       const result = await orchestrator.call(
         function_name || 'caption_gen',
         messages,
