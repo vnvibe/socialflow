@@ -28,8 +28,8 @@ Moi buoc la 1 object:
 Cac action:
 - browse: Xem feed nhom/trang (warm up truoc khi tuong tac)
 - like: Like bai viet (params.topic: chu de)
-- comment: Binh luan (params.style: "natural"|"expert"|"casual", params.topic: chu de)
-- join_group: Tim va tham gia nhom (params.keywords: tu khoa tim kiem, params.min_members: 100)
+- comment: Binh luan (params.style: "natural"|"expert"|"casual", params.topic: chu de, params.context: "binh luan lien quan den [topic]")
+- join_group: Tim va tham gia nhom (params.keywords: MANG CAC TU KHOA tim kiem, trich xuat TU PROMPT. VD: prompt "nhom ve vps hosting, openclaw" → params.keywords: ["vps hosting", "openclaw", "cloud server"]. params.min_members: 100)
 - scan_members: Scan thanh vien nhom (params.max_results: 30, params.active_only: true)
 - send_friend_request: Ket ban (params.source: "group_members"|"commenters")
 - post: Dang bai (params.content_source: "ai_gen")
