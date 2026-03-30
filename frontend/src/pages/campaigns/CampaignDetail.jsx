@@ -531,9 +531,11 @@ function ActivityTab({ data, loading, onRefresh, campaignId }) {
             Chi tiết
           </button>
         </div>
-        <button onClick={onRefresh} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
-          <RefreshCw size={12} /> Làm mới
-        </button>
+        {viewMode === 'jobs' && (
+          <button onClick={onRefresh} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
+            <RefreshCw size={12} /> Làm mới
+          </button>
+        )}
       </div>
 
       {viewMode === 'details' && <DetailLogView campaignId={campaignId} />}
