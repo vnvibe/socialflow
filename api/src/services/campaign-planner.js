@@ -6,38 +6,52 @@
 const { getOrchestratorForUser } = require('./ai/orchestrator')
 
 const SYSTEM_PROMPT = `Ban la AI planner cho he thong tu dong hoa Facebook.
-Phan tich nhiem vu nguoi dung → tra ve JSON array cac buoc thuc thi.
+Phan tich CHINH XAC yeu cau nguoi dung → tra ve JSON array cac buoc thuc thi.
+
+QUAN TRONG: Doc ky yeu cau va trich xuat SO LIEU CU THE tu prompt.
+Vi du: "binh luan 5 bai" → count_min: 5, count_max: 5
+Vi du: "ket 5 ban moi" → count_min: 5, count_max: 5
+Vi du: "tim 4-6 nhom" → count_min: 4, count_max: 6
 
 Moi buoc la 1 object:
 {
   "action": string,       // browse|like|comment|join_group|scan_members|send_friend_request|post|reply
-  "description": string,  // mo ta ngan
-  "params": object,       // tham so cu the cho action
-  "quota_key": string,    // key budget: like|comment|friend_request|join_group|post|scan
-  "count_mode": string,   // "fixed"|"range"|"ai_decide"
-  "count_min": number,    // so luong toi thieu
-  "count_max": number,    // so luong toi da
-  "priority": number      // 1 = cao nhat
+  "description": string,  // mo ta CU THE, bao gom topic va so luong. VD: "Binh luan 5 bai trong nhom VPS hosting"
+  "params": object,       // tham so cu the
+  "quota_key": string,    // like|comment|friend_request|join_group|post|scan
+  "count_mode": string,   // "fixed"|"range"
+  "count_min": number,    // lay TU PROMPT, khong phai tu nghi
+  "count_max": number,    // lay TU PROMPT
+  "priority": number      // 1 = thuc hien truoc
 }
 
-Cac action ho tro:
-- browse: Vao trang/group de xem, khong tuong tac
-- like: Like bai viet
-- comment: Binh luan bai viet (params.style: "natural"|"expert"|"casual")
-- join_group: Tham gia nhom moi
-- scan_members: Scan thanh vien nhom (params.max_results, params.active_only)
-- send_friend_request: Gui loi moi ket ban
-- post: Dang bai (params.content_source: "ai_gen"|"content_id")
-- reply: Tra loi binh luan/tin nhan
+Cac action:
+- browse: Xem feed nhom/trang (warm up truoc khi tuong tac)
+- like: Like bai viet (params.topic: chu de)
+- comment: Binh luan (params.style: "natural"|"expert"|"casual", params.topic: chu de)
+- join_group: Tim va tham gia nhom (params.keywords: tu khoa tim kiem, params.min_members: 100)
+- scan_members: Scan thanh vien nhom (params.max_results: 30, params.active_only: true)
+- send_friend_request: Ket ban (params.source: "group_members"|"commenters")
+- post: Dang bai (params.content_source: "ai_gen")
 
-Quy tac:
-- Uu tien an toan: nick moi nen it hanh dong
-- count_mode="ai_decide" de he thong tu quyet dinh dua tren context
-- Sap xep theo thu tu thuc hien hop ly
-- Toi da 8 buoc
-- Luon dat quota_key dung: like, comment, friend_request, join_group, post, scan
+GIOI HAN AN TOAN (PER NICK PER NGAY — count KHONG DUOC vuot):
+- join_group: toi da 3/ngay → chia deu cho cac lan chay
+- comment: toi da 15/ngay
+- like: toi da 50/ngay
+- friend_request: toi da 10/ngay
+- post: toi da 3/ngay
 
-CHI tra ve JSON array, KHONG giai thich them.`
+CHIA COUNT CHO SO LAN CHAY: Neu lich chay 2 lan/ngay (6h + 18h), chia count cho 2.
+VD: "binh luan 5 bai/ngay", chay 2 lan → count_min: 2, count_max: 3 (moi lan)
+
+QUY TAC:
+1. PHAI doc so lieu tu prompt nguoi dung, KHONG tu nghi ra con so
+2. Sap xep: browse → join_group → scan → like → comment → friend_request
+3. description phai cu the: bao gom topic + so luong + doi tuong
+4. Toi da 8 buoc
+5. Luon co buoc browse dau tien de warm up
+
+CHI tra ve JSON array, KHONG giai thich.`
 
 // Fallback plans when AI is unavailable or fails
 const FALLBACK_PLANS = {
@@ -113,13 +127,17 @@ async function parseMission(mission, context, userId, supabase) {
       } catch {}
     }
 
+    const runsPerDay = context.runsPerDay || 2
     const userPrompt = `Chu de: ${context.topic || 'general'}
-Loai role: ${context.roleType || 'custom'}
 So nick: ${context.accountCount || 1}
+So lan chay/ngay: ${runsPerDay} (chia count cho ${runsPerDay})
 ${context.accountNames ? `Ten nick: ${context.accountNames.join(', ')}` : ''}
 ${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}${priorContext}
 
-Nhiem vu: ${mission}`
+Yeu cau NGUYEN VAN cua nguoi dung:
+"${mission}"
+
+Hay phan tich yeu cau tren va tao plan CU THE voi so lieu DUNG NHU NGUOI DUNG YEU CAU.`
 
     const aiResult = await orchestrator.call('caption_gen', [
       { role: 'system', content: SYSTEM_PROMPT },

@@ -95,7 +95,7 @@ module.exports = async (fastify) => {
 
   // POST /campaigns/preview-plan — AI generates plan from requirement (no save)
   fastify.post('/preview-plan', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { requirement, topic, account_ids } = req.body
+    const { requirement, topic, account_ids, runs_per_day } = req.body
     if (!requirement) return reply.code(400).send({ error: 'requirement required' })
     if (!account_ids?.length) return reply.code(400).send({ error: 'account_ids required' })
 
@@ -117,7 +117,7 @@ module.exports = async (fastify) => {
     try {
       const steps = await parseMission(
         requirement,
-        { topic: topic || '', roleType: 'auto', accountCount: accounts.length, accountNames, nickAges },
+        { topic: topic || '', roleType: 'auto', accountCount: accounts.length, accountNames, nickAges, runsPerDay: runs_per_day || 2 },
         req.user.id,
         supabase
       )

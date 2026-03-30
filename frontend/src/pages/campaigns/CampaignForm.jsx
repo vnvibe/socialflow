@@ -100,9 +100,10 @@ export default function CampaignForm() {
   // Cập nhật cron khi thay đổi preset/hour
   const updateCron = (mode, h1, h2, cH, cM, cDays) => {
     let cron = '0 9 * * *'
-    if (mode === 'daily') cron = `0 ${h1} * * *`
-    else if (mode === 'twice') cron = `0 ${h1},${h2} * * *`
-    else if (mode === 'weekday') cron = `0 ${h1} * * 1-5`
+    const randomMin = Math.floor(Math.random() * 25) + 5  // 5-29 phút, tránh :00 và :30
+    if (mode === 'daily') cron = `${randomMin} ${h1} * * *`
+    else if (mode === 'twice') cron = `${randomMin} ${h1},${h2} * * *`
+    else if (mode === 'weekday') cron = `${randomMin} ${h1} * * 1-5`
     else if (mode === 'every4h') cron = '0 */4 * * *'
     else if (mode === 'custom') cron = `${cM} ${cH} * * ${cDays.length === 7 ? '*' : cDays.join(',')}`
     setForm(f => ({ ...f, schedule_type: 'recurring', cron_expression: cron }))
@@ -139,9 +140,13 @@ export default function CampaignForm() {
 
   // AI Preview Plan
   const previewMut = useMutation({
-    mutationFn: () => api.post('/campaigns/preview-plan', {
-      requirement: form.requirement, topic: form.topic, account_ids: selectedAccountIds,
-    }).then(r => r.data),
+    mutationFn: () => {
+      const runsMap = { daily: 1, twice: 2, weekday: 1, every4h: 6, custom: 1 }
+      return api.post('/campaigns/preview-plan', {
+        requirement: form.requirement, topic: form.topic, account_ids: selectedAccountIds,
+        runs_per_day: runsMap[scheduleMode] || 2,
+      }).then(r => r.data)
+    },
     onSuccess: (data) => { setAiPlan(data.plan); setPlanConfirmed(false) },
     onError: (err) => toast.error(err.response?.data?.error || 'AI không thể tạo kế hoạch'),
   })
