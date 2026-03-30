@@ -557,13 +557,14 @@ module.exports = async (fastify) => {
 
       const activities = activityRows || []
 
-      // Action summary
+      // Action summary (success / skipped / failed)
       const actionSummary = {}
       for (const a of activities) {
-        if (!actionSummary[a.action_type]) actionSummary[a.action_type] = { total: 0, success: 0, failed: 0 }
+        if (!actionSummary[a.action_type]) actionSummary[a.action_type] = { total: 0, success: 0, failed: 0, skipped: 0 }
         actionSummary[a.action_type].total++
         if (a.result_status === 'success') actionSummary[a.action_type].success++
-        if (a.result_status === 'failed') actionSummary[a.action_type].failed++
+        else if (a.result_status === 'skipped') actionSummary[a.action_type].skipped++
+        else if (a.result_status === 'failed') actionSummary[a.action_type].failed++
       }
 
       // Per-nick action breakdown
@@ -572,7 +573,7 @@ module.exports = async (fastify) => {
         const aid = a.account_id
         if (!aid) continue
         if (!nickActions[aid]) nickActions[aid] = { account_id: aid, actions: {} }
-        if (!nickActions[aid].actions[a.action_type]) nickActions[aid].actions[a.action_type] = { total: 0, success: 0, failed: 0 }
+        if (!nickActions[aid].actions[a.action_type]) nickActions[aid].actions[a.action_type] = { total: 0, success: 0, failed: 0, skipped: 0 }
         nickActions[aid].actions[a.action_type].total++
         if (a.result_status === 'success') nickActions[aid].actions[a.action_type].success++
         if (a.result_status === 'failed') nickActions[aid].actions[a.action_type].failed++

@@ -330,6 +330,7 @@ function ReportTab({ report, loading }) {
                   <div>
                     <p className="text-xs font-medium text-gray-700 capitalize">{type.replace(/_/g, ' ')}</p>
                     <p className="text-sm font-bold">{counts.success}<span className="text-xs text-gray-400 font-normal">/{counts.total}</span>
+                      {counts.skipped > 0 && <span className="text-xs text-yellow-500 ml-1">({counts.skipped} bỏ qua)</span>}
                       {counts.failed > 0 && <span className="text-xs text-red-400 ml-1">({counts.failed} lỗi)</span>}
                     </p>
                   </div>
@@ -374,6 +375,7 @@ function ReportTab({ report, loading }) {
                     <div>
                       <p className="text-[10px] text-gray-500 capitalize">{type.replace(/_/g, ' ')}</p>
                       <p className="text-sm font-bold text-green-600">{c.success}<span className="text-gray-400 font-normal text-xs">/{c.total}</span>
+                        {c.skipped > 0 && <span className="text-yellow-500 text-xs ml-1">⏭️{c.skipped}</span>}
                         {c.failed > 0 && <span className="text-red-400 text-xs ml-1">❌{c.failed}</span>}
                       </p>
                     </div>
