@@ -7,9 +7,10 @@ const path = require('path')
 const os = require('os')
 
 const PROFILES_DIR = path.join(os.homedir(), '.socialflow', 'profiles')
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000 // 15 phút (tăng lên vì fetch có thể lâu)
+const IDLE_TIMEOUT_MS = 20 * 60 * 1000 // 20 phút — giữ session sống lâu hơn giữa jobs
+const MAX_SESSIONS = 4 // Giới hạn RAM — max 4 browser cùng lúc
 
-// Map account_id -> { browser, context, storageFile, lastUsed, closing, busy }
+// Map account_id -> { browser, context, storageFile, lastUsed, closing, busy, createdAt }
 const sessions = new Map()
 
 let cleanupInterval = null
@@ -48,6 +49,21 @@ async function getSession(account, opts = {}) {
     password: account.proxies.password
   } : account.proxy || null }, { headless: opts.headless })
 
+  // If at max sessions, close oldest idle session first
+  if (sessions.size >= MAX_SESSIONS) {
+    let oldestId = null, oldestTime = Infinity
+    for (const [sid, s] of sessions) {
+      if (!s.busy && !s.closing && s.lastUsed < oldestTime) {
+        oldestTime = s.lastUsed
+        oldestId = sid
+      }
+    }
+    if (oldestId) {
+      console.log(`[SESSION-POOL] At max ${MAX_SESSIONS} sessions, evicting idle session ${oldestId.slice(0, 8)}`)
+      await closeSession(oldestId)
+    }
+  }
+
   const entry = {
     browser: session.browser,
     context: session.context,
@@ -55,6 +71,7 @@ async function getSession(account, opts = {}) {
     profileDir: session.profileDir,
     isPersistent: true, // launchPersistentContext — browser data tách riêng mỗi nick
     lastUsed: Date.now(),
+    createdAt: Date.now(),
     closing: false,
     busy: false,
   }
@@ -146,13 +163,16 @@ async function _getPageInternal(account, opts = {}) {
     try {
       console.log(`[SESSION-POOL] Warming up ${account.username || id} (was: ${currentUrl})`)
       await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 })
-      await page.waitForTimeout(2000)
+      // Random wait 1.5-3s — không fix cứng
+      await page.waitForTimeout(1500 + Math.floor(Math.random() * 1500))
       const url = page.url()
       if (url.includes('/login') || url.includes('checkpoint')) {
-        console.warn(`[SESSION-POOL] Session not logged in for ${account.username || id}: ${url}`)
+        console.warn(`[SESSION-POOL] ⚠️ Not logged in: ${account.username || id} → ${url}`)
+        // Mark session as problematic for error classification
+        session._loginFailed = true
       }
     } catch (err) {
-      console.warn(`[SESSION-POOL] FB warmup failed for ${account.username || id}: ${err.message}`)
+      console.warn(`[SESSION-POOL] Warmup failed for ${account.username || id}: ${err.message}`)
     }
   }
 
