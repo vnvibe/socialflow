@@ -349,25 +349,83 @@ async function campaignDiscoverGroups(payload, supabase) {
         await R.sleepRange(2000, 4000)
         await humanMouseMove(page)
 
-        // Quick language check — read first 2 posts, skip if non-Vietnamese/English
-        const langCheck = await page.evaluate(() => {
-          const articles = document.querySelectorAll('[role="article"]')
-          const texts = []
-          for (const a of [...articles].slice(0, 3)) {
-            const t = (a.innerText || '').substring(0, 200)
-            if (t.length > 20) texts.push(t)
+        // Collect group info: description + first 2 posts for AI evaluation
+        const groupInfo = await page.evaluate(() => {
+          // Group description
+          const descEl = document.querySelector('[role="main"] h2')?.closest('div')?.parentElement
+          let desc = ''
+          const aboutSection = document.querySelectorAll('div[role="main"] span')
+          for (const el of aboutSection) {
+            const t = (el.textContent || '').trim()
+            if (t.length > 30 && t.length < 500 && !t.includes('thành viên') && !t.includes('members')) {
+              desc = t.substring(0, 200)
+              break
+            }
           }
-          return texts.join(' ').substring(0, 500)
-        }).catch(() => '')
 
-        if (langCheck.length > 30) {
-          // Detect CJK characters (Chinese/Japanese/Korean)
-          const cjkRatio = (langCheck.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g) || []).length / langCheck.length
-          if (cjkRatio > 0.15) {
-            console.log(`[CAMPAIGN-SCOUT] ⚠️ Skipping "${group.name}" — non-Vietnamese content (${Math.round(cjkRatio * 100)}% CJK)`)
-            logger.log('visit_group', { target_type: 'group', target_name: group.name, result_status: 'skipped', details: { reason: 'foreign_language', cjk_ratio: cjkRatio } })
-            continue
+          // First 2 posts
+          const articles = document.querySelectorAll('[role="article"]')
+          const posts = []
+          for (const a of [...articles].slice(0, 2)) {
+            const t = (a.innerText || '').substring(0, 150).trim()
+            if (t.length > 20) posts.push(t)
           }
+
+          return { desc, posts }
+        }).catch(() => ({ desc: '', posts: [] }))
+
+        // AI evaluation: 1 call per group — name + desc + posts + topic
+        const postSnippets = groupInfo.posts.map((p, i) => `Bài ${i + 1}: ${p}`).join('\n')
+        let shouldJoin = true
+        try {
+          const evalRes = await axios.post(`${API_URL}/ai/generate`, {
+            function_name: 'caption_gen',
+            provider: 'deepseek',
+            messages: [{
+              role: 'user',
+              content: `Đánh giá nhóm Facebook này có phù hợp để tham gia không?
+
+Chủ đề cần tìm: "${topic}"
+Tên nhóm: "${group.name}"
+ID: ${group.fb_group_id}
+Số thành viên: ${group.member_count || '?'}
+Mô tả: ${groupInfo.desc || '(không có)'}
+${postSnippets || 'Chưa có bài viết'}
+
+Trả lời CHỈ JSON: {"join": true/false, "reason": "lý do ngắn"}
+- join=true: nhóm tiếng Việt hoặc Anh, liên quan đến ${topic}
+- join=false: nhóm tiếng Trung/ngoại ngữ khác, spam, MLM, không liên quan`
+            }],
+            max_tokens: 80,
+            temperature: 0,
+          }, {
+            timeout: 8000,
+            headers: { 'Content-Type': 'application/json', ...(SERVICE_KEY && { Authorization: `Bearer ${SERVICE_KEY}` }), ...(payload.owner_id && { 'x-user-id': payload.owner_id }) },
+          })
+
+          const evalText = evalRes.data?.text || evalRes.data?.result || ''
+          const evalMatch = evalText.match(/\{[\s\S]*?\}/)
+          if (evalMatch) {
+            const decision = JSON.parse(evalMatch[0])
+            shouldJoin = !!decision.join
+            const reason = decision.reason || ''
+            console.log(`[CAMPAIGN-SCOUT] AI eval "${group.name}": ${shouldJoin ? '✅ JOIN' : '❌ SKIP'} — ${reason}`)
+            if (!shouldJoin) {
+              logger.log('visit_group', { target_type: 'group', target_name: group.name, result_status: 'skipped', details: { reason, ai_decision: 'reject' } })
+              continue
+            }
+          }
+        } catch (evalErr) {
+          // AI failed — use CJK detection as fallback
+          const allText = `${groupInfo.desc} ${groupInfo.posts.join(' ')}`
+          if (allText.length > 30) {
+            const cjkRatio = (allText.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g) || []).length / allText.length
+            if (cjkRatio > 0.15) {
+              console.log(`[CAMPAIGN-SCOUT] ⚠️ Skip "${group.name}" — CJK ${Math.round(cjkRatio * 100)}% (AI unavailable)`)
+              continue
+            }
+          }
+          console.log(`[CAMPAIGN-SCOUT] AI eval failed for "${group.name}": ${evalErr.message}, proceeding with join`)
         }
 
         // Find join button — try aria-label first, then text match via locator
