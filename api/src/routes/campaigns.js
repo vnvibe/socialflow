@@ -557,14 +557,13 @@ module.exports = async (fastify) => {
 
       const activities = activityRows || []
 
-      // Action summary (success / skipped / failed)
+      // Action summary — skipped NOT counted in total (total = success + failed only)
       const actionSummary = {}
       for (const a of activities) {
         if (!actionSummary[a.action_type]) actionSummary[a.action_type] = { total: 0, success: 0, failed: 0, skipped: 0 }
-        actionSummary[a.action_type].total++
-        if (a.result_status === 'success') actionSummary[a.action_type].success++
-        else if (a.result_status === 'skipped') actionSummary[a.action_type].skipped++
-        else if (a.result_status === 'failed') actionSummary[a.action_type].failed++
+        if (a.result_status === 'success') { actionSummary[a.action_type].success++; actionSummary[a.action_type].total++ }
+        else if (a.result_status === 'failed') { actionSummary[a.action_type].failed++; actionSummary[a.action_type].total++ }
+        else if (a.result_status === 'skipped') { actionSummary[a.action_type].skipped++ }
       }
 
       // Per-nick action breakdown
@@ -652,7 +651,8 @@ module.exports = async (fastify) => {
           total_runs: campaign.total_runs || 0,
           first_run_at: firstJob,
           last_run_at: campaign.last_run_at,
-          total_activities: activities.length,
+          total_activities: activities.filter(a => a.result_status !== 'skipped').length,
+          total_skipped: activities.filter(a => a.result_status === 'skipped').length,
         },
         daily: Object.values(dailyMap),
         by_role: Object.values(roleMap),
