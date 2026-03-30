@@ -349,16 +349,15 @@ async function campaignDiscoverGroups(payload, supabase) {
         await R.sleepRange(2000, 4000)
         await humanMouseMove(page)
 
-        // Find join button — multiple selectors for Vietnamese + English
-        const joinBtn = await page.$([
-          'div[aria-label="Join group"]',
-          'div[aria-label="Tham gia nhóm"]',
-          'div[aria-label="Join Group"]',
-          'div[role="button"]:has-text("Join group")',
-          'div[role="button"]:has-text("Tham gia nhóm")',
-          'div[role="button"]:has-text("Join")',
-          'div[role="button"]:has-text("Tham gia")',
-        ].join(', '))
+        // Find join button — try aria-label first, then text match via locator
+        let joinBtn = await page.$('div[aria-label="Join group"], div[aria-label="Tham gia nhóm"], div[aria-label="Join Group"], div[aria-label="Tham gia"]')
+        if (!joinBtn) {
+          // Fallback: Playwright locator with text matching
+          try {
+            const loc = page.locator('div[role="button"]:has-text("Tham gia"), div[role="button"]:has-text("Join")').first()
+            if (await loc.isVisible({ timeout: 2000 })) joinBtn = await loc.elementHandle()
+          } catch {}
+        }
 
         if (joinBtn) {
           await humanClick(page, joinBtn)
