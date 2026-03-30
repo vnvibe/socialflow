@@ -202,7 +202,7 @@ function RolesTab({ campaign }) {
             <span className="text-xs text-gray-400">• {(role.account_ids || []).length} nicks</span>
           </div>
           {role.mission && <p className="text-sm text-gray-600 mb-2">{role.mission}</p>}
-          {role.parsed_plan && (
+          {Array.isArray(role.parsed_plan) && role.parsed_plan.length > 0 && (
             <div className="bg-gray-50 rounded-lg p-2 space-y-1">
               {role.parsed_plan.map((step, i) => (
                 <div key={i} className="text-xs text-gray-600 flex items-center gap-2">
@@ -275,13 +275,17 @@ function ReportTab({ report, loading }) {
   const exportCSV = () => {
     const rows = [['Thời gian', 'Nick', 'Hành động', 'Nhóm/Đối tượng', 'Nội dung', 'Link bài', 'Kết quả']]
     const all = [
-      ...(report.recent_comments || []).map(c => [fmtDate(c.created_at), c.account_name, 'Comment', c.group_name, `"${(c.comment_text || '').replace(/"/g, '""')}"`, c.post_url || '', 'OK']),
+      ...(report.recent_comments || []).map(c => [fmtDate(c.created_at), c.account_name, 'Comment', c.group_name, c.comment_text || '', c.post_url || '', 'OK']),
       ...(report.recent_likes || []).map(l => [fmtDate(l.created_at), l.account_name, 'Like', l.group_name, '', l.post_url || '', 'OK']),
       ...(report.groups_joined || []).map(g => [fmtDate(g.created_at), g.account_name, 'Join Group', g.group_name, `${g.member_count || '?'} members`, g.group_url || '', 'OK']),
       ...(report.checkpoint_events || []).map(e => [fmtDate(e.created_at), e.account_name || '-', e.event_type, e.target || e.type || '-', e.error || e.error_message || '', '', 'FAIL']),
     ]
     rows.push(...all)
-    const csv = rows.map(r => r.join(',')).join('\n')
+    const escapeCell = (v) => {
+      const s = String(v ?? '')
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const csv = rows.map(r => r.map(escapeCell).join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = `campaign-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click()

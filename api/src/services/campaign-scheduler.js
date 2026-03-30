@@ -449,7 +449,8 @@ Chi tra ve JSON, khong giai thich them.`
     const text = result?.text || result || ''
     const match = text.match(/\{[\s\S]*\}/)
     if (match) {
-      const decisions = JSON.parse(match[0])
+      let decisions
+      try { decisions = JSON.parse(match[0]) } catch { decisions = {} }
 
       // Apply adjustments
       for (const adj of (decisions.adjustments || [])) {
@@ -464,7 +465,8 @@ Chi tra ve JSON, khong giai thich them.`
         } else if ((adj.action === 'increase' || adj.action === 'decrease') && adj.field && adj.value) {
           const role = roles.find(r => r.id === adj.role_id)
           if (role?.parsed_plan) {
-            const plan = typeof role.parsed_plan === 'string' ? JSON.parse(role.parsed_plan) : role.parsed_plan
+            let plan
+            try { plan = typeof role.parsed_plan === 'string' ? JSON.parse(role.parsed_plan) : role.parsed_plan } catch { plan = [] }
             for (const step of plan) {
               if (step[adj.field] !== undefined) {
                 step[adj.field] = Math.max(1, adj.value)

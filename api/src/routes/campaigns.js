@@ -85,7 +85,7 @@ module.exports = async (fastify) => {
       .eq('owner_id', req.user.id)
       .single()
 
-    if (error) return reply.code(404).send({ error: 'Not found' })
+    if (error || !data) return reply.code(404).send({ error: 'Not found' })
     // Sort roles by sort_order
     if (data.campaign_roles) {
       data.campaign_roles.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))

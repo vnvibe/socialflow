@@ -159,10 +159,15 @@ ${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}${priorContext}
     }
     jsonStr = jsonStr.trim()
 
-    const plan = JSON.parse(jsonStr)
+    let plan
+    try {
+      plan = JSON.parse(jsonStr)
+    } catch (parseErr) {
+      throw new Error(`AI returned invalid JSON: ${parseErr.message} — raw: ${jsonStr.substring(0, 200)}`)
+    }
 
     if (!Array.isArray(plan)) {
-      throw new Error('AI returned non-array response')
+      throw new Error(`AI returned non-array response: ${typeof plan}`)
     }
 
     // Validate and normalize each step
