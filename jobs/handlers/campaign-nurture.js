@@ -249,15 +249,21 @@ async function campaignNurture(payload, supabase) {
         const status = await checkAccountStatus(page, supabase, account_id)
         if (status.blocked) throw new Error(`Account blocked: ${status.detail}`)
 
-        // Language + engagement check — analyze first 5 posts
+        // Language check — analyze first 8 posts + group description
         const groupAnalysis = await page.evaluate(() => {
           const articles = document.querySelectorAll('[role="article"]')
           let viPosts = 0, enPosts = 0, otherPosts = 0, totalPosts = 0
           const VI_DIACRITICS = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/gi
-          const VI_WORDS = /\b(của|này|trong|không|được|những|cái|một|các|có|cho|với|đang|và|là|tôi|bạn|mình|anh|chị|em|ơi|nhé|nhỉ|vậy|sao|thế|gì|nào|ạ|ừ)\b/gi
+          const VI_WORDS = /\b(của|này|trong|không|được|những|cái|một|các|có|cho|với|đang|và|là|tôi|bạn|mình|anh|chị|em|ơi|nhé|nhỉ|vậy|sao|thế|gì|nào|ạ|ừ|rồi|cũng|nhưng|nên|vì|hỏi|bác|mấy|xin|giúp)\b/gi
           const CJK = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g
 
-          for (const a of [...articles].slice(0, 5)) {
+          // Also check group description
+          const descEl = document.querySelector('[data-testid="group-about-card"], [aria-label="Group description"]')
+          const descText = descEl ? (descEl.innerText || '').substring(0, 200) : ''
+          const descVi = (descText.match(VI_DIACRITICS) || []).length + (descText.match(VI_WORDS) || []).length
+          const descIsVi = descVi > 3
+
+          for (const a of [...articles].slice(0, 8)) {
             const text = (a.innerText || '').substring(0, 300)
             if (text.length < 20) continue
             totalPosts++
@@ -267,21 +273,26 @@ async function campaignNurture(payload, supabase) {
             const cjkChars = (text.match(CJK) || []).length
 
             if (cjkChars > 5) { otherPosts++; continue }
-            if (viDiacritics > 3 || viWords > 2) { viPosts++; continue }
+            if (viDiacritics > 3 || viWords > 3) { viPosts++; continue }
             enPosts++
           }
 
-          return {
-            totalPosts, viPosts, enPosts, otherPosts,
-            viRatio: totalPosts > 0 ? viPosts / totalPosts : 0,
-            lang: viPosts >= enPosts ? 'vi' : enPosts > viPosts ? 'en' : 'unknown'
-          }
-        }).catch(() => ({ totalPosts: 0, viPosts: 0, enPosts: 0, otherPosts: 0, viRatio: 0, lang: 'unknown' }))
+          // Strict: need MAJORITY of posts to be Vietnamese (>50%)
+          const viRatio = totalPosts > 0 ? viPosts / totalPosts : 0
+          let lang = 'unknown'
+          if (viRatio > 0.5) lang = 'vi'          // >50% VN posts → Vietnamese
+          else if (enPosts > viPosts) lang = 'en'  // more EN than VN → English
+          else if (otherPosts > 0) lang = 'other'
+          // Override: if description is clearly Vietnamese, give benefit of doubt
+          if (lang !== 'vi' && descIsVi && viRatio >= 0.3) lang = 'vi'
 
-        if (groupAnalysis.lang !== 'vi' && groupAnalysis.viRatio < 0.3) {
-          console.log(`[NURTURE] ⚠️ Skip group "${group.name}" — ${groupAnalysis.lang} (${groupAnalysis.viPosts}/${groupAnalysis.totalPosts} VN posts)`)
+          return { totalPosts, viPosts, enPosts, otherPosts, viRatio, lang, descIsVi }
+        }).catch(() => ({ totalPosts: 0, viPosts: 0, enPosts: 0, otherPosts: 0, viRatio: 0, lang: 'unknown', descIsVi: false }))
+
+        if (groupAnalysis.lang !== 'vi') {
+          console.log(`[NURTURE] ⚠️ Skip group "${group.name}" — ${groupAnalysis.lang} (${groupAnalysis.viPosts}vi/${groupAnalysis.enPosts}en/${groupAnalysis.totalPosts}total, desc_vi:${groupAnalysis.descIsVi})`)
           logger.log('visit_group', { target_type: 'group', target_name: group.name, result_status: 'skipped',
-            details: { reason: 'non_vietnamese_group', lang: groupAnalysis.lang, vi_posts: groupAnalysis.viPosts, total_posts: groupAnalysis.totalPosts } })
+            details: { reason: 'non_vietnamese_group', lang: groupAnalysis.lang, vi_posts: groupAnalysis.viPosts, en_posts: groupAnalysis.enPosts, total_posts: groupAnalysis.totalPosts } })
 
           // Auto-block non-Vietnamese group in DB (except manually added groups)
           try {
