@@ -701,7 +701,6 @@ function DetailLogView({ campaignId }) {
     setCurrentPage(1)
     setActionFilter(null)
     setAccountFilter(null)
-    setDateFilter('')
   }, [campaignId, fetchPage])
 
   // Poll for new entries (page 1 only, no filters)
