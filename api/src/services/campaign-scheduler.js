@@ -1,5 +1,5 @@
 const cron = require('node-cron')
-const cronParser = require('cron-parser')
+const { CronExpressionParser } = require('cron-parser')
 const { createClient } = require('@supabase/supabase-js')
 
 let supabase = null
@@ -138,7 +138,7 @@ function calculateNextRun(campaign) {
   // Parse cron expression properly
   if (campaign.schedule_type === 'recurring' && campaign.cron_expression) {
     try {
-      const interval = cronParser.parseExpression(campaign.cron_expression, {
+      const interval = CronExpressionParser.parse(campaign.cron_expression, {
         currentDate: new Date(),
         tz: 'Asia/Ho_Chi_Minh',
       })
@@ -561,7 +561,7 @@ async function processPendingScans() {
       let nextScan = null
       if (kw.cron_expression) {
         try {
-          const interval = cronParser.parseExpression(kw.cron_expression, {
+          const interval = CronExpressionParser.parse(kw.cron_expression, {
             currentDate: new Date(),
             tz: 'Asia/Ho_Chi_Minh',
           })
