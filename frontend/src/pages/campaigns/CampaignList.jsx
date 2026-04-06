@@ -76,7 +76,7 @@ export default function CampaignList() {
       </div>
 
       {isLoading ? (
-        <div className="text-center py-12 text-gray-500">Dang tai...</div>
+        <div className="text-center py-12 text-gray-400">Dang tai...</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-12">
           <Target size={48} className="mx-auto text-gray-300 mb-3" />

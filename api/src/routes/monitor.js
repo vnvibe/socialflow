@@ -235,6 +235,178 @@ module.exports = async (fastify) => {
   })
 
   // ============================================
+  // MONITORED GROUPS (Group Monitor feature)
+  // ============================================
+
+  // GET /monitor/watched-groups - List monitored groups with stats
+  fastify.get('/watched-groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { campaign_id, page = 1, limit = 50 } = req.query
+
+    let query = supabase
+      .from('monitored_groups')
+      .select('*, accounts(id, username, fb_user_id, status)', { count: 'exact' })
+      .eq('owner_id', getOwnerId(req))
+      .order('created_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1)
+
+    if (campaign_id) query = query.eq('campaign_id', campaign_id)
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+    return { data: data || [], total: count, page: Number(page), limit: Number(limit) }
+  })
+
+  // POST /monitor/watched-groups - Create monitored group
+  fastify.post('/watched-groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const {
+      campaign_id, account_id, group_fb_id, group_name, group_url,
+      brand_keywords, brand_voice, brand_name,
+      opportunity_threshold, scan_interval_minutes, scan_lookback_minutes
+    } = req.body || {}
+
+    if (!group_fb_id?.trim()) return reply.code(400).send({ error: 'group_fb_id required' })
+    if (!account_id) return reply.code(400).send({ error: 'account_id required' })
+
+    // Verify account belongs to user
+    const { data: account } = await supabase.from('accounts').select('id')
+      .eq('id', account_id).eq('owner_id', req.user.id).single()
+    if (!account) return reply.code(404).send({ error: 'Account not found' })
+
+    const { data, error } = await supabase.from('monitored_groups').insert({
+      owner_id: req.user.id,
+      campaign_id: campaign_id || null,
+      account_id,
+      group_fb_id: group_fb_id.trim(),
+      group_name: group_name || null,
+      group_url: group_url || null,
+      brand_keywords: brand_keywords || [],
+      brand_voice: brand_voice || null,
+      brand_name: brand_name || null,
+      opportunity_threshold: opportunity_threshold || 7,
+      scan_interval_minutes: scan_interval_minutes || 120,
+      scan_lookback_minutes: scan_lookback_minutes || 180,
+      is_active: true,
+    }).select().single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reply.code(201).send(data)
+  })
+
+  // PUT /monitor/watched-groups/:id - Update monitored group config
+  fastify.put('/watched-groups/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const allowed = [
+      'account_id', 'campaign_id', 'group_name', 'group_url',
+      'brand_keywords', 'brand_voice', 'brand_name',
+      'opportunity_threshold', 'scan_interval_minutes', 'scan_lookback_minutes', 'is_active'
+    ]
+    const updates = {}
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key]
+    }
+
+    const { data, error } = await supabase
+      .from('monitored_groups')
+      .update(updates)
+      .eq('id', req.params.id)
+      .eq('owner_id', req.user.id)
+      .select()
+      .single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
+  })
+
+  // DELETE /monitor/watched-groups/:id - Delete monitored group
+  fastify.delete('/watched-groups/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { error } = await supabase
+      .from('monitored_groups')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('owner_id', req.user.id)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return { success: true }
+  })
+
+  // GET /monitor/watched-groups/:id/opportunities - List opportunities for a group
+  fastify.get('/watched-groups/:id/opportunities', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { status, min_score, page = 1, limit = 50 } = req.query
+
+    let query = supabase
+      .from('group_opportunities')
+      .select('*', { count: 'exact' })
+      .eq('monitored_group_id', req.params.id)
+      .eq('owner_id', getOwnerId(req))
+      .order('detected_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1)
+
+    if (status) query = query.eq('status', status)
+    if (min_score) query = query.gte('opportunity_score', parseInt(min_score))
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+    return { data: data || [], total: count, page: Number(page), limit: Number(limit) }
+  })
+
+  // POST /monitor/watched-groups/:id/scan-now - Queue immediate scan job
+  fastify.post('/watched-groups/:id/scan-now', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: group } = await supabase
+      .from('monitored_groups')
+      .select('*, accounts(id, status, is_active)')
+      .eq('id', req.params.id)
+      .eq('owner_id', req.user.id)
+      .single()
+
+    if (!group) return reply.code(404).send({ error: 'Monitored group not found' })
+    if (!group.accounts?.is_active) return reply.code(400).send({ error: 'Account not active' })
+
+    // Check agent online
+    const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
+      .gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
+    if (!agents?.length) return reply.code(503).send({ error: 'No agent online' })
+
+    const { data: job, error } = await supabase.from('jobs').insert({
+      type: 'campaign_group_monitor',
+      payload: {
+        monitored_group_id: group.id,
+        account_id: group.account_id,
+        campaign_id: group.campaign_id,
+        owner_id: req.user.id,
+        group_fb_id: group.group_fb_id,
+        group_name: group.group_name,
+        group_url: group.group_url,
+        brand_keywords: group.brand_keywords,
+        brand_name: group.brand_name,
+        brand_voice: group.brand_voice,
+        opportunity_threshold: group.opportunity_threshold || 7,
+        scan_lookback_minutes: group.scan_lookback_minutes || 180,
+      },
+      status: 'pending',
+      scheduled_at: new Date().toISOString(),
+      created_by: req.user.id,
+    }).select().single()
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return { message: 'Group monitor scan queued', job_id: job.id }
+  })
+
+  // GET /monitor/group-performance - View from group_performance
+  fastify.get('/group-performance', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { campaign_id } = req.query
+
+    let query = supabase
+      .from('group_performance')
+      .select('*')
+      .eq('owner_id', getOwnerId(req))
+
+    if (campaign_id) query = query.eq('campaign_id', campaign_id)
+
+    const { data, error } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
+  // ============================================
   // DISCOVERED GROUPS
   // ============================================
 

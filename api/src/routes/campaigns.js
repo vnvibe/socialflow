@@ -93,13 +93,11 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // POST /campaigns/preview-plan — AI generates plan from requirement (no save)
+  // POST /campaigns/preview-plan — Builds proper roles from selected_actions
   fastify.post('/preview-plan', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { requirement, topic, account_ids, runs_per_day } = req.body
-    if (!requirement) return reply.code(400).send({ error: 'requirement required' })
+    const { requirement, topic, account_ids, runs_per_day, selected_actions } = req.body
     if (!account_ids?.length) return reply.code(400).send({ error: 'account_ids required' })
 
-    // Get account names for context
     const { data: accounts } = await supabase
       .from('accounts')
       .select('id, username, fb_user_id, status, daily_budget, created_at')
@@ -108,71 +106,144 @@ module.exports = async (fastify) => {
 
     if (!accounts?.length) return reply.code(400).send({ error: 'No valid accounts found' })
 
-    const accountNames = accounts.map(a => a.username || a.fb_user_id)
-    const nickAges = accounts.map(a => {
-      const days = Math.floor((Date.now() - new Date(a.created_at).getTime()) / 86400000)
-      return { name: a.username || a.fb_user_id, age_days: days, status: a.status }
-    })
+    const runsPerDay = runs_per_day || 2
+    const HARD_LIMITS = { like: 50, comment: 15, friend_request: 10, join_group: 3, post: 3, scan: 15 }
 
     try {
-      const steps = await parseMission(
-        requirement,
-        { topic: topic || '', roleType: 'auto', accountCount: accounts.length, accountNames, nickAges, runsPerDay: runs_per_day || 2 },
-        req.user.id,
-        supabase
-      )
+      // Build roles from selected_actions (new flow) or requirement (legacy)
+      const actions = selected_actions || []
+      const accountNames = accounts.map(a => a.username || a.fb_user_id)
+      const allAccountIds = accounts.map(a => a.id)
 
-      // Build rich plan object matching frontend expectations
-      // Distribute steps across accounts as roles
-      const HARD_LIMITS = { like: 100, comment: 30, friend_request: 20, join_group: 3, post: 5, scan: 50 }
-      const roles = accounts.map((acc, i) => {
-        const name = acc.username || acc.fb_user_id || `Nick ${i + 1}`
-        const ageDays = Math.floor((Date.now() - new Date(acc.created_at).getTime()) / 86400000)
-        const ageFactor = ageDays < 30 ? 0.4 : ageDays < 90 ? 0.6 : ageDays < 180 ? 0.85 : 1.0
-        return {
-          name,
-          account_name: name,
-          account_ids: [acc.id],
-          role_type: 'custom',
-          steps: steps.map(s => ({
-            ...s,
-            quantity: s.count_mode === 'fixed' ? s.count_min : `${Math.round(s.count_min * ageFactor)}-${Math.round(s.count_max * ageFactor)}`,
-          })),
+      let roles = []
+
+      if (actions.length > 0) {
+        // === NEW: Build roles by action type mapping ===
+        const hasAction = (key) => actions.some(a => a.key === key)
+        const getCount = (key) => actions.find(a => a.key === key)?.count || 0
+
+        // Scout role: join_group + scan_members
+        if (hasAction('join_group')) {
+          const countPerRun = Math.ceil(getCount('join_group') / runsPerDay)
+          const capped = Math.min(countPerRun, HARD_LIMITS.join_group || 3)
+          roles.push({
+            name: 'Thám dò nhóm',
+            role_type: 'scout',
+            account_ids: allAccountIds,
+            account_names: accountNames,
+            steps: [
+              { action: 'browse', description: 'Warm up trước khi tìm nhóm', params: {}, quota_key: 'scan', count_mode: 'fixed', count_min: 1, count_max: 1, priority: 1 },
+              { action: 'join_group', description: `Tìm & tham gia nhóm về ${topic}`, params: { keywords: topic.split(/[,;]+/).map(k => k.trim()).filter(Boolean), min_members: 100 }, quota_key: 'join_group', count_mode: 'range', count_min: Math.max(1, capped - 1), count_max: capped, priority: 2 },
+              { action: 'scan_members', description: 'Quét thành viên nhóm để tìm khách tiềm năng', params: {}, quota_key: 'scan', count_mode: 'fixed', count_min: 1, count_max: 1, priority: 3 },
+            ],
+          })
         }
-      })
 
-      // Compute daily budget summary PER NICK (steps are already per-run counts)
-      const runsPerDay = runs_per_day || 2
-      const perNickDaily = {}
-      for (const step of steps) {
-        const key = step.quota_key || step.action
-        const max = step.count_max || step.count_min || 1
-        perNickDaily[key] = (perNickDaily[key] || 0) + max * runsPerDay
+        // Nurture role: browse + like + comment
+        if (hasAction('like') || hasAction('comment')) {
+          const steps = [
+            { action: 'browse', description: 'Lướt feed warm up', params: {}, quota_key: 'scan', count_mode: 'fixed', count_min: 1, count_max: 1, priority: 1 },
+          ]
+          if (hasAction('like')) {
+            const countPerRun = Math.ceil(getCount('like') / runsPerDay)
+            const capped = Math.min(countPerRun, Math.ceil(HARD_LIMITS.like / runsPerDay))
+            steps.push({ action: 'like', description: `Like ${getCount('like')} bài/ngày trong nhóm`, params: {}, quota_key: 'like', count_mode: 'range', count_min: Math.max(1, capped - 2), count_max: capped, priority: 2 })
+          }
+          if (hasAction('comment')) {
+            const countPerRun = Math.ceil(getCount('comment') / runsPerDay)
+            const capped = Math.min(countPerRun, Math.ceil(HARD_LIMITS.comment / runsPerDay))
+            steps.push({ action: 'comment', description: `Comment ${getCount('comment')} bài/ngày về ${topic}`, params: { style: 'casual', topic }, quota_key: 'comment', count_mode: 'range', count_min: Math.max(1, capped - 1), count_max: capped, priority: 3 })
+          }
+          roles.push({
+            name: 'Tương tác nhóm',
+            role_type: 'nurture',
+            account_ids: allAccountIds,
+            account_names: accountNames,
+            steps,
+          })
+        }
+
+        // Connect role: friend_request
+        if (hasAction('friend_request')) {
+          const countPerRun = Math.ceil(getCount('friend_request') / runsPerDay)
+          const capped = Math.min(countPerRun, Math.ceil(HARD_LIMITS.friend_request / runsPerDay))
+          roles.push({
+            name: 'Kết bạn',
+            role_type: 'connect',
+            account_ids: allAccountIds,
+            account_names: accountNames,
+            _depends_on: 'scout', // will be wired at save time
+            steps: [
+              { action: 'browse', description: 'Xem profile trước khi kết bạn', params: {}, quota_key: 'scan', count_mode: 'fixed', count_min: 1, count_max: 1, priority: 1 },
+              { action: 'send_friend_request', description: `Kết bạn ${getCount('friend_request')}/ngày — AI đánh giá trước khi gửi`, params: { source: 'group_members' }, quota_key: 'friend_request', count_mode: 'range', count_min: Math.max(1, capped - 1), count_max: capped, priority: 2 },
+            ],
+          })
+        }
+
+        // Post role
+        if (hasAction('post')) {
+          const countPerRun = Math.ceil(getCount('post') / runsPerDay)
+          roles.push({
+            name: 'Đăng bài',
+            role_type: 'post',
+            account_ids: allAccountIds,
+            account_names: accountNames,
+            steps: [
+              { action: 'post', description: `Đăng ${getCount('post')} bài/ngày`, params: { content_source: 'ai_gen' }, quota_key: 'post', count_mode: 'fixed', count_min: countPerRun, count_max: countPerRun, priority: 1 },
+            ],
+          })
+        }
+      } else if (requirement) {
+        // Legacy: use AI planner for free-text requirement
+        const nickAges = accounts.map(a => ({
+          name: a.username || a.fb_user_id,
+          age_days: Math.floor((Date.now() - new Date(a.created_at).getTime()) / 86400000),
+          status: a.status,
+        }))
+
+        const steps = await parseMission(
+          requirement,
+          { topic: topic || '', roleType: 'auto', accountCount: accounts.length, accountNames, nickAges, runsPerDay },
+          req.user.id, supabase
+        )
+
+        // Legacy: all accounts get same plan as custom role
+        roles = accounts.map((acc, i) => ({
+          name: acc.username || acc.fb_user_id || `Nick ${i + 1}`,
+          account_ids: [acc.id],
+          account_names: [acc.username || acc.fb_user_id],
+          role_type: 'custom',
+          steps,
+        }))
+      } else {
+        return reply.code(400).send({ error: 'selected_actions or requirement required' })
       }
 
-      // Daily budget display: per-nick × runs (NOT multiplied by nick count)
-      // Because hard limits are PER NICK PER DAY
-      const dailyBudget = { ...perNickDaily }
+      // Compute daily budget
+      const perNickDaily = {}
+      for (const role of roles) {
+        for (const step of (role.steps || [])) {
+          const key = step.quota_key || step.action
+          const max = step.count_max || step.count_min || 1
+          perNickDaily[key] = Math.max(perNickDaily[key] || 0, max * runsPerDay)
+        }
+      }
 
-      // Safety warnings: compare per-nick daily total vs hard limit
       const warnings = []
       for (const [key, perNick] of Object.entries(perNickDaily)) {
         const limit = HARD_LIMITS[key]
-        if (limit && perNick > limit) {
-          warnings.push(`${key}: ${perNick}/nick/ngay vuot gioi han ${limit}/nick/ngay`)
-        }
+        if (limit && perNick > limit) warnings.push(`${key}: ${perNick}/nick/ngay vuot gioi han ${limit}/nick/ngay`)
       }
 
-      // Estimate duration (each step ~2-5 min depending on count)
-      const totalSteps = steps.reduce((sum, s) => sum + (s.count_max || 1), 0)
-      const estimatedMinutes = Math.round(totalSteps * 2.5 * accounts.length)
+      const totalSteps = roles.reduce((sum, r) => sum + (r.steps?.length || 0), 0)
 
       const plan = {
-        summary: `${roles.length} nick × ${steps.length} buoc, topic: ${topic || 'general'}`,
+        summary: `${roles.length} roles, ${accounts.length} nicks, topic: ${topic || 'general'}`,
         roles,
-        daily_budget: dailyBudget,
+        daily_budget: perNickDaily,
         safety_warnings: warnings,
-        estimated_duration_minutes: estimatedMinutes,
+        estimated_duration_minutes: Math.round(totalSteps * 3 * accounts.length),
+        selected_actions: actions,
       }
 
       return { plan, accounts: accountNames }
@@ -220,9 +291,11 @@ module.exports = async (fastify) => {
 
     // Auto-create roles from ai_plan if confirmed
     if (ai_plan?.roles && ai_plan_confirmed) {
+      const createdRoles = [] // track role IDs for wiring feeds_into
+
       for (let i = 0; i < ai_plan.roles.length; i++) {
         const role = ai_plan.roles[i]
-        await supabase.from('campaign_roles').insert({
+        const { data: created } = await supabase.from('campaign_roles').insert({
           campaign_id: data.id,
           name: role.name || `Role ${String.fromCharCode(65 + i)}`,
           role_type: role.role_type || 'custom',
@@ -231,7 +304,21 @@ module.exports = async (fastify) => {
           parsed_plan: role.steps || null,
           sort_order: i,
           is_active: true,
-        })
+        }).select('id, role_type').single()
+
+        if (created) createdRoles.push({ ...created, _depends_on: role._depends_on })
+      }
+
+      // Wire feeds_into: scout feeds into connect (so connect gets targets from scout's scan)
+      const scoutRole = createdRoles.find(r => r.role_type === 'scout')
+      const connectRole = createdRoles.find(r => r.role_type === 'connect')
+      if (scoutRole && connectRole) {
+        await supabase.from('campaign_roles')
+          .update({ feeds_into: connectRole.id })
+          .eq('id', scoutRole.id)
+        await supabase.from('campaign_roles')
+          .update({ read_from: scoutRole.id })
+          .eq('id', connectRole.id)
       }
     }
 
@@ -423,6 +510,54 @@ module.exports = async (fastify) => {
       queue: { pending: queuePending.count || 0, done: queueDone.count || 0, failed: queueFailed.count || 0 },
       friends: { sent: friendSent.count || 0, accepted: friendAccepted.count || 0 },
       jobs: { done: jobsDone.count || 0, failed: jobsFailed.count || 0 },
+    }
+  })
+
+  // GET /campaigns/:id/post-strategy — AI-powered post scheduling insights
+  fastify.get('/:id/post-strategy', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id, name, topic, campaign_roles(account_ids)')
+      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { collectPerformanceData } = require('../services/post-strategy')
+
+    // Collect data from all campaign accounts
+    const allAccountIds = [...new Set((campaign.campaign_roles || []).flatMap(r => r.account_ids || []))]
+    let bestStrategy = null
+
+    for (const accId of allAccountIds.slice(0, 3)) {
+      const perfData = await collectPerformanceData(supabase, accId)
+      if (perfData && (!bestStrategy || perfData.total_posts > bestStrategy.total_posts)) {
+        bestStrategy = { ...perfData, account_id: accId }
+      }
+    }
+
+    if (!bestStrategy) {
+      return { has_data: false, min_posts: 5, message: 'Cần ít nhất 5 bài đã đăng để AI phân tích chiến lược' }
+    }
+
+    // Check if any recent job has ai_strategy in payload
+    const { data: recentJob } = await supabase
+      .from('jobs')
+      .select('payload, created_at')
+      .filter('payload->>campaign_id', 'eq', req.params.id)
+      .not('payload->ai_strategy', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const aiStrategy = recentJob?.payload?.ai_strategy || null
+
+    return {
+      has_data: true,
+      total_posts: bestStrategy.total_posts,
+      best_hours: bestStrategy.best_hours,
+      best_days: bestStrategy.best_days,
+      hour_stats: bestStrategy.hour_stats?.slice(0, 8),
+      group_stats: bestStrategy.group_stats?.slice(0, 5),
+      ai_strategy: aiStrategy,
+      strategy_updated_at: recentJob?.created_at || null,
     }
   })
 
@@ -705,6 +840,126 @@ module.exports = async (fastify) => {
 
     if (error) return reply.code(500).send({ error: error.message })
     return { data, total: count }
+  })
+
+  // GET /campaigns/:id/groups — Campaign-scoped groups (via campaign_ids array)
+  fastify.get('/:id/groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id, campaign_roles(account_ids)')
+      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const accountIds = [...new Set((campaign.campaign_roles || []).flatMap(r => r.account_ids || []))]
+    if (!accountIds.length) return []
+
+    const { data, error } = await supabase
+      .from('fb_groups')
+      .select('id, fb_group_id, name, url, member_count, group_type, topic, ai_relevance, is_blocked, campaign_ids, account_id, joined_via_campaign_id')
+      .in('account_id', accountIds)
+      .contains('campaign_ids', [req.params.id])
+      .or('is_blocked.is.null,is_blocked.eq.false')
+      .order('name')
+
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Enrich with account username
+    const { data: accounts } = await supabase.from('accounts').select('id, username').in('id', accountIds)
+    const accountMap = Object.fromEntries((accounts || []).map(a => [a.id, a.username]))
+
+    return (data || []).map(g => ({
+      ...g,
+      account_username: accountMap[g.account_id] || null,
+    }))
+  })
+
+  // GET /campaigns/:id/leads — Campaign-scoped leads
+  fastify.get('/:id/leads', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { status, search, page = 1, limit = 50 } = req.query
+    const offset = (parseInt(page) - 1) * parseInt(limit)
+
+    let query = supabase
+      .from('leads')
+      .select('*', { count: 'exact' })
+      .eq('campaign_id', req.params.id)
+      .order('discovered_at', { ascending: false })
+      .range(offset, offset + parseInt(limit) - 1)
+
+    if (status) query = query.eq('status', status)
+    if (search) query = query.or(`name.ilike.%${search}%,fb_uid.ilike.%${search}%`)
+
+    const { data, error, count } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Stats
+    const { data: allLeads } = await supabase
+      .from('leads')
+      .select('status, ai_type')
+      .eq('campaign_id', req.params.id)
+
+    const byStatus = {}, byType = {}
+    for (const l of (allLeads || [])) {
+      byStatus[l.status] = (byStatus[l.status] || 0) + 1
+      if (l.ai_type) byType[l.ai_type] = (byType[l.ai_type] || 0) + 1
+    }
+
+    return {
+      data: data || [],
+      total: count || 0,
+      page: parseInt(page),
+      pages: Math.ceil((count || 0) / parseInt(limit)),
+      stats: { total: (allLeads || []).length, by_status: byStatus, by_type: byType },
+    }
+  })
+
+  // PUT /campaigns/:id/groups/:groupId — Assign/remove group from campaign
+  fastify.put('/:id/groups/:groupId', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { action } = req.body // 'add' or 'remove'
+    const groupId = req.params.groupId
+
+    if (action === 'add') {
+      // Get group's fb_group_id and account_id
+      const { data: group } = await supabase.from('fb_groups')
+        .select('fb_group_id, account_id').eq('id', groupId).single()
+      if (!group) return reply.code(404).send({ error: 'Group not found' })
+
+      await supabase.rpc('append_campaign_to_group', {
+        p_account_id: group.account_id,
+        p_fb_group_id: group.fb_group_id,
+        p_campaign_id: req.params.id,
+      })
+      return { ok: true, action: 'added' }
+    } else if (action === 'remove') {
+      const { data: group } = await supabase.from('fb_groups')
+        .select('campaign_ids').eq('id', groupId).single()
+      if (!group) return reply.code(404).send({ error: 'Group not found' })
+
+      const newIds = (group.campaign_ids || []).filter(id => id !== req.params.id)
+      await supabase.from('fb_groups').update({ campaign_ids: newIds }).eq('id', groupId)
+      return { ok: true, action: 'removed' }
+    }
+
+    return reply.code(400).send({ error: 'action must be add or remove' })
+  })
+
+  // PUT /campaigns/:id/groups/:groupId/review — User approve/reject AI evaluation
+  fastify.put('/:id/groups/:groupId/review', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { approved } = req.body // true = approve, false = reject
+    if (typeof approved !== 'boolean') return reply.code(400).send({ error: 'approved must be true or false' })
+
+    const { error } = await supabase.from('fb_groups')
+      .update({ user_approved: approved })
+      .eq('id', req.params.groupId)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return { ok: true, approved }
   })
 
   // GET /campaigns/:id/activity-log — granular per-action log (cursor-based)

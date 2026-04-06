@@ -16,24 +16,26 @@ import {
   Settings,
   Globe,
   Activity,
+  Database,
+  Sprout,
+  Radar,
 } from 'lucide-react'
 import useAuthStore from '../../store/auth.store'
 
 const mainLinks = [
   { to: '/dashboard', label: 'Tổng quan', icon: LayoutDashboard },
+  { to: '/campaigns', label: 'AI Pilot', icon: Bot },
+  { to: '/nick-nurture', label: 'Nuôi nick', icon: Sprout },
   { to: '/accounts', label: 'Tài khoản', icon: Users },
   { to: '/pages', label: 'Fanpage', icon: FileText },
-  { to: '/groups', label: 'Nhóm', icon: UsersRound },
   { to: '/media', label: 'Thư viện', icon: Film },
-  { to: '/content', label: 'Nội dung', icon: PenSquare },
   { to: '/publish', label: 'Đăng bài', icon: Send },
   { to: '/inbox', label: 'Hộp thư', icon: Inbox },
-  { to: '/monitor', label: 'Theo dõi', icon: Eye },
-  { to: '/campaigns', label: 'AI Pilot', icon: Bot },
   { to: '/health', label: 'Sức khỏe', icon: Activity },
-  { to: '/calendar', label: 'Lịch', icon: CalendarDays },
   { to: '/trends', label: 'Xu hướng', icon: TrendingUp },
   { to: '/analytics', label: 'Thống kê', icon: BarChart3 },
+  { to: '/data-center', label: 'Data Center', icon: Database },
+  { to: '/group-monitor', label: 'Theo dõi nhóm', icon: Radar },
   { to: '/settings/websites', label: 'Website', icon: Globe },
 ]
 

@@ -170,7 +170,17 @@ ${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}${priorContext}
       throw new Error(`AI returned non-array response: ${typeof plan}`)
     }
 
-    // Validate and normalize each step
+    // Hard limits per nick per day — AI CANNOT exceed these
+    const HARD_LIMITS = {
+      join_group: 3,
+      comment: 15,  // was 30 — FB blocks at 15-20/day
+      like: 80,     // was 100
+      friend_request: 10,
+      post: 3,
+      scan: 15,
+    }
+
+    // Validate, normalize, and ENFORCE hard limits on each step
     const validActions = ['browse', 'like', 'comment', 'join_group', 'scan_members', 'send_friend_request', 'post', 'reply']
     const validPlan = []
     for (const step of plan) {
@@ -184,6 +194,19 @@ ${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}${priorContext}
       step.priority = step.priority || 5
       step.params = step.params || {}
       step.quota_key = step.quota_key || step.action
+
+      // ENFORCE: cap daily total (count_per_run * runs) to hard limit
+      const limitKey = step.quota_key === 'friend_request' ? 'friend_request' : step.quota_key
+      const dailyLimit = HARD_LIMITS[limitKey]
+      if (dailyLimit) {
+        const maxPerRun = Math.ceil(dailyLimit / runsPerDay)
+        if (step.count_max > maxPerRun) {
+          console.warn(`[PLANNER] Capping ${step.action}: ${step.count_max}/run → ${maxPerRun}/run (limit: ${dailyLimit}/day ÷ ${runsPerDay} runs)`)
+          step.count_max = maxPerRun
+          step.count_min = Math.min(step.count_min, step.count_max)
+        }
+      }
+
       validPlan.push(step)
     }
 

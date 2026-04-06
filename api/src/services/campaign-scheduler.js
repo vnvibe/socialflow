@@ -1,6 +1,9 @@
 const cron = require('node-cron')
 const { CronExpressionParser } = require('cron-parser')
 const { createClient } = require('@supabase/supabase-js')
+const { getBusyNicks } = require('../lib/nick-lock')
+const { collectPerformanceData, evaluatePostStrategy, getOptimalScheduleTime, MIN_POSTS_FOR_AI } = require('./post-strategy')
+const { remember, recall, formatMemoriesForPrompt } = require('./ai-memory')
 
 let supabase = null
 
@@ -19,12 +22,6 @@ function initScheduler() {
     } catch (err) {
       console.error('[SCHEDULER] Role campaign error:', err.message)
     }
-    // scan_group_keyword auto-scheduling disabled — jobs must be triggered manually
-    // try {
-    //   await processPendingScans()
-    // } catch (err) {
-    //   console.error('[SCHEDULER] Scan error:', err.message)
-    // }
     try {
       await processEngagementChecks()
     } catch (err) {
@@ -77,12 +74,30 @@ async function executeCampaign(campaign) {
     : campaign.total_runs % contentIds.length
   const contentId = contentIds[contentIdx]
 
+  // ── Adaptive scheduling: collect performance data per account ──
+  // Cache strategy per account to avoid repeated AI calls within same campaign run
+  const strategyCache = {}
+  async function getStrategy(accountId) {
+    if (strategyCache[accountId] !== undefined) return strategyCache[accountId]
+    try {
+      const perfData = await collectPerformanceData(supabase, accountId)
+      if (perfData) {
+        const strategy = await evaluatePostStrategy(supabase, campaign.owner_id, perfData, campaign)
+        strategyCache[accountId] = strategy
+        if (strategy) console.log(`[SCHEDULER] AI strategy for ${accountId.slice(0, 8)}: hours=[${strategy.recommended_hours}], confidence=${strategy.confidence}`)
+        return strategy
+      }
+    } catch (err) {
+      console.warn(`[SCHEDULER] Strategy eval failed for ${accountId.slice(0, 8)}: ${err.message}`)
+    }
+    strategyCache[accountId] = null
+    return null
+  }
+
   // Create jobs for each target with delay
   let jobsCreated = 0
   for (let i = 0; i < allTargets.length; i++) {
     const target = allTargets[i]
-    const delayMinutes = i * (campaign.delay_between_targets_minutes || 15)
-    const scheduledAt = new Date(Date.now() + delayMinutes * 60 * 1000)
 
     // Get account for this target
     let accountId = null
@@ -90,13 +105,36 @@ async function executeCampaign(campaign) {
       const { data } = await supabase.from('fanpages').select('account_id').eq('id', target.id).single()
       accountId = data?.account_id
     } else if (target.type === 'group') {
-      const { data } = await supabase.from('fb_groups').select('account_id').eq('id', target.id).single()
+      const { data } = await supabase.from('fb_groups').select('account_id, fb_group_id').eq('id', target.id).single()
       accountId = data?.account_id
+      // Check if AI strategy says avoid this group
+      if (accountId) {
+        const strategy = await getStrategy(accountId)
+        if (strategy?.avoid_groups?.includes(data?.fb_group_id)) {
+          console.log(`[SCHEDULER] Skipping group ${target.id} — AI strategy: avoid (low engagement)`)
+          continue
+        }
+      }
     } else {
       accountId = target.id // profile = account
     }
 
     if (!accountId) continue
+
+    // Determine schedule time: AI optimal hour or fallback to delay-based
+    const strategy = await getStrategy(accountId)
+    let scheduledAt
+    if (strategy?.recommended_hours?.length && i === 0) {
+      // First target: schedule at optimal hour
+      scheduledAt = getOptimalScheduleTime(strategy.recommended_hours, 5)
+    } else {
+      // Subsequent targets or no strategy: use delay from first
+      const baseTime = strategyCache[accountId]?.recommended_hours?.length
+        ? getOptimalScheduleTime(strategyCache[accountId].recommended_hours, 5).getTime()
+        : Date.now()
+      const delayMinutes = i * (campaign.delay_between_targets_minutes || 15)
+      scheduledAt = new Date(baseTime + delayMinutes * 60 * 1000)
+    }
 
     const { error } = await supabase.from('jobs').insert({
       type: `post_${target.type}`,
@@ -105,7 +143,8 @@ async function executeCampaign(campaign) {
         target_id: target.id,
         account_id: accountId,
         campaign_id: campaign.id,
-        spin_mode: campaign.spin_mode || 'none'
+        spin_mode: campaign.spin_mode || 'none',
+        ...(strategy && { ai_strategy: { recommended_hours: strategy.recommended_hours, confidence: strategy.confidence, content_suggestion: strategy.content_suggestion } }),
       },
       scheduled_at: scheduledAt.toISOString(),
       created_by: campaign.owner_id
@@ -238,6 +277,14 @@ async function executeRoleCampaign(campaign) {
     .eq('is_active', true)
   const activeAccountSet = new Set((activeAccounts || []).map(a => a.id))
 
+  // ── Nick lock: batch check which accounts are busy (nurture or other jobs) ──
+  let busyNickSet = new Set()
+  try {
+    busyNickSet = await getBusyNicks([...activeAccountSet])
+  } catch (err) {
+    console.warn(`[SCHEDULER] Nick lock check failed: ${err.message} — proceeding without lock`)
+  }
+
   let jobsCreated = 0
   let jobsSkipped = 0
   let roleDelay = 0
@@ -301,10 +348,17 @@ async function executeRoleCampaign(campaign) {
     // Round-robin: pick next account(s) in rotation
     const lastIdx = rrState[role.id] || 0
     const orderedAccounts = []
-    for (let i = 0; i < accountIds.length; i++) {
-      orderedAccounts.push(accountIds[(lastIdx + i) % accountIds.length])
+
+    if (role.role_type === 'scout') {
+      // Scout: chỉ 1 nick mỗi run, round-robin giữa các nicks
+      orderedAccounts.push(accountIds[lastIdx % accountIds.length])
+      rrState[role.id] = (lastIdx + 1) % accountIds.length
+    } else {
+      for (let i = 0; i < accountIds.length; i++) {
+        orderedAccounts.push(accountIds[(lastIdx + i) % accountIds.length])
+      }
+      rrState[role.id] = (lastIdx + orderedAccounts.length) % accountIds.length
     }
-    rrState[role.id] = (lastIdx + orderedAccounts.length) % accountIds.length
 
     for (let i = 0; i < orderedAccounts.length; i++) {
       const accountId = orderedAccounts[i]
@@ -315,6 +369,27 @@ async function executeRoleCampaign(campaign) {
         jobsSkipped++
         continue
       }
+
+      // Nick lock: skip if nick is busy with nurture or other job
+      if (busyNickSet.has(accountId)) {
+        jobsSkipped++
+        continue
+      }
+
+      // Budget pre-check: skip if all relevant budgets exhausted (avoid creating dead jobs)
+      try {
+        const { data: accBudget } = await supabase.from('accounts')
+          .select('daily_budget').eq('id', accountId).single()
+        const budgetMap = { scout: 'join_group', nurture: 'like', connect: 'friend_request', post: 'post', interact: 'like' }
+        const budgetKey = budgetMap[role.role_type]
+        if (budgetKey && accBudget?.daily_budget?.[budgetKey]) {
+          const b = accBudget.daily_budget[budgetKey]
+          if (b.used >= b.max) {
+            jobsSkipped++
+            continue
+          }
+        }
+      } catch {}
 
       const nickDelay = i * (campaign.nick_stagger_seconds || 60)
       const totalDelaySec = roleDelay + nickDelay
@@ -372,215 +447,406 @@ async function executeRoleCampaign(campaign) {
 }
 
 /**
- * AI Supreme Control — evaluates campaign results and auto-adjusts
- * Runs every 3rd campaign execution. Can:
- * - Adjust parsed_plan counts (increase/decrease actions)
- * - Pause underperforming roles
- * - Reallocate nicks between roles
- * - Log decisions to campaign_activity_log
+ * AI Pilot — evaluates campaign performance and auto-adjusts strategy
+ * Runs every 3rd campaign execution.
+ *
+ * Root causes fixed (2026-04-04):
+ * 1. AI returned role_type name instead of UUID → now prompt includes actual role IDs
+ * 2. Missing owner_id in log insert → now includes campaign.owner_id
+ * 3. increase/decrease used same logic → now properly increase vs decrease with limits
+ * 4. All parsed_plan steps updated → now only updates matching action step
+ * 5. No hard limit enforcement → now clamps to HARD_LIMITS
  */
+
+const HARD_LIMITS = {
+  comment: 15, like: 80, join_group: 3, friend_request: 10, post: 3, scan: 15,
+}
+
 async function aiEvaluateCampaign(campaign, roles) {
-  // Gather results from last 24h
-  const { data: activityStats } = await supabase
+  // ── 1. Gather activity stats (last 24h) ──
+  const { data: activityStats, error: actErr } = await supabase
     .from('campaign_activity_log')
-    .select('action_type, result_status, account_id')
+    .select('action_type, result_status, account_id, role_id, source')
     .eq('campaign_id', campaign.id)
     .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
 
-  if (!activityStats?.length) return
+  if (actErr) {
+    console.error(`[AI-PILOT] Activity query error: ${actErr.message}`)
+    return
+  }
+  if (!activityStats?.length) {
+    console.log(`[AI-PILOT] No activity in last 24h for campaign ${campaign.id}, skipping evaluation`)
+    return
+  }
 
+  // Aggregate per action_type
   const summary = {}
   const accountPerf = {}
+  const rolePerf = {}
   for (const s of activityStats) {
     if (!summary[s.action_type]) summary[s.action_type] = { total: 0, success: 0, failed: 0 }
     summary[s.action_type].total++
     if (s.result_status === 'success') summary[s.action_type].success++
     if (s.result_status === 'failed') summary[s.action_type].failed++
 
-    // Per-account performance
     if (s.account_id) {
       if (!accountPerf[s.account_id]) accountPerf[s.account_id] = { total: 0, success: 0, failed: 0 }
       accountPerf[s.account_id].total++
       if (s.result_status === 'success') accountPerf[s.account_id].success++
       if (s.result_status === 'failed') accountPerf[s.account_id].failed++
     }
+
+    if (s.role_id) {
+      if (!rolePerf[s.role_id]) rolePerf[s.role_id] = { total: 0, success: 0, failed: 0 }
+      rolePerf[s.role_id].total++
+      if (s.result_status === 'success') rolePerf[s.role_id].success++
+      if (s.result_status === 'failed') rolePerf[s.role_id].failed++
+    }
   }
 
-  const summaryText = Object.entries(summary).map(([k, v]) =>
-    `${k}: ${v.total} (success: ${v.success}, failed: ${v.failed})`
-  ).join('\n')
+  const summaryText = Object.entries(summary)
+    .map(([k, v]) => `${k}: ${v.total} (thành công: ${v.success}, thất bại: ${v.failed})`)
+    .join('\n')
 
-  const accountText = Object.entries(accountPerf).map(([id, v]) =>
-    `${id.slice(0, 8)}: ${v.total} actions, ${v.failed} failed`
-  ).join('\n')
+  // ── 2. Account health context ──
+  const allAccountIds = [...new Set(roles.flatMap(r => r.account_ids || []))]
+  let accountHealthText = ''
+  if (allAccountIds.length) {
+    const { data: accounts } = await supabase
+      .from('accounts')
+      .select('id, username, status, is_active, created_at')
+      .in('id', allAccountIds)
+    if (accounts?.length) {
+      accountHealthText = accounts.map(a => {
+        const age = Math.floor((Date.now() - new Date(a.created_at).getTime()) / 86400000)
+        const perf = accountPerf[a.id] || { total: 0, failed: 0 }
+        return `  ${a.username || a.id.slice(0, 8)}: trạng thái=${a.status}, tuổi=${age} ngày, ${perf.total} actions, ${perf.failed} lỗi`
+      }).join('\n')
+    }
+  }
 
-  // Call AI for evaluation
+  // ── 2b. Warning scores context ──
+  let warningText = ''
+  try {
+    const { data: warnings } = await supabase
+      .from('account_warning_scores')
+      .select('*')
+      .in('account_id', allAccountIds)
+
+    if (warnings?.length) {
+      warningText = warnings.map(w =>
+        `  ${w.account_id.slice(0, 8)}: ${w.risk_level.toUpperCase()} — ${w.signals_24h} cảnh báo/24h, ${w.signals_6h} cảnh báo/6h`
+      ).join('\n')
+    }
+  } catch (err) {
+    console.warn(`[AI-PILOT] Warning scores query failed: ${err.message}`)
+  }
+
+  // ── 2c. Post performance context (for post strategy feedback) ──
+  let postPerfText = ''
+  try {
+    // Check if any account has enough data for strategy
+    for (const accId of allAccountIds.slice(0, 3)) { // check top 3 accounts
+      const perfData = await collectPerformanceData(supabase, accId)
+      if (perfData) {
+        const bestHrs = perfData.best_hours.join('h, ') + 'h'
+        const topGroups = perfData.group_stats.slice(0, 3).map(g => `"${g.group_name}" (avg ${g.avg_reactions} reactions)`).join(', ')
+        postPerfText += `  ${accId.slice(0, 8)}: best hours=[${bestHrs}], top groups=[${topGroups}], ${perfData.total_posts} posts/30d\n`
+      }
+    }
+  } catch {}
+
+  // ── 3. Group performance context ──
+  let groupPerfText = ''
+  try {
+    const { data: groupPerf } = await supabase
+      .from('group_performance')
+      .select('*')
+      .eq('campaign_id', campaign.id)
+
+    if (groupPerf?.length) {
+      groupPerfText = groupPerf.map(g =>
+        `  "${g.group_name}": ${g.detected_7d} cơ hội/7 ngày, avg score ${g.avg_score || '?'}, đã act ${g.acted_7d}`
+      ).join('\n')
+    }
+  } catch (err) {
+    console.warn(`[AI-PILOT] Group perf query failed: ${err.message}`)
+  }
+
+  // ── 4. Build role details with ACTUAL UUIDs + parsed_plan ──
+  const rolesText = roles.map(r => {
+    const perf = rolePerf[r.id] || { total: 0, success: 0, failed: 0 }
+    let planSummary = ''
+    try {
+      const plan = typeof r.parsed_plan === 'string' ? JSON.parse(r.parsed_plan) : (r.parsed_plan || [])
+      planSummary = plan.map(s => `${s.action}: ${s.count_min || 0}-${s.count_max || 0}`).join(', ')
+    } catch { planSummary = '(không có plan)' }
+
+    return `  - role_id: "${r.id}"
+    Tên: ${r.name} (${r.role_type}), ${(r.account_ids || []).length} nick
+    Plan hiện tại: ${planSummary}
+    Hiệu suất 24h: ${perf.total} actions, ${perf.success} thành công, ${perf.failed} lỗi`
+  }).join('\n')
+
+  // ── 5. Recall memories from previous runs ──
+  let memoryContext = ''
+  try {
+    const campaignMemories = await recall(supabase, { campaignId: campaign.id, memoryType: 'campaign_pattern' })
+    // Also get per-nick memories for all campaign accounts
+    const nickMemories = []
+    for (const accId of allAccountIds.slice(0, 4)) {
+      const mems = await recall(supabase, { campaignId: campaign.id, accountId: accId, memoryType: 'nick_behavior' })
+      if (mems.length) nickMemories.push({ accId, memories: mems })
+    }
+
+    if (campaignMemories.length || nickMemories.length) {
+      memoryContext = '\n=== MEMORY TỪ CÁC LẦN ĐÁNH GIÁ TRƯỚC ===\n'
+      if (campaignMemories.length) {
+        memoryContext += 'Campaign-level:\n' + formatMemoriesForPrompt(campaignMemories) + '\n'
+      }
+      for (const nm of nickMemories) {
+        memoryContext += `Nick ${nm.accId.slice(0, 8)}:\n` + formatMemoriesForPrompt(nm.memories) + '\n'
+      }
+      console.log(`[AI-PILOT] Recalled ${campaignMemories.length} campaign + ${nickMemories.reduce((s, n) => s + n.memories.length, 0)} nick memories`)
+    }
+  } catch (err) {
+    console.warn(`[AI-PILOT] Memory recall failed: ${err.message}`)
+  }
+
+  // ── 6. Call AI with structured prompt ──
   try {
     const { getOrchestratorForUser } = require('./ai/orchestrator')
     const orchestrator = await getOrchestratorForUser(campaign.owner_id, supabase)
 
-    const prompt = `Ban la AI dieu khien chien dich marketing tren Facebook.
-Campaign: "${campaign.name}" (topic: ${campaign.topic})
-Da chay ${campaign.total_runs} lan.
+    const systemPrompt = `Bạn là AI Pilot điều khiển chiến dịch marketing trên Facebook.
+Nhiệm vụ: Phân tích hiệu suất chiến dịch và đưa ra quyết định điều chỉnh.
 
-Ket qua 24h qua:
+QUY TẮC BẮT BUỘC:
+- role_id PHẢI là UUID chính xác được cung cấp, KHÔNG được dùng tên role
+- Giới hạn cứng mỗi nick/ngày: comment=15, like=80, join_group=3, friend_request=10, post=3, scan=15
+- Giá trị count_max KHÔNG được vượt giới hạn cứng
+- Nếu tỷ lệ lỗi > 30%: nên giảm volume hoặc pause role
+- Nếu nick bị checkpoint/expired: đề xuất loại khỏi role
+- Nếu nick có risk_level WARNING/CRITICAL: đề xuất giảm actions hoặc cho nghỉ (pause role chứa nick đó)
+- Nick ở mức WATCH: giảm 30% count_max, nick WARNING: giảm 50%, nick CRITICAL: pause role
+
+Trả về JSON duy nhất, không giải thích thêm.`
+
+    const userPrompt = `Chiến dịch: "${campaign.name}" (chủ đề: ${campaign.topic})
+Đã chạy: ${campaign.total_runs} lần
+
+=== KẾT QUẢ 24H QUA ===
 ${summaryText}
 
-Hieu suat per-nick:
-${accountText}
+=== TÌNH TRẠNG NICK ===
+${accountHealthText || '(không có dữ liệu)'}
 
-Roles hien tai:
-${roles.map(r => `- ${r.name} (${r.role_type}): ${(r.account_ids || []).length} nick`).join('\n')}
+=== CẢNH BÁO SỨC KHỎE NICK ===
+${warningText || '(không có cảnh báo)'}
 
-Hay tra loi JSON voi cac quyet dinh:
+=== HIỆU SUẤT POST (30 ngày) ===
+${postPerfText || '(chưa đủ dữ liệu)'}
+
+=== HIỆU SUẤT NHÓM ===
+${groupPerfText || '(không có dữ liệu)'}
+
+=== ROLES (dùng chính xác role_id UUID bên dưới) ===
+${rolesText}
+
+${memoryContext}
+
+Trả về JSON:
 {
   "adjustments": [
-    {"role_id": "...", "action": "increase|decrease|pause|resume", "field": "count_max|count_min", "value": number, "reason": "..."}
+    {"role_id": "UUID_CHÍNH_XÁC", "action": "increase|decrease|pause|resume", "field": "count_max", "new_value": number, "reason": "..."}
+  ],
+  "new_learnings": [
+    {"scope": "campaign|nick|group", "account_id": null, "group_fb_id": null, "key": "insight_ngắn", "value": "nội dung học được", "confidence": 0.7}
   ],
   "overall_assessment": "good|warning|critical",
-  "recommendation": "..."
-}
-Chi tra ve JSON, khong giai thich them.`
+  "recommendation": "tóm tắt 1-2 câu"
+}`
 
-    const result = await orchestrator.call('caption_gen', [
-      { role: 'user', content: prompt }
-    ], { max_tokens: 500, temperature: 0.2 })
+    console.log(`[AI-PILOT] Calling AI for campaign "${campaign.name}" (${activityStats.length} activities, ${roles.length} roles)`)
 
-    const text = result?.text || result || ''
+    const result = await orchestrator.call('ai_pilot', [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ], { max_tokens: 1000, temperature: 0.15 })
+
+    const text = result?.text || result?.content || (typeof result === 'string' ? result : '')
     const match = text.match(/\{[\s\S]*\}/)
-    if (match) {
-      let decisions
-      try { decisions = JSON.parse(match[0]) } catch { decisions = {} }
+    if (!match) {
+      console.warn(`[AI-PILOT] No JSON in AI response (${text.length} chars)`)
+      return
+    }
 
-      // Apply adjustments
-      for (const adj of (decisions.adjustments || [])) {
-        if (!adj.role_id || !adj.action) continue
+    let decisions
+    try { decisions = JSON.parse(match[0]) } catch (e) {
+      console.warn(`[AI-PILOT] JSON parse failed: ${e.message}`)
+      return
+    }
 
-        if (adj.action === 'pause') {
-          await supabase.from('campaign_roles').update({ is_active: false }).eq('id', adj.role_id)
-          console.log(`[AI-CTRL] Paused role ${adj.role_id}: ${adj.reason}`)
-        } else if (adj.action === 'resume') {
-          await supabase.from('campaign_roles').update({ is_active: true }).eq('id', adj.role_id)
-          console.log(`[AI-CTRL] Resumed role ${adj.role_id}: ${adj.reason}`)
-        } else if ((adj.action === 'increase' || adj.action === 'decrease') && adj.field && adj.value) {
-          const role = roles.find(r => r.id === adj.role_id)
-          if (role?.parsed_plan) {
-            let plan
-            try { plan = typeof role.parsed_plan === 'string' ? JSON.parse(role.parsed_plan) : role.parsed_plan } catch { plan = [] }
-            for (const step of plan) {
-              if (step[adj.field] !== undefined) {
-                step[adj.field] = Math.max(1, adj.value)
-              }
-            }
-            await supabase.from('campaign_roles').update({ parsed_plan: plan }).eq('id', adj.role_id)
-            console.log(`[AI-CTRL] Adjusted role ${adj.role_id} ${adj.field}=${adj.value}: ${adj.reason}`)
-          }
+    // ── 6. Apply adjustments with validation ──
+    let appliedCount = 0
+    for (const adj of (decisions.adjustments || [])) {
+      if (!adj.role_id || !adj.action) continue
+
+      // Resolve role by UUID (primary) or fallback to role_type/name match
+      let role = roles.find(r => r.id === adj.role_id)
+      if (!role) {
+        role = roles.find(r => r.role_type === adj.role_id || r.name === adj.role_id)
+        if (role) {
+          console.log(`[AI-PILOT] Resolved "${adj.role_id}" → role UUID ${role.id} (${role.name})`)
+          adj.role_id = role.id
         }
       }
-
-      // Log AI decision
-      await supabase.from('campaign_activity_log').insert({
-        campaign_id: campaign.id,
-        action_type: 'ai_control',
-        result_status: decisions.overall_assessment || 'success',
-        details: {
-          assessment: decisions.overall_assessment,
-          recommendation: decisions.recommendation,
-          adjustments: decisions.adjustments,
-          run_number: campaign.total_runs,
-        },
-        created_at: new Date().toISOString(),
-      })
-
-      console.log(`[AI-CTRL] Campaign ${campaign.name}: ${decisions.overall_assessment} — ${decisions.recommendation}`)
-    }
-  } catch (err) {
-    console.warn(`[AI-CTRL] AI evaluation error: ${err.message}`)
-  }
-}
-
-// ============================================
-// SCAN KEYWORDS SCHEDULER
-// ============================================
-
-async function processPendingScans() {
-  const now = new Date().toISOString()
-
-  const { data: keywords } = await supabase
-    .from('scan_keywords')
-    .select('*')
-    .eq('is_active', true)
-    .lte('next_scan_at', now)
-
-  if (!keywords?.length) return
-
-  // Check if agent is online
-  const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
-    .gte('last_seen', new Date(Date.now() - 30000).toISOString()).limit(1)
-  if (!agents?.length) return // No agent, skip this cycle
-
-  for (const kw of keywords) {
-    try {
-      // Determine job type based on scan_type
-      let jobType
-      if (kw.scan_type === 'discover_groups') jobType = 'discover_groups_keyword'
-      else if (kw.scan_type === 'group_feed') jobType = 'scan_group_feed'
-      else jobType = 'scan_group_keyword'
-
-      // For group scans: resolve target groups
-      let groupIds = kw.target_group_ids
-      if ((jobType === 'scan_group_keyword' || jobType === 'scan_group_feed') && (!groupIds || groupIds.length === 0)) {
-        const { data: groups } = await supabase.from('fb_groups').select('fb_group_id')
-          .eq('account_id', kw.account_id)
-        groupIds = groups?.map(g => g.fb_group_id) || []
-      }
-
-      // Create job
-      const { error } = await supabase.from('jobs').insert({
-        type: jobType,
-        payload: {
-          account_id: kw.account_id,
-          keyword: kw.keyword,
-          keyword_id: kw.id,
-          group_ids: groupIds,
-          topics: kw.topics || [],
-          time_window_hours: kw.time_window_hours,
-          owner_id: kw.owner_id,
-        },
-        status: 'pending',
-        scheduled_at: now,
-        created_by: kw.owner_id,
-      })
-
-      if (error) {
-        console.error(`[SCHEDULER] Scan job create error for keyword "${kw.keyword}":`, error.message)
+      if (!role) {
+        console.warn(`[AI-PILOT] Unknown role_id "${adj.role_id}", skipping`)
         continue
       }
 
-      // Calculate next scan
-      let nextScan = null
-      if (kw.cron_expression) {
-        try {
-          const interval = CronExpressionParser.parse(kw.cron_expression, {
-            currentDate: new Date(),
-            tz: 'Asia/Ho_Chi_Minh',
-          })
-          nextScan = interval.next().toDate().toISOString()
-        } catch (e) {
-          nextScan = new Date(Date.now() + 6 * 3600 * 1000).toISOString() // fallback: 6h
-        }
+      // Normalize action aliases (AI sometimes returns synonyms)
+      const actionMap = { reduce: 'decrease', lower: 'decrease', raise: 'increase', activate: 'resume', deactivate: 'pause', maintain: 'skip', stop: 'pause' }
+      const action = actionMap[adj.action] || adj.action
+
+      if (action === 'skip' || action === 'maintain') {
+        console.log(`[AI-PILOT] ≡ Maintain "${role.name}": ${adj.reason}`)
+        continue
       }
 
-      await supabase.from('scan_keywords').update({
-        last_scan_at: now,
-        next_scan_at: nextScan,
-        total_scans: (kw.total_scans || 0) + 1,
-      }).eq('id', kw.id)
+      if (action === 'pause') {
+        await supabase.from('campaign_roles').update({ is_active: false }).eq('id', role.id)
+        console.log(`[AI-PILOT] ⏸ Paused "${role.name}": ${adj.reason}`)
+        appliedCount++
 
-      console.log(`[SCHEDULER] Scan queued: "${kw.keyword}" (${kw.scan_type}), next: ${nextScan || 'none'}`)
-    } catch (err) {
-      console.error(`[SCHEDULER] Scan keyword "${kw.keyword}" error:`, err.message)
+      } else if (action === 'resume') {
+        await supabase.from('campaign_roles').update({ is_active: true }).eq('id', role.id)
+        console.log(`[AI-PILOT] ▶ Resumed "${role.name}": ${adj.reason}`)
+        appliedCount++
+
+      } else if (action === 'increase' || action === 'decrease') {
+        const field = adj.field || 'count_max'
+        // Handle new_value as number or string like "1-1" (extract max from "min-max")
+        let rawValue = adj.new_value ?? adj.value
+        if (typeof rawValue === 'string') {
+          const parts = rawValue.split('-').map(Number).filter(n => !isNaN(n))
+          rawValue = parts.length > 1 ? parts[1] : parts[0] // take max from "min-max"
+        }
+        const newValue = Number(rawValue)
+        if (isNaN(newValue) || newValue < 0) {
+          console.warn(`[AI-PILOT] Invalid new_value "${adj.new_value}" for ${role.name}, skipping`)
+          continue
+        }
+
+        let plan
+        try { plan = typeof role.parsed_plan === 'string' ? JSON.parse(role.parsed_plan) : [...(role.parsed_plan || [])] } catch { plan = [] }
+        if (!plan.length) continue
+
+        let updated = false
+        for (const step of plan) {
+          const actionType = step.action || step.type
+          const hardLimit = HARD_LIMITS[actionType]
+
+          if (step[field] !== undefined) {
+            const oldVal = step[field]
+            let clampedValue = Math.max(1, newValue)
+            if (hardLimit) clampedValue = Math.min(clampedValue, hardLimit)
+
+            step[field] = clampedValue
+            if (clampedValue !== oldVal) updated = true
+            console.log(`[AI-PILOT] ${action === 'increase' ? '↑' : '↓'} "${role.name}" ${actionType}.${field}: ${oldVal} → ${clampedValue}${hardLimit && newValue > hardLimit ? ` (clamped from ${newValue}, limit=${hardLimit})` : ''}`)
+          }
+        }
+
+        if (updated) {
+          await supabase.from('campaign_roles').update({ parsed_plan: plan }).eq('id', role.id)
+          appliedCount++
+        }
+      }
     }
+
+    // ── 7. Log AI decision (with owner_id!) ──
+    const { error: logErr } = await supabase.from('campaign_activity_log').insert({
+      campaign_id: campaign.id,
+      owner_id: campaign.owner_id,
+      action_type: 'ai_control',
+      result_status: decisions.overall_assessment || 'good',
+      source: 'campaign',
+      details: {
+        assessment: decisions.overall_assessment,
+        recommendation: decisions.recommendation,
+        adjustments: decisions.adjustments,
+        applied_count: appliedCount,
+        run_number: campaign.total_runs,
+        activity_count: activityStats.length,
+      },
+      created_at: new Date().toISOString(),
+    })
+
+    if (logErr) {
+      console.error(`[AI-PILOT] Log insert failed: ${logErr.message}`)
+    }
+
+    // ── 8. Remember decision context (Level A) ──
+    try {
+      await remember(supabase, {
+        campaignId: campaign.id,
+        memoryType: 'campaign_pattern',
+        key: 'last_decision',
+        value: {
+          assessment: decisions.overall_assessment,
+          adjustments_count: (decisions.adjustments || []).length,
+          applied_count: appliedCount,
+          run_number: campaign.total_runs,
+          activity_count: activityStats.length,
+        },
+      })
+
+      // Remember success rate trend
+      const totalActions = activityStats.length
+      const successActions = activityStats.filter(s => s.result_status === 'success').length
+      const successRate = totalActions > 0 ? Math.round(successActions / totalActions * 100) : 0
+      await remember(supabase, {
+        campaignId: campaign.id,
+        memoryType: 'campaign_pattern',
+        key: 'success_rate_trend',
+        value: { rate: successRate, sample_size: totalActions, run: campaign.total_runs },
+      })
+    } catch (memErr) {
+      console.warn(`[AI-PILOT] Memory save failed: ${memErr.message}`)
+    }
+
+    // ── 9. Level D: AI self-write memories (new_learnings) ──
+    try {
+      for (const learning of (decisions.new_learnings || [])) {
+        if (!learning.key) continue
+        const memType = learning.scope === 'nick' ? 'nick_behavior'
+          : learning.scope === 'group' ? 'group_response'
+          : 'campaign_pattern'
+
+        await remember(supabase, {
+          campaignId: campaign.id,
+          accountId: learning.account_id || null,
+          groupFbId: learning.group_fb_id || null,
+          memoryType: memType,
+          key: learning.key,
+          value: learning.value,
+          confidence: learning.confidence || 0.5,
+        })
+      }
+      if (decisions.new_learnings?.length) {
+        console.log(`[AI-PILOT] Stored ${decisions.new_learnings.length} AI self-learnings`)
+      }
+    } catch (learnErr) {
+      console.warn(`[AI-PILOT] new_learnings save failed: ${learnErr.message}`)
+    }
+
+    console.log(`[AI-PILOT] ✓ Campaign "${campaign.name}": ${decisions.overall_assessment} — ${appliedCount} adjustments applied — ${decisions.recommendation}`)
+
+  } catch (err) {
+    console.error(`[AI-PILOT] AI evaluation error: ${err.message}`)
+    console.error(`[AI-PILOT] Stack: ${err.stack?.split('\n').slice(0, 3).join(' | ')}`)
   }
 }
 

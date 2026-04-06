@@ -491,6 +491,7 @@ function AddAccountModal({ onClose, onSuccess }) {
   const [browserType, setBrowserType] = useState('chromium')
   const [proxyId, setProxyId] = useState('')
   const [newProxy, setNewProxy] = useState('')
+  const [fbCreatedAt, setFbCreatedAt] = useState('')
   const [loading, setLoading] = useState(false)
 
   const { data: proxies = [] } = useQuery({
@@ -524,6 +525,7 @@ function AddAccountModal({ onClose, onSuccess }) {
         cookie_string: parsed,
         browser_type: browserType,
         proxy_id: finalProxyId,
+        fb_created_at: fbCreatedAt || null,
       })
       toast.success('Account added')
       onSuccess()
@@ -576,6 +578,17 @@ function AddAccountModal({ onClose, onSuccess }) {
             proxies={proxies}
           />
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Ngày tạo tài khoản FB (optional)</label>
+            <input
+              type="date"
+              value={fbCreatedAt}
+              onChange={(e) => setFbCreatedAt(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">Tuổi thật của nick FB, dùng để tính warm-up chính xác hơn</p>
+          </div>
+
           <div className="flex items-center gap-3 pt-2">
             <button
               type="button"
@@ -607,6 +620,7 @@ function EditAccountModal({ account, onClose, onSuccess }) {
   const [proxyId, setProxyId] = useState(account.proxy_id || '')
   const [newProxy, setNewProxy] = useState('')
   const [notes, setNotes] = useState(account.notes || '')
+  const [fbCreatedAt, setFbCreatedAt] = useState(account.fb_created_at || '')
   const [isActive, setIsActive] = useState(account.is_active !== false)
   const [cookieString, setCookieString] = useState('')
   const [loading, setLoading] = useState(false)
@@ -639,6 +653,7 @@ function EditAccountModal({ account, onClose, onSuccess }) {
         proxy_id: finalProxyId,
         notes,
         is_active: isActive,
+        fb_created_at: fbCreatedAt || null,
       })
 
       if (cookieString.trim()) {
@@ -717,6 +732,17 @@ function EditAccountModal({ account, onClose, onSuccess }) {
               rows={2}
               className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Ngày tạo tài khoản FB</label>
+            <input
+              type="date"
+              value={fbCreatedAt}
+              onChange={(e) => setFbCreatedAt(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <p className="text-xs text-gray-400 mt-1">Tuổi thật của nick FB, dùng để tính warm-up chính xác hơn</p>
           </div>
 
           <div className="flex items-center gap-2">

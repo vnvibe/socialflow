@@ -32,6 +32,9 @@ import CampaignList from './pages/campaigns/CampaignList'
 import CampaignForm from './pages/campaigns/CampaignForm'
 import CampaignDetail from './pages/campaigns/CampaignDetail'
 import AccountHealth from './pages/accounts/AccountHealth'
+import DataCenter from './pages/data-center/DataCenter'
+import NickNurture from './pages/nick-nurture/NickNurture'
+import GroupMonitor from './pages/groups/GroupMonitor'
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
@@ -116,9 +119,12 @@ export default function App() {
                 <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
                 <Route path="/campaigns/old" element={<CampaignManager />} />
                 <Route path="/health" element={<AccountHealth />} />
+                <Route path="/nick-nurture" element={<NickNurture />} />
                 <Route path="/calendar" element={<CampaignCalendar />} />
                 <Route path="/trends" element={<TrendCenter />} />
                 <Route path="/analytics" element={<Analytics />} />
+                <Route path="/data-center" element={<DataCenter />} />
+                <Route path="/group-monitor" element={<GroupMonitor />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/admin" element={<AdminSettings />} />
                 <Route path="/settings/websites" element={<WebsiteSettings />} />

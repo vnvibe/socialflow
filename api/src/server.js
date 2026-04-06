@@ -1,7 +1,8 @@
-require('dotenv').config()
+require('dotenv').config({ override: true })
 const Fastify = require('fastify')
 const { createClient } = require('@supabase/supabase-js')
 const { initScheduler } = require('./services/campaign-scheduler')
+const { initNurtureScheduler } = require('./services/nurture-scheduler')
 
 const app = Fastify({ logger: true })
 
@@ -50,6 +51,8 @@ app.register(require('./routes/websites'), { prefix: '/websites' })
 app.register(require('./routes/monitoring'), { prefix: '/monitoring' })
 app.register(require('./routes/user-settings'), { prefix: '/user-settings' })
 app.register(require('./routes/permissions'), { prefix: '/permissions' })
+app.register(require('./routes/leads'), { prefix: '/leads' })
+app.register(require('./routes/nurture'), { prefix: '/nurture' })
 
 // Health check
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
@@ -71,11 +74,12 @@ const start = async () => {
     await app.ready()
     console.log('[BOOT] Routes ready. Starting listener...')
 
-    const port = parseInt(process.env.PORT) || 3000
+    const port = parseInt(process.env.PORT) || 3005
     await app.listen({ port, host: '0.0.0.0' })
 
-    // Start campaign scheduler
+    // Start schedulers
     initScheduler()
+    initNurtureScheduler()
 
     console.log(`SocialFlow API running on port ${port}`)
   } catch (err) {

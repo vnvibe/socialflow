@@ -96,6 +96,10 @@ class AIOrchestrator {
       trend_analysis: { provider: 'gemini',   model: 'gemini-1.5-flash', max_tokens: 1000 },
       content_ideas:  { provider: 'gemini',   model: 'gemini-1.5-flash', max_tokens: 1500 },
       relevance_review: { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 1500 },
+      ai_pilot:       { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 1000 },
+      profile_eval:   { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 150 },
+      group_eval:     { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 300 },
+      post_strategy:  { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 300 },
       image_gen:      { provider: 'fal', model: 'fal-ai/flux/schnell' },
     }
     return this.defaults[functionName] || DEFAULTS[functionName] || DEFAULTS.caption_gen

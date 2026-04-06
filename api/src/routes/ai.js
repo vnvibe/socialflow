@@ -647,6 +647,101 @@ Chỉ trả về NỘI DUNG bình luận, không giải thích.`
     }
   })
 
+  // POST /ai/evaluate - AI Brain quality gate + relevance evaluation
+  // Used by agent and frontend to check content/post relevance
+  fastify.post('/evaluate', async (req, reply) => {
+    const { type, data: evalData, topic, campaign, ownerId } = req.body
+    const userId = ownerId || req.body.user_id || req.user?.id
+
+    if (!type || !evalData) {
+      return reply.code(400).send({ error: 'type and data required' })
+    }
+
+    const orchestrator = await getOrchestratorForUser(userId, supabase)
+
+    try {
+      if (type === 'post_relevance') {
+        // Evaluate if a post is relevant to campaign topic
+        const { post_text, group_name, author } = evalData
+        const result = await orchestrator.generate('relevance_review', [{
+          role: 'user',
+          content: `Đánh giá bài viết này có LIÊN QUAN đến chủ đề "${topic}" không:
+
+Nhóm: "${group_name || '?'}"
+Tác giả: ${author || '?'}
+Nội dung: "${(post_text || '').substring(0, 400)}"
+
+Chiến dịch: ${campaign?.name || topic}
+Đối tượng mục tiêu: Người CÓ NHU CẦU về "${topic}" (người mua/dùng)
+
+Trả về JSON:
+{"relevant": true/false, "score": 0-10, "reason": "...", "is_competitor": true/false, "comment_worthy": true/false, "comment_angle": "gợi ý góc bình luận nếu đáng"}`
+        }], { max_tokens: 150, temperature: 0 })
+
+        const text = result?.text || ''
+        const match = text.match(/\{[\s\S]*?\}/)
+        if (match) return JSON.parse(match[0])
+        return { relevant: false, score: 0, reason: 'parse_failed' }
+      }
+
+      if (type === 'comment_quality') {
+        // Quality gate for generated comment
+        const { comment, post_text, group_name } = evalData
+        const result = await orchestrator.generate('caption_gen', [{
+          role: 'user',
+          content: `Đánh giá bình luận Facebook:
+
+BÀI GỐC (nhóm "${group_name || '?'}"): "${(post_text || '').substring(0, 200)}"
+BÌNH LUẬN: "${comment}"
+CHỦ ĐỀ: "${topic || 'N/A'}"
+
+Chấm điểm 1-10:
+- naturalness: Tự nhiên như người thật?
+- relevance: Trả lời đúng nội dung bài?
+- value: Mang lại giá trị cho cuộc trò chuyện?
+
+JSON: {"naturalness": N, "relevance": N, "value": N, "approved": true/false, "reason": "..."}`
+        }], { max_tokens: 100, temperature: 0 })
+
+        const text = result?.text || ''
+        const match = text.match(/\{[\s\S]*?\}/)
+        if (match) {
+          const r = JSON.parse(match[0])
+          const avg = ((r.naturalness || 0) + (r.relevance || 0) + (r.value || 0)) / 3
+          return { ...r, avg_score: Math.round(avg * 10) / 10, approved: avg >= 6.5 }
+        }
+        return { approved: true, reason: 'parse_failed_default_allow' }
+      }
+
+      if (type === 'lead_quality') {
+        // Score potential lead
+        const { name, context: leadContext } = evalData
+        const result = await orchestrator.generate('caption_gen', [{
+          role: 'user',
+          content: `Đánh giá người này có phải KHÁCH TIỀM NĂNG cho "${topic}" không:
+
+Tên: ${name || '?'}
+Ngữ cảnh: ${leadContext || 'Tương tác trong nhóm Facebook'}
+
+Dấu hiệu KHÁCH TỐT: Hỏi giá, so sánh, tìm giải pháp
+Dấu hiệu KHÔNG PHẢI: Đối thủ bán cùng loại, spam, quảng cáo
+
+JSON: {"score": 0-10, "worth": true/false, "reason": "...", "type": "potential_buyer|competitor|irrelevant"}`
+        }], { max_tokens: 80, temperature: 0 })
+
+        const text = result?.text || ''
+        const match = text.match(/\{[\s\S]*?\}/)
+        if (match) return JSON.parse(match[0])
+        return { score: 5, worth: true, reason: 'parse_failed_default', type: 'unknown' }
+      }
+
+      return reply.code(400).send({ error: `Unknown evaluation type: ${type}` })
+    } catch (err) {
+      console.error('[AI-EVALUATE] Error:', err.message)
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // GET /ai/hashtag-presets - List saved presets
   fastify.get('/hashtag-presets', { preHandler: fastify.authenticate }, async (req, reply) => {
     try {

@@ -29,6 +29,67 @@ module.exports = async (fastify) => {
     return data || []
   })
 
+  // GET /accounts/warning-scores — Risk levels for all accounts
+  fastify.get('/warning-scores', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const accessibleIds = await getAccessibleIds(supabase, req.user.id, 'account')
+    if (accessibleIds.length === 0) return []
+
+    const { data, error } = await supabase
+      .from('account_warning_scores')
+      .select('*')
+      .in('account_id', accessibleIds)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
+  // GET /accounts/:id/health-signals — Recent signals for a specific account
+  fastify.get('/:id/health-signals', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {
+      return reply.code(403).send({ error: 'No access' })
+    }
+
+    const { data, error } = await supabase
+      .from('account_health_signals')
+      .select('*')
+      .eq('account_id', req.params.id)
+      .order('detected_at', { ascending: false })
+      .limit(50)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
+  // GET /accounts/:id/avatar — redirect to R2-stored avatar or fallback
+  fastify.get('/:id/avatar', async (req, reply) => {
+    try {
+      const { data: account } = await supabase
+        .from('accounts')
+        .select('avatar_url, fb_user_id')
+        .eq('id', req.params.id)
+        .single()
+
+      if (!account) return reply.code(404).send({ error: 'Not found' })
+
+      // Prefer R2 URL (set by check-health after upload)
+      if (account.avatar_url) {
+        return reply.redirect(302, account.avatar_url)
+      }
+
+      // Fallback: Graph API (may not work without token)
+      if (account.fb_user_id) {
+        return reply.redirect(302, `https://graph.facebook.com/${account.fb_user_id}/picture?type=large`)
+      }
+
+      return reply.code(404).send({ error: 'No avatar' })
+    } catch {
+      return reply.code(500).send({ error: 'Avatar error' })
+    }
+  })
+
+  // NOTE: Old warmup-status and warmup endpoints removed.
+  // Nurture system (GET /nurture/profiles, POST /nurture/profiles/:id/run) replaces them.
+
   // GET /accounts - List accounts user owns + accounts granted by admin
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const accessibleIds = await getAccessibleIds(supabase, req.user.id, 'account')
@@ -63,7 +124,7 @@ module.exports = async (fastify) => {
 
   // POST /accounts - Add account (save only, no validation)
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { cookie_string, username, browser_type, proxy_id, notes } = req.body
+    const { cookie_string, username, browser_type, proxy_id, notes, fb_created_at } = req.body
     if (!cookie_string) return reply.code(400).send({ error: 'cookie_string required' })
 
     const fbUserId = extractCUserId(cookie_string)
@@ -80,7 +141,8 @@ module.exports = async (fastify) => {
       viewport: fingerprint.viewport,
       timezone: fingerprint.timezone,
       status: 'unknown',
-      notes
+      notes,
+      fb_created_at: fb_created_at || null
     }).select().single()
 
     if (error) return reply.code(500).send({ error: error.message })
@@ -91,7 +153,7 @@ module.exports = async (fastify) => {
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const allowed = ['username', 'browser_type', 'proxy_id', 'notes', 'is_active',
       'active_hours_start', 'active_hours_end', 'active_days',
-      'min_interval_minutes', 'max_daily_posts', 'random_delay_minutes']
+      'min_interval_minutes', 'max_daily_posts', 'random_delay_minutes', 'fb_created_at']
     const updates = {}
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key]
