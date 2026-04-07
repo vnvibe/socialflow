@@ -55,6 +55,30 @@ func (a *App) fetchAgentConfig() (*AgentConfig, error) {
 		return nil, fmt.Errorf("not logged in")
 	}
 
+	cfg, err := a.doFetchAgentConfig()
+	if err == nil {
+		return cfg, nil
+	}
+
+	// On 401: token may have expired (Supabase JWT lasts 1h).
+	// Try to re-login with saved credentials and retry once.
+	if strings.Contains(err.Error(), "401") {
+		a.addLog("Token hết hạn, đang đăng nhập lại...", "warn")
+		saved := a.loadCredentials()
+		if saved != nil && saved["email"] != "" && saved["password"] != "" {
+			result := a.Login(saved["email"], saved["password"])
+			if result["error"] == nil {
+				return a.doFetchAgentConfig()
+			}
+			return nil, fmt.Errorf("re-login failed: %v", result["error"])
+		}
+		return nil, fmt.Errorf("token expired and no saved credentials")
+	}
+
+	return nil, err
+}
+
+func (a *App) doFetchAgentConfig() (*AgentConfig, error) {
 	url := fmt.Sprintf("%s/agent/config", apiURL)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", a.user.Token))
@@ -420,6 +444,13 @@ func (a *App) StartAgent() map[string]interface{} {
 		env = append(env, fmt.Sprintf("API_URL=%s", cfg.APIURL))
 		env = append(env, fmt.Sprintf("API_BASE_URL=%s", cfg.APIURL))
 		env = append(env, fmt.Sprintf("AGENT_SECRET_KEY=%s", cfg.AgentSecretKey))
+	} else {
+		// Last-resort fallback: hardcoded public Supabase URL + anon key
+		// (these are anon, not secret — same defaults as init())
+		env = append(env, fmt.Sprintf("SUPABASE_URL=%s", supabaseURL))
+		env = append(env, fmt.Sprintf("SUPABASE_ANON_KEY=%s", supabaseAnon))
+		env = append(env, fmt.Sprintf("API_URL=%s", apiURL))
+		env = append(env, fmt.Sprintf("API_BASE_URL=%s", apiURL))
 	}
 
 	// Pass user JWT so agent can authenticate with API for AI calls
