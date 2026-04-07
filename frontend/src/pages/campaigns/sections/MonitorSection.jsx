@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Eye, ScrollText, MessageCircle, Clock, CheckCircle, XCircle,
   Loader, RefreshCw, ThumbsUp, UserPlus, Users, Search,
-  ExternalLink, AlertTriangle, Bot, Filter, Brain, ChevronDown, ChevronUp,
+  ExternalLink, AlertTriangle, Bot, Filter, Brain, ChevronDown, ChevronUp, ArrowUp,
 } from 'lucide-react'
 import api from '../../../lib/api'
 import { format, formatDistanceToNow } from 'date-fns'
@@ -96,8 +96,9 @@ export default function MonitorSection({ campaignId, campaign }) {
 
   // Detail activity log
   const dateRange = getDateRange()
+
+  // === MAIN PAGE QUERY (no auto-refetch — polling handled separately) ===
   const { data: detailRes, isLoading: detailLoading, refetch: refetchDetail } = useQuery({
-    // Include dateRange.from in key — refetch automatically when crossing VN midnight
     queryKey: ['campaign-detail-log', campaignId, detailPage, actionFilter, statusFilter, dateFilter, dateRange.from || ''],
     queryFn: () => api.get(`/campaigns/${campaignId}/activity-log`, {
       params: {
@@ -108,12 +109,100 @@ export default function MonitorSection({ campaignId, campaign }) {
       },
     }).then(r => r.data),
     enabled: subTab === 'details',
-    refetchInterval: subTab === 'details' ? 10000 : false,
+    keepPreviousData: true, // smooth pagination, no blank flash
   })
-  const detailLogs = Array.isArray(detailRes) ? detailRes : (detailRes?.data || [])
-  const detailTotal = detailRes?.total || detailLogs.length
+  const baseLogs = Array.isArray(detailRes) ? detailRes : (detailRes?.data || [])
+  const detailTotal = detailRes?.total || baseLogs.length
   const detailSummary = detailRes?.summary || {}
   const detailPages = detailRes?.totalPages || Math.ceil(detailTotal / 30)
+
+  // === LIVE POLLING (cursor-based, page 1 only) ===
+  // Stores entries that arrived AFTER the page-1 fetch, prepended to visible list
+  const [polledEntries, setPolledEntries] = useState([]) // newest first
+  const [unseenCount, setUnseenCount] = useState(0)      // entries arrived while user scrolled down
+  const containerRef = useRef(null)
+  const isAtTopRef = useRef(true)
+
+  // Reset polled state when filters/page change
+  useEffect(() => {
+    setPolledEntries([])
+    setUnseenCount(0)
+  }, [campaignId, actionFilter, statusFilter, dateFilter, detailPage])
+
+  // The cursor: timestamp of newest entry currently visible (polled or page 1)
+  const cursorTimestamp = useMemo(() => {
+    const newest = polledEntries[0]?.created_at || baseLogs[0]?.created_at
+    return newest || null
+  }, [polledEntries, baseLogs])
+
+  // Polling enabled only on page 1 — when user is browsing history (page 2+) we don't poll
+  const pollEnabled = subTab === 'details' && detailPage === 1 && !!cursorTimestamp
+
+  useQuery({
+    queryKey: ['campaign-log-poll', campaignId, actionFilter, statusFilter, dateFilter, cursorTimestamp],
+    queryFn: () => api.get(`/campaigns/${campaignId}/activity-log`, {
+      params: {
+        after: cursorTimestamp,
+        limit: 50,
+        ...(actionFilter && { action_type: actionFilter }),
+        ...(statusFilter && { result_status: statusFilter }),
+        ...(dateRange.from && { date_from: dateRange.from }),
+      },
+    }).then(r => {
+      const newEntries = Array.isArray(r.data) ? r.data : (r.data?.data || [])
+      if (newEntries.length > 0) {
+        // Dedup by id, prepend (server returns ascending; we want newest-first)
+        setPolledEntries(prev => {
+          const existingIds = new Set(prev.map(e => e.id))
+          const fresh = newEntries.filter(e => !existingIds.has(e.id))
+          if (!fresh.length) return prev
+          // Server returns ascending by created_at; reverse to newest-first then merge
+          return [...fresh.slice().reverse(), ...prev]
+        })
+        // If user is scrolled down, increment unseen badge
+        if (!isAtTopRef.current) {
+          setUnseenCount(c => c + newEntries.length)
+        }
+      }
+      return r.data
+    }),
+    enabled: pollEnabled,
+    refetchInterval: pollEnabled ? 8000 : false,
+    refetchIntervalInBackground: true, // keep polling even when tab not focused
+  })
+
+  // Track scroll position to decide whether to show "N mới" badge
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onScroll = () => {
+      const atTop = el.scrollTop < 50
+      isAtTopRef.current = atTop
+      if (atTop && unseenCount > 0) setUnseenCount(0)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [unseenCount])
+
+  const scrollToTop = () => {
+    containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    setUnseenCount(0)
+  }
+
+  // Final visible list = polled (newest first) + base page 1 (already newest first)
+  // Dedup by id (in case base query refetch picks up an entry that polling already had)
+  const detailLogs = useMemo(() => {
+    if (detailPage !== 1) return baseLogs // page 2+ shows raw paginated data
+    const seen = new Set()
+    const merged = []
+    for (const e of polledEntries) {
+      if (e.id && !seen.has(e.id)) { seen.add(e.id); merged.push(e) }
+    }
+    for (const e of baseLogs) {
+      if (e.id && !seen.has(e.id)) { seen.add(e.id); merged.push(e) }
+    }
+    return merged
+  }, [polledEntries, baseLogs, detailPage])
 
   // Engagement data
   const { data: report } = useQuery({
@@ -138,17 +227,26 @@ export default function MonitorSection({ campaignId, campaign }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Theo doi & Nhat ky</h2>
-        <button
-          disabled={refreshing}
-          onClick={async () => {
-            setRefreshing(true)
-            try { await Promise.all([refetchJobs(), refetchDetail()]) } finally { setRefreshing(false) }
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50"
-        >
-          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-          {refreshing ? 'Dang tai...' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-2">
+          {pollEnabled && (
+            <span className="flex items-center gap-1 text-[11px] text-green-600">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Đang theo dõi trực tiếp
+            </span>
+          )}
+          <button
+            disabled={refreshing}
+            onClick={async () => {
+              setRefreshing(true)
+              setPolledEntries([])
+              setUnseenCount(0)
+              try { await Promise.all([refetchJobs(), refetchDetail()]) } finally { setRefreshing(false) }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+            {refreshing ? 'Dang tai...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Sub-tabs */}
@@ -239,9 +337,20 @@ export default function MonitorSection({ campaignId, campaign }) {
             <span className="text-xs text-gray-500 self-center">{detailTotal} entries</span>
           </div>
 
+          {/* "N entries mới" floating badge */}
+          {unseenCount > 0 && (
+            <button
+              onClick={scrollToTop}
+              className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-full shadow-lg hover:bg-blue-700 animate-bounce"
+              style={{ width: 'fit-content', display: 'block' }}
+            >
+              <ArrowUp size={12} className="inline" /> {unseenCount} entries mới
+            </button>
+          )}
+
           {/* Detail Log List — grouped by date */}
-          <div className="space-y-3">
-            {detailLoading ? (
+          <div ref={containerRef} className="space-y-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+            {detailLoading && detailLogs.length === 0 ? (
               <div className="flex items-center justify-center py-12 bg-white rounded-xl border border-gray-200">
                 <Loader size={20} className="animate-spin text-purple-600" />
               </div>
@@ -271,9 +380,10 @@ export default function MonitorSection({ campaignId, campaign }) {
                 const ActionIcon = ACTION_ICONS[log.action_type] || Eye
                 const statusCfg = STATUS_COLORS[log.result_status] || STATUS_COLORS.done
                 const StatusIcon = statusCfg.icon
+                const isFresh = polledEntries.some(p => p.id === log.id)
 
                 return (
-                  <div key={log.id || i} className="px-4 py-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50">
+                  <div key={log.id || i} className={`px-4 py-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 ${isFresh ? 'animate-fadeInLog' : ''}`}>
                     {/* Row 1: Action + Status + Target + Account + Time */}
                     <div className="flex items-center gap-2">
                       <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${statusCfg.bg}`}>
