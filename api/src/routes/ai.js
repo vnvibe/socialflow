@@ -606,16 +606,41 @@ A colossal glass server tower floating in the sky above clouds, bathed in warm g
     const userId = req.user?.id || user_id || ((isServiceKey || isAgentSecret) ? '274868cf-742d-4d8a-89e8-bf1c37766b77' : null)
     if (!userId) return reply.code(400).send({ error: 'user_id required' })
 
-    const lang = language === 'en' ? 'English' : 'Vietnamese'
+    const isEnglish = language === 'en'
     const commentStyle = style || 'casual'
 
-    const styleGuides = {
+    // If client provided a custom_prompt, use that directly (allows full language override)
+    const styleGuides = isEnglish ? {
+      casual: 'Friendly, conversational',
+      expert: 'Professional, add relevant knowledge',
+      enthusiastic: 'Enthusiastic, positive',
+    } : {
       casual: 'Thân thiện, tự nhiên như đang nói chuyện',
       expert: 'Chuyên nghiệp, thêm kiến thức liên quan',
       enthusiastic: 'Nhiệt tình, hào hứng, tích cực',
     }
 
-    const prompt = `Viết MỘT bình luận Facebook bằng ${lang}.
+    const prompt = req.body.custom_prompt
+      ? req.body.custom_prompt
+      : (isEnglish ? `Write ONE Facebook comment in NATURAL ENGLISH.
+
+=== ORIGINAL POST (in group "${group_name || 'general'}") ===
+"${(post_snippet || '').substring(0, 500)}"
+
+=== STRICT RULES ===
+1. Read the post carefully, understand what the author means
+2. Comment MUST respond directly to the post:
+   - If they ASK → answer or share related experience
+   - If they SHARE → comment on what they shared, ask for details
+   - If they ADVERTISE → show interest or ask about price/details
+3. Don't write generic comments like "great", "awesome"
+4. Don't mention topic "${topic}" unless the post is directly related
+5. Tone: ${styleGuides[commentStyle] || styleGuides.casual}
+6. Max 1-2 sentences, max 1 emoji
+7. No hashtags, no links
+8. Natural like a real person talking
+
+Return ONLY the comment, no explanation.` : `Viết MỘT bình luận Facebook bằng tiếng Việt tự nhiên.
 
 === BÀI VIẾT GỐC (trong nhóm "${group_name || 'chung'}") ===
 "${(post_snippet || '').substring(0, 500)}"
@@ -633,7 +658,7 @@ A colossal glass server tower floating in the sky above clouds, bathed in warm g
 7. KHÔNG hashtag, KHÔNG link
 8. Tự nhiên như người thật đang nói chuyện
 
-Chỉ trả về NỘI DUNG bình luận, không giải thích.`
+Chỉ trả về NỘI DUNG bình luận, không giải thích.`)
 
     try {
       const orchestrator = await getOrchestratorForUser(userId, supabase)
