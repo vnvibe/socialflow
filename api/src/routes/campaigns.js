@@ -93,9 +93,9 @@ module.exports = async (fastify) => {
     return data
   })
 
-  // POST /campaigns/preview-plan — Builds proper roles from selected_actions
+  // POST /campaigns/preview-plan — Builds proper roles from selected_actions OR mission
   fastify.post('/preview-plan', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { requirement, topic, account_ids, runs_per_day, selected_actions } = req.body
+    const { requirement, mission, topic, account_ids, runs_per_day, selected_actions, brand_config } = req.body
     if (!account_ids?.length) return reply.code(400).send({ error: 'account_ids required' })
 
     const { data: accounts } = await supabase
@@ -193,30 +193,81 @@ module.exports = async (fastify) => {
             ],
           })
         }
-      } else if (requirement) {
-        // Legacy: use AI planner for free-text requirement
+      } else if (mission || requirement) {
+        // === NEW: mission-first flow — AI parses natural language → roles ===
         const nickAges = accounts.map(a => ({
           name: a.username || a.fb_user_id,
           age_days: Math.floor((Date.now() - new Date(a.created_at).getTime()) / 86400000),
           status: a.status,
         }))
 
+        const missionText = mission || requirement
         const steps = await parseMission(
-          requirement,
-          { topic: topic || '', roleType: 'auto', accountCount: accounts.length, accountNames, nickAges, runsPerDay },
+          missionText,
+          { topic: topic || '', roleType: 'auto', accountCount: accounts.length, accountNames, nickAges, runsPerDay, brandConfig: brand_config },
           req.user.id, supabase
         )
 
-        // Legacy: all accounts get same plan as custom role
-        roles = accounts.map((acc, i) => ({
-          name: acc.username || acc.fb_user_id || `Nick ${i + 1}`,
-          account_ids: [acc.id],
-          account_names: [acc.username || acc.fb_user_id],
-          role_type: 'custom',
-          steps,
-        }))
+        // Group steps by role type derived from action
+        const roleByType = {}
+        const ROLE_OF_ACTION = {
+          join_group: 'scout', scan_members: 'scout',
+          like: 'nurture', comment: 'nurture', browse: 'nurture',
+          send_friend_request: 'connect',
+          post: 'post',
+          reply: 'nurture',
+        }
+        const ROLE_NAME = {
+          scout: 'Thám dò nhóm',
+          nurture: 'Tương tác nhóm',
+          connect: 'Kết bạn',
+          post: 'Đăng bài',
+        }
+        for (const step of steps) {
+          const rt = ROLE_OF_ACTION[step.action] || 'nurture'
+          if (!roleByType[rt]) {
+            roleByType[rt] = {
+              name: ROLE_NAME[rt] || rt,
+              role_type: rt,
+              account_ids: allAccountIds,
+              account_names: accountNames,
+              steps: [],
+            }
+          }
+          roleByType[rt].steps.push(step)
+        }
+        roles = Object.values(roleByType)
+
+        // === ADS: inject opportunity_comment into nurture role if brand config enabled ===
+        if (brand_config && brand_config.brand_name) {
+          const nurture = roleByType.nurture
+          if (nurture) {
+            nurture.steps.push({
+              action: 'comment',
+              description: `Quảng cáo tự nhiên ${brand_config.brand_name}: tối đa 2 lần/nick/ngày`,
+              params: {
+                style: brand_config.brand_voice || 'casual',
+                topic,
+                ad_mode: true,
+                brand_keywords: brand_config.brand_keywords || [],
+              },
+              quota_key: 'opportunity_comment',
+              count_mode: 'range',
+              count_min: 1,
+              count_max: 2,
+              priority: 9,
+            })
+          }
+        }
+
+        // Wire feeds_into for scout → connect
+        const scoutR = roleByType.scout
+        const connectR = roleByType.connect
+        if (scoutR && connectR) {
+          connectR._depends_on = 'scout'
+        }
       } else {
-        return reply.code(400).send({ error: 'selected_actions or requirement required' })
+        return reply.code(400).send({ error: 'selected_actions, mission, or requirement required' })
       }
 
       // Compute daily budget
@@ -244,6 +295,9 @@ module.exports = async (fastify) => {
         safety_warnings: warnings,
         estimated_duration_minutes: Math.round(totalSteps * 3 * accounts.length),
         selected_actions: actions,
+        brand_config: brand_config || null,
+        ad_mode: brand_config?.brand_name ? 'ad_enabled' : 'normal',
+        mission: mission || requirement || null,
       }
 
       return { plan, accounts: accountNames }
@@ -255,7 +309,8 @@ module.exports = async (fastify) => {
   // POST /campaigns
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const {
-      name, topic, requirement, account_ids, ai_plan, ai_plan_confirmed,
+      name, topic, requirement, mission, brand_config, ad_mode,
+      account_ids, ai_plan, ai_plan_confirmed,
       target_pages, target_groups, target_profiles,
       content_ids, rotation_mode, spin_mode,
       schedule_type, cron_expression, interval_minutes,
@@ -270,6 +325,9 @@ module.exports = async (fastify) => {
       name,
       topic: topic || null,
       requirement: requirement || null,
+      mission: mission || null,
+      brand_config: brand_config || null,
+      ad_mode: ad_mode || 'normal',
       account_ids: account_ids || [],
       ai_plan: ai_plan || null,
       ai_plan_confirmed: ai_plan_confirmed || false,
@@ -328,7 +386,8 @@ module.exports = async (fastify) => {
   // PUT /campaigns/:id
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const allowed = [
-      'name', 'topic', 'requirement', 'account_ids', 'ai_plan', 'ai_plan_confirmed',
+      'name', 'topic', 'requirement', 'mission', 'brand_config', 'ad_mode',
+      'account_ids', 'ai_plan', 'ai_plan_confirmed',
       'target_pages', 'target_groups', 'target_profiles',
       'content_ids', 'rotation_mode', 'spin_mode',
       'schedule_type', 'cron_expression', 'interval_minutes',

@@ -123,11 +123,23 @@ async function parseMission(mission, context, userId, supabase) {
     }
 
     const runsPerDay = context.runsPerDay || 2
+
+    // Brand/ads context — only included if user enabled ads in form
+    const brandBlock = context.brandConfig && context.brandConfig.brand_name ? `
+
+=== QUANG CAO THUONG HIEU (DA BAT) ===
+Ten thuong hieu: ${context.brandConfig.brand_name}
+${context.brandConfig.brand_description ? `Mo ta: ${context.brandConfig.brand_description}` : ''}
+${context.brandConfig.brand_keywords?.length ? `Tu khoa kich hoat: ${context.brandConfig.brand_keywords.join(', ')}` : ''}
+${context.brandConfig.brand_voice ? `Giong dieu: ${context.brandConfig.brand_voice}` : ''}
+=> Khi gap bai viet co tu khoa kich hoat, AI se de xuat thuong hieu mot cach tu nhien (max 2 lan/nick/ngay).
+=> Khong can them buoc rieng — buoc comment se tu xu ly.` : ''
+
     const userPrompt = `Chu de: ${context.topic || 'general'}
 So nick: ${context.accountCount || 1}
 So lan chay moi ngay: ${runsPerDay}
 ${context.accountNames ? `Ten nick: ${context.accountNames.join(', ')}` : ''}
-${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}${priorContext}
+${nickInfo ? `Tuoi nick: ${nickInfo}` : ''}${priorContext}${brandBlock}
 
 === YEU CAU NGUYEN VAN ===
 "${mission}"

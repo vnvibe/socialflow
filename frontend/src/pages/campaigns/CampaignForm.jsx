@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Target, Save, ArrowLeft, Clock, Sparkles, Check, AlertTriangle, Loader2, ChevronDown, ChevronUp, Info, Minus, Plus } from 'lucide-react'
+import { Target, Save, ArrowLeft, Clock, Sparkles, Check, AlertTriangle, Loader2, Megaphone, X, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
@@ -14,31 +14,33 @@ const DEFAULT_PRESETS = [
   { key: 'every3h', label: 'Mỗi 3 tiếng', runs: 6, buildCron: () => `${randMin()} 6,9,12,15,18,21 * * *`, descFn: () => '6h, 9h, 12h, 15h, 18h, 21h (6 lần)' },
 ]
 
-const AVAILABLE_ACTIONS = [
-  { key: 'join_group', label: 'Tìm & tham gia nhóm', icon: '🏠', desc: 'Scout tìm nhóm mới theo topic', defaultCount: 5, max: 999, min: 1 },
-  { key: 'like', label: 'Like bài viết', icon: '👍', desc: 'Like bài trong nhóm đã tham gia', defaultCount: 20, max: 999, min: 1 },
-  { key: 'comment', label: 'Bình luận bài viết', icon: '💬', desc: 'AI comment tự nhiên, đúng chủ đề', defaultCount: 10, max: 999, min: 1 },
-  { key: 'friend_request', label: 'Kết bạn', icon: '🤝', desc: 'AI đánh giá & gửi lời mời kết bạn', defaultCount: 10, max: 999, min: 1 },
-  { key: 'post', label: 'Đăng bài', icon: '📝', desc: 'Đăng bài vào nhóm/trang', defaultCount: 2, max: 999, min: 1 },
-]
-
-const ACTION_ICONS = {
-  join_group: '🏠', like: '👍', comment: '💬', send_friend_request: '🤝',
-  friend_request: '🤝', post: '📝', scan_members: '🔍', browse: '👀',
-}
-
 const DAY_LABELS = [
   { value: 1, label: 'T2' }, { value: 2, label: 'T3' }, { value: 3, label: 'T4' },
   { value: 4, label: 'T5' }, { value: 5, label: 'T6' }, { value: 6, label: 'T7' },
   { value: 0, label: 'CN' },
 ]
 
-const ROLE_TYPE_LABELS = {
-  scout: { label: 'Thám do', icon: '🔍', color: 'bg-blue-100 text-blue-700' },
-  nurture: { label: 'Chăm sóc', icon: '💚', color: 'bg-green-100 text-green-700' },
-  connect: { label: 'Kết nối', icon: '🤝', color: 'bg-purple-100 text-purple-700' },
-  post: { label: 'Đăng bài', icon: '📝', color: 'bg-orange-100 text-orange-700' },
+// Hard limits per nick per day — Warning if exceeded
+const HARD_LIMITS = { join_group: 3, comment: 15, like: 80, friend_request: 10, post: 3, opportunity_comment: 2 }
+
+// Action display config — readonly preview
+const ACTION_DISPLAY = {
+  join_group:        { icon: '🔍', label: 'Thám dò nhóm',     unit: 'nhóm/nick/ngày' },
+  scan_members:      { icon: '👥', label: 'Quét thành viên',  unit: 'lần/nick/ngày' },
+  browse:            { icon: '👀', label: 'Lướt feed',        unit: 'lần/nick/ngày' },
+  like:              { icon: '👍', label: 'Like bài',         unit: 'bài/nick/ngày' },
+  comment:           { icon: '💬', label: 'Comment',          unit: 'bài/nick/ngày' },
+  send_friend_request:{ icon: '🤝', label: 'Kết bạn',         unit: 'người/nick/ngày' },
+  friend_request:    { icon: '🤝', label: 'Kết bạn',         unit: 'người/nick/ngày' },
+  post:              { icon: '📝', label: 'Đăng bài',         unit: 'bài/nick/ngày' },
+  opportunity_comment:{ icon: '📢', label: 'Quảng cáo tự nhiên', unit: 'lần/nick/ngày' },
 }
+
+const VOICE_OPTIONS = [
+  { value: 'casual',     label: 'Thân thiện' },
+  { value: 'professional', label: 'Chuyên nghiệp' },
+  { value: 'humor',      label: 'Hài hước' },
+]
 
 export default function CampaignForm() {
   const { id } = useParams()
@@ -46,31 +48,39 @@ export default function CampaignForm() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  // Section 1: Basic
   const [form, setForm] = useState({
-    name: '', topic: '', requirement: '',
-    schedule_type: 'recurring', cron_expression: `${randMin()} 6,10,14,18,22 * * *`,
+    name: '',
+    topic: '',
+    mission: '',
+    schedule_type: 'recurring',
+    cron_expression: `${randMin()} 6,10,14,18,22 * * *`,
   })
+
+  // Section 3: Ads
+  const [adsEnabled, setAdsEnabled] = useState(false)
+  const [brand, setBrand] = useState({
+    brand_name: '',
+    brand_description: '',
+    brand_keywords: [],
+    brand_voice: 'casual',
+  })
+  const [keywordInput, setKeywordInput] = useState('')
+
+  // Section 4: Accounts
   const [selectedAccountIds, setSelectedAccountIds] = useState([])
-  const [aiPlan, setAiPlan] = useState(null)
-  const [planConfirmed, setPlanConfirmed] = useState(false)
 
-  // Action picker state
-  const [selectedActions, setSelectedActions] = useState(() => {
-    const initial = {}
-    AVAILABLE_ACTIONS.forEach(a => {
-      initial[a.key] = { enabled: a.key !== 'post', count: a.defaultCount }
-    })
-    return initial
-  })
-
-  // Schedule state
+  // Section 5: Schedule
   const [scheduleMode, setScheduleMode] = useState('allday')
   const [presetHour, setPresetHour] = useState(9)
   const [presetHour2, setPresetHour2] = useState(18)
   const [customHour, setCustomHour] = useState(9)
   const [customMinute, setCustomMinute] = useState(0)
   const [customDays, setCustomDays] = useState([1, 2, 3, 4, 5, 6, 0])
-  const [showAdvanced, setShowAdvanced] = useState(false)
+
+  // Section 6: AI plan output
+  const [aiPlan, setAiPlan] = useState(null)
+  const [planConfirmed, setPlanConfirmed] = useState(false)
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -86,18 +96,26 @@ export default function CampaignForm() {
   useEffect(() => {
     if (existing) {
       setForm({
-        name: existing.name || '', topic: existing.topic || '',
-        requirement: existing.requirement || '',
+        name: existing.name || '',
+        topic: existing.topic || '',
+        mission: existing.mission || existing.requirement || '',
         schedule_type: existing.schedule_type || 'recurring',
         cron_expression: existing.cron_expression || '0 9 * * *',
       })
       setSelectedAccountIds(existing.account_ids || [])
-      if (existing.ai_plan) { setAiPlan(existing.ai_plan); setPlanConfirmed(existing.ai_plan_confirmed || false) }
-      // Restore action state from existing plan if available
-      if (existing.ai_plan?.selected_actions) {
-        setSelectedActions(existing.ai_plan.selected_actions)
+      if (existing.brand_config) {
+        setAdsEnabled(true)
+        setBrand({
+          brand_name: existing.brand_config.brand_name || '',
+          brand_description: existing.brand_config.brand_description || '',
+          brand_keywords: existing.brand_config.brand_keywords || [],
+          brand_voice: existing.brand_config.brand_voice || 'casual',
+        })
       }
-      // Parse cron
+      if (existing.ai_plan) {
+        setAiPlan(existing.ai_plan)
+        setPlanConfirmed(existing.ai_plan_confirmed || false)
+      }
       const cron = existing.cron_expression || '0 9 * * *'
       const parts = cron.split(' ')
       if (parts[1]?.split(',').length >= 4) setScheduleMode('allday')
@@ -106,6 +124,8 @@ export default function CampaignForm() {
       else { setScheduleMode('daily'); setPresetHour(parseInt(parts[1]) || 9) }
     }
   }, [existing])
+
+  const resetPlan = () => { setAiPlan(null); setPlanConfirmed(false) }
 
   const updateCron = (mode, h1, h2, cH, cM, cDays) => {
     const preset = DEFAULT_PRESETS.find(p => p.key === mode)
@@ -131,24 +151,6 @@ export default function CampaignForm() {
     else updateCron(mode)
   }
 
-  const toggleAction = (key) => {
-    setSelectedActions(prev => ({
-      ...prev,
-      [key]: { ...prev[key], enabled: !prev[key].enabled },
-    }))
-    setAiPlan(null); setPlanConfirmed(false)
-  }
-
-  const setActionCount = (key, count) => {
-    const action = AVAILABLE_ACTIONS.find(a => a.key === key)
-    const clamped = Math.max(action?.min || 1, Math.min(action?.max || 50, count))
-    setSelectedActions(prev => ({
-      ...prev,
-      [key]: { ...prev[key], count: clamped },
-    }))
-    setAiPlan(null); setPlanConfirmed(false)
-  }
-
   const getScheduleDesc = () => {
     const preset = DEFAULT_PRESETS.find(p => p.key === scheduleMode)
     if (preset?.descFn) return preset.descFn(presetHour, presetHour2)
@@ -159,28 +161,64 @@ export default function CampaignForm() {
     return ''
   }
 
-  const enabledActions = Object.entries(selectedActions).filter(([_, v]) => v.enabled).map(([k, v]) => ({ key: k, count: v.count }))
+  const addKeyword = () => {
+    const k = keywordInput.trim()
+    if (!k) return
+    if (brand.brand_keywords.includes(k)) return
+    setBrand(b => ({ ...b, brand_keywords: [...b.brand_keywords, k] }))
+    setKeywordInput('')
+    resetPlan()
+  }
 
-  // AI Preview
+  const removeKeyword = (k) => {
+    setBrand(b => ({ ...b, brand_keywords: b.brand_keywords.filter(x => x !== k) }))
+    resetPlan()
+  }
+
+  // Build brand_config payload (only if enabled and has name)
+  const brandPayload = adsEnabled && brand.brand_name.trim() ? {
+    brand_name: brand.brand_name.trim(),
+    brand_description: brand.brand_description.trim(),
+    brand_keywords: brand.brand_keywords,
+    brand_voice: brand.brand_voice,
+  } : null
+
+  // === Compute plan summary from AI roles for display ===
+  const planSummary = (() => {
+    if (!aiPlan?.roles) return []
+    const out = []
+    const seen = new Set()
+    for (const role of aiPlan.roles) {
+      for (const step of (role.steps || [])) {
+        const key = step.quota_key || step.action
+        if (seen.has(key)) continue
+        seen.add(key)
+        const display = ACTION_DISPLAY[key] || ACTION_DISPLAY[step.action]
+        if (!display) continue
+        const max = step.count_max || step.count_min || 1
+        const runs = (DEFAULT_PRESETS.find(p => p.key === scheduleMode)?.runs || 2)
+        const dailyMax = max * runs
+        const limit = HARD_LIMITS[key]
+        out.push({
+          key, ...display,
+          count: dailyMax,
+          warning: limit && dailyMax > limit ? `vượt giới hạn ${limit}/ngày` : null,
+        })
+      }
+    }
+    return out
+  })()
+
+  // === Mutations ===
   const previewMut = useMutation({
     mutationFn: () => {
       const preset = DEFAULT_PRESETS.find(p => p.key === scheduleMode)
-      // Build requirement from selected actions
-      const actionDescs = enabledActions.map(a => {
-        const info = AVAILABLE_ACTIONS.find(x => x.key === a.key)
-        return `${info?.label || a.key}: ${a.count}/ngày`
-      })
-      const autoRequirement = actionDescs.join(', ')
-      const fullRequirement = form.requirement
-        ? `${autoRequirement}. ${form.requirement}`
-        : autoRequirement
-
       return api.post('/campaigns/preview-plan', {
-        requirement: fullRequirement,
+        mission: form.mission,
         topic: form.topic,
         account_ids: selectedAccountIds,
         runs_per_day: preset?.runs || 2,
-        selected_actions: enabledActions,
+        brand_config: brandPayload,
       }).then(r => r.data)
     },
     onSuccess: (data) => { setAiPlan(data.plan); setPlanConfirmed(false) },
@@ -190,9 +228,12 @@ export default function CampaignForm() {
   const saveMut = useMutation({
     mutationFn: async () => {
       const payload = {
-        ...form, account_ids: selectedAccountIds,
-        ai_plan: aiPlan ? { ...aiPlan, selected_actions: selectedActions } : null,
+        ...form,
+        account_ids: selectedAccountIds,
+        ai_plan: aiPlan,
         ai_plan_confirmed: planConfirmed,
+        brand_config: brandPayload,
+        ad_mode: brandPayload ? 'ad_enabled' : 'normal',
       }
       if (isEdit) { await api.put(`/campaigns/${id}`, payload); return id }
       else { const res = await api.post('/campaigns', payload); return res.data.id }
@@ -205,297 +246,338 @@ export default function CampaignForm() {
     onError: (err) => toast.error(err.response?.data?.error || 'Lỗi'),
   })
 
-  const canPreview = form.topic.trim() && selectedAccountIds.length > 0 && enabledActions.length > 0
+  const canPreview = form.topic.trim() && form.mission.trim() && selectedAccountIds.length > 0
   const canSubmit = form.name.trim() && canPreview && aiPlan && planConfirmed
 
   return (
     <div className="max-w-2xl">
-        <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => navigate('/campaigns')} className="p-1.5 text-gray-400 hover:text-gray-600"><ArrowLeft size={20} /></button>
-          <Target size={24} className="text-purple-600" />
-          <h1 className="text-2xl font-bold text-gray-900">{isEdit ? 'Sửa AI Pilot' : 'Tạo AI Pilot'}</h1>
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={() => navigate('/campaigns')} className="p-1.5 text-gray-400 hover:text-gray-600"><ArrowLeft size={20} /></button>
+        <Target size={24} className="text-purple-600" />
+        <h1 className="text-2xl font-bold text-gray-900">{isEdit ? 'Sửa AI Pilot' : 'Tạo AI Pilot'}</h1>
+      </div>
+
+      <div className="space-y-5">
+        {/* === Section 1: Basic === */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-gray-900">1. Thông tin cơ bản</h2>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Tên chiến dịch *</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              placeholder="VD: VPS Growth Campaign"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Chủ đề / Ngành hàng *</label>
+            <input
+              type="text"
+              value={form.topic}
+              onChange={e => { setForm({ ...form, topic: e.target.value }); resetPlan() }}
+              placeholder="VD: vps hosting, openclaw"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
         </div>
 
-        <div className="space-y-5">
-          {/* 1. Basic Info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-            <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 block">Tên chiến dịch *</label>
-              <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-                placeholder="VD: VPS Growth Campaign" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 block">Chủ đề / Ngành hàng *</label>
-              <input type="text" value={form.topic} onChange={e => { setForm({ ...form, topic: e.target.value }); setAiPlan(null) }}
-                placeholder="VD: vps hosting, openclaw" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-            </div>
+        {/* === Section 2: Mission (MAIN INPUT) === */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">2. Mô tả mục tiêu *</h2>
+            <p className="text-xs text-gray-500 mt-1">AI sẽ tự lên kế hoạch dựa trên mô tả này</p>
           </div>
+          <textarea
+            value={form.mission}
+            onChange={e => { setForm({ ...form, mission: e.target.value }); resetPlan() }}
+            rows={5}
+            placeholder={'VD: Tìm 4-6 nhóm VPS mỗi ngày, tương tác tự nhiên với thành viên,\nkết bạn những người quan tâm VPS, comment hữu ích trong group'}
+            className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
 
-          {/* 2. ACTION PICKER */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <label className="text-xs font-medium text-gray-500 mb-3 block">Chọn hành động AI sẽ thực hiện *</label>
-            <div className="space-y-2">
-              {AVAILABLE_ACTIONS.map(action => {
-                const state = selectedActions[action.key]
-                return (
-                  <div key={action.key}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition-all ${
-                      state?.enabled
-                        ? 'border-blue-300 bg-blue-50/50'
-                        : 'border-gray-200 bg-gray-50/50 opacity-60'
-                    }`}
-                  >
-                    {/* Toggle */}
-                    <button
-                      onClick={() => toggleAction(action.key)}
-                      className={`w-5 h-5 rounded flex items-center justify-center shrink-0 transition-colors ${
-                        state?.enabled ? 'bg-blue-600 text-white' : 'bg-gray-200'
-                      }`}
-                    >
-                      {state?.enabled && <Check size={12} />}
-                    </button>
-
-                    {/* Icon + Label */}
-                    <span className="text-lg shrink-0">{action.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900">{action.label}</p>
-                      <p className="text-[11px] text-gray-500">{action.desc}</p>
-                    </div>
-
-                    {/* Count adjuster */}
-                    {state?.enabled && (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          onClick={() => setActionCount(action.key, (state?.count || action.defaultCount) - 1)}
-                          className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300"
-                        >
-                          <Minus size={12} />
-                        </button>
-                        <span className="w-8 text-center text-sm font-bold text-blue-700">{state?.count || action.defaultCount}</span>
-                        <button
-                          onClick={() => setActionCount(action.key, (state?.count || action.defaultCount) + 1)}
-                          className="w-6 h-6 rounded bg-gray-200 flex items-center justify-center hover:bg-gray-300"
-                        >
-                          <Plus size={12} />
-                        </button>
-                        <span className="text-[10px] text-gray-500 w-10">/ngày</span>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+        {/* === Section 3: Ads (toggle) === */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Megaphone size={16} className="text-orange-500" />
+              <h2 className="text-sm font-semibold text-gray-900">3. Quảng cáo thương hiệu</h2>
             </div>
-
-            {/* Optional note for AI */}
-            <div className="mt-3">
-              <label className="text-[11px] text-gray-500 mb-1 block">Ghi chú thêm cho AI (tùy chọn)</label>
-              <textarea
-                value={form.requirement}
-                onChange={e => { setForm({ ...form, requirement: e.target.value }); setAiPlan(null); setPlanConfirmed(false) }}
-                placeholder="VD: Tránh nhóm tiếng Anh, ưu tiên nhóm tech Việt Nam..."
-                rows={2}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
+            <button
+              type="button"
+              onClick={() => { setAdsEnabled(!adsEnabled); resetPlan() }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                adsEnabled ? 'bg-orange-500' : 'bg-gray-300'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                adsEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
           </div>
-
-          {/* 3. Accounts */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <label className="text-xs font-medium text-gray-500 mb-2 block">
-              Tài khoản thực hiện * <span className="text-gray-500">({selectedAccountIds.length} đã chọn)</span>
-            </label>
-            {accounts.length === 0 ? (
-              <p className="text-xs text-gray-500 italic">Chưa có tài khoản nào.</p>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-1.5">
-                  {accounts.map(a => {
-                    const sel = selectedAccountIds.includes(a.id)
-                    return (
-                      <button key={a.id} onClick={() => {
-                          const next = sel ? selectedAccountIds.filter(x => x !== a.id) : [...selectedAccountIds, a.id]
-                          setSelectedAccountIds(next); setAiPlan(null); setPlanConfirmed(false)
-                        }}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                          sel ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
-                        }`}>
-                        {sel && <Check size={10} />}
-                        {a.username || a.fb_user_id}
-                      </button>
-                    )
-                  })}
+          {!adsEnabled ? (
+            <p className="text-xs text-gray-500">Bật để AI có thể đề xuất sản phẩm tự nhiên trong comment khi gặp bài viết liên quan.</p>
+          ) : (
+            <div className="space-y-3 pt-2">
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Tên thương hiệu</label>
+                <input
+                  type="text"
+                  value={brand.brand_name}
+                  onChange={e => { setBrand({ ...brand, brand_name: e.target.value }); resetPlan() }}
+                  placeholder="VD: OpenClaw"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Mô tả sản phẩm</label>
+                <textarea
+                  value={brand.brand_description}
+                  onChange={e => { setBrand({ ...brand, brand_description: e.target.value }); resetPlan() }}
+                  rows={2}
+                  placeholder="VD: AI Agent giúp tự động hóa công việc, dùng được cho VPS"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Từ khóa kích hoạt</label>
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  {brand.brand_keywords.map(k => (
+                    <span key={k} className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs">
+                      {k}
+                      <button onClick={() => removeKeyword(k)} className="hover:text-orange-900"><X size={10} /></button>
+                    </span>
+                  ))}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => { setSelectedAccountIds(accounts.map(a => a.id)); setAiPlan(null) }}
-                    className="text-[10px] text-blue-600 hover:underline">Chọn tất cả</button>
-                  <button onClick={() => { setSelectedAccountIds([]); setAiPlan(null) }}
-                    className="text-[10px] text-gray-500 hover:underline">Bỏ chọn</button>
+                  <input
+                    type="text"
+                    value={keywordInput}
+                    onChange={e => setKeywordInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addKeyword() } }}
+                    placeholder="VD: cần vps, thuê hosting (Enter để thêm)"
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={addKeyword}
+                    className="px-3 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
+                  >
+                    <Plus size={14} />
+                  </button>
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* 4. Schedule */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Clock size={16} className="text-gray-400" />
-                <h3 className="text-sm font-semibold text-gray-900">Lịch chạy</h3>
-              </div>
-              <span className="text-[11px] text-gray-500">{getScheduleDesc()}</span>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {DEFAULT_PRESETS.map(p => (
-                <button key={p.key} onClick={() => selectMode(p.key)}
-                  className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                    scheduleMode === p.key ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}>
-                  <div>{p.label}</div>
-                </button>
-              ))}
-              <button onClick={() => selectMode('custom')}
-                className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                  scheduleMode === 'custom' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                }`}>Tùy chỉnh</button>
-            </div>
-            {scheduleMode === 'custom' && (
-              <div className="bg-gray-50 rounded-lg p-3 space-y-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-500 w-8">Giờ:</span>
-                  <select value={customHour} onChange={e => { const h = parseInt(e.target.value); setCustomHour(h); updateCron('custom', null, null, h, customMinute, customDays) }}
-                    className="border border-gray-300 rounded px-2 py-1 text-sm">
-                    {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, '0')}</option>)}
-                  </select>
-                  <span className="text-gray-500">:</span>
-                  <select value={customMinute} onChange={e => { const m = parseInt(e.target.value); setCustomMinute(m); updateCron('custom', null, null, customHour, m, customDays) }}
-                    className="border border-gray-300 rounded px-2 py-1 text-sm">
-                    {[0, 15, 30, 45].map(m => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 w-8">Ngày:</span>
-                  {DAY_LABELS.map(d => (
-                    <button key={d.value} onClick={() => {
-                      const next = customDays.includes(d.value) ? customDays.filter(x => x !== d.value) : [...customDays, d.value].sort()
-                      if (!next.length) return; setCustomDays(next); updateCron('custom', null, null, customHour, customMinute, next)
-                    }} className={`w-8 h-8 rounded-full text-xs font-medium transition-colors ${
-                      customDays.includes(d.value) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
-                    }`}>{d.label}</button>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-2 block">Giọng điệu</label>
+                <div className="flex gap-2">
+                  {VOICE_OPTIONS.map(v => (
+                    <label key={v.value} className={`flex-1 cursor-pointer px-3 py-2 rounded-lg border text-center text-xs transition-colors ${
+                      brand.brand_voice === v.value
+                        ? 'bg-orange-50 border-orange-300 text-orange-700 font-medium'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="voice"
+                        value={v.value}
+                        checked={brand.brand_voice === v.value}
+                        onChange={() => { setBrand({ ...brand, brand_voice: v.value }); resetPlan() }}
+                        className="hidden"
+                      />
+                      {v.label}
+                    </label>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* 5. AI Plan button */}
-          {!aiPlan && (
-            <button onClick={() => previewMut.mutate()} disabled={!canPreview || previewMut.isPending}
-              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all ${
-                canPreview ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 shadow-lg shadow-purple-200'
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              }`}>
-              {previewMut.isPending ? <><Loader2 size={16} className="animate-spin" /> AI đang phân tích...</>
-                : <><Sparkles size={16} /> AI tạo kế hoạch</>}
-            </button>
+            </div>
           )}
+        </div>
 
-          {/* 6. AI Plan preview */}
-          {aiPlan && (
-            <div className="bg-white rounded-xl border-2 border-purple-200 overflow-hidden">
-              <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center justify-between">
-                <span className="text-sm font-semibold text-purple-800 flex items-center gap-2">
-                  <Sparkles size={14} /> Kế hoạch AI
-                </span>
-                {aiPlan.estimated_duration_minutes && (
-                  <span className="text-xs text-purple-500 flex items-center gap-1">
-                    <Clock size={12} /> ~{aiPlan.estimated_duration_minutes} phút/ngày
-                  </span>
-                )}
-              </div>
-
-              {aiPlan.summary && (
-                <div className="px-5 py-3 text-sm text-gray-600 border-b border-gray-100">{aiPlan.summary}</div>
-              )}
-
-              <div className="px-5 py-3 space-y-4">
-                {(aiPlan.roles || []).map((role, ri) => {
-                  const rtCfg = ROLE_TYPE_LABELS[role.role_type] || { label: role.role_type, icon: '⚙️', color: 'bg-gray-100 text-gray-700' }
+        {/* === Section 4: Accounts === */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 className="text-sm font-semibold text-gray-900 mb-2">
+            4. Tài khoản thực hiện * <span className="text-xs text-gray-500 font-normal">({selectedAccountIds.length} đã chọn)</span>
+          </h2>
+          {accounts.length === 0 ? (
+            <p className="text-xs text-gray-500 italic">Chưa có tài khoản nào.</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                {accounts.map(a => {
+                  const sel = selectedAccountIds.includes(a.id)
                   return (
-                    <div key={ri} className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${rtCfg.color}`}>
-                          {rtCfg.icon} {rtCfg.label}
-                        </span>
-                        <span className="text-sm font-medium text-gray-900">{role.name}</span>
-                        {role.account_names && (
-                          <span className="text-xs text-gray-500">({role.account_names.join(', ')})</span>
-                        )}
-                      </div>
-                      <div className="pl-8 space-y-1.5">
-                        {(role.steps || []).map((step, si) => (
-                          <div key={si} className="flex items-start gap-2 text-xs">
-                            <span>{ACTION_ICONS[step.action] || '▶️'}</span>
-                            <span className="text-gray-700">
-                              {step.description || step.action}
-                              {step.count_max && <span className="text-gray-400 ml-1">({step.count_min}-{step.count_max}/lần)</span>}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <button key={a.id} onClick={() => {
+                      const next = sel ? selectedAccountIds.filter(x => x !== a.id) : [...selectedAccountIds, a.id]
+                      setSelectedAccountIds(next); resetPlan()
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      sel ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                    }`}>
+                      {sel && <Check size={10} />}
+                      {a.username || a.fb_user_id}
+                    </button>
                   )
                 })}
               </div>
-
-              {aiPlan.daily_budget && (
-                <div className="px-5 py-2 bg-gray-50 border-t border-gray-100">
-                  <div className="flex flex-wrap gap-3 text-xs text-gray-500">
-                    {Object.entries(aiPlan.daily_budget).map(([key, val]) => (
-                      <span key={key}><span className="font-medium text-gray-500">{key}:</span> {val}/ngày</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {aiPlan.safety_warnings?.length > 0 && (
-                <div className="px-5 py-2 bg-orange-50 border-t border-orange-100">
-                  {aiPlan.safety_warnings.map((w, i) => (
-                    <div key={i} className="flex items-center gap-1.5 text-xs text-orange-600">
-                      <AlertTriangle size={11} /> {w}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
-                <button onClick={() => { setAiPlan(null); setPlanConfirmed(false) }}
-                  className="text-xs text-gray-400 hover:text-gray-600">Tạo lại</button>
-                {planConfirmed ? (
-                  <span className="flex items-center gap-1.5 text-sm text-green-600 font-medium">
-                    <Check size={14} /> Đã xác nhận
-                  </span>
-                ) : (
-                  <button onClick={() => setPlanConfirmed(true)}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors">
-                    <Check size={14} /> Xác nhận kế hoạch
-                  </button>
-                )}
+              <div className="flex gap-2">
+                <button onClick={() => { setSelectedAccountIds(accounts.map(a => a.id)); resetPlan() }}
+                  className="text-[10px] text-blue-600 hover:underline">Chọn tất cả</button>
+                <button onClick={() => { setSelectedAccountIds([]); resetPlan() }}
+                  className="text-[10px] text-gray-500 hover:underline">Bỏ chọn</button>
               </div>
             </div>
           )}
+        </div>
 
-          {/* 7. Submit */}
-          <div className="flex justify-end gap-3 pb-8">
-            <button onClick={() => navigate('/campaigns')} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Hủy</button>
-            <button onClick={() => saveMut.mutate()} disabled={!canSubmit || saveMut.isPending}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                canSubmit ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}>
-              <Save size={16} /> {isEdit ? 'Cập nhật' : 'Tạo AI Pilot'}
-            </button>
+        {/* === Section 5: Schedule === */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock size={16} className="text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-900">5. Lịch chạy</h2>
+            </div>
+            <span className="text-[11px] text-gray-500">{getScheduleDesc()}</span>
           </div>
+          <div className="flex gap-2 flex-wrap">
+            {DEFAULT_PRESETS.map(p => (
+              <button key={p.key} onClick={() => { selectMode(p.key); resetPlan() }}
+                className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                  scheduleMode === p.key ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}>
+                <div>{p.label}</div>
+              </button>
+            ))}
+            <button onClick={() => { selectMode('custom'); resetPlan() }}
+              className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                scheduleMode === 'custom' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}>Tùy chỉnh</button>
+          </div>
+          {scheduleMode === 'custom' && (
+            <div className="bg-gray-50 rounded-lg p-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-500 w-8">Giờ:</span>
+                <select value={customHour} onChange={e => { const h = parseInt(e.target.value); setCustomHour(h); updateCron('custom', null, null, h, customMinute, customDays); resetPlan() }}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm">
+                  {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, '0')}</option>)}
+                </select>
+                <span className="text-gray-500">:</span>
+                <select value={customMinute} onChange={e => { const m = parseInt(e.target.value); setCustomMinute(m); updateCron('custom', null, null, customHour, m, customDays); resetPlan() }}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm">
+                  {[0, 15, 30, 45].map(m => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 w-8">Ngày:</span>
+                {DAY_LABELS.map(d => (
+                  <button key={d.value} onClick={() => {
+                    const next = customDays.includes(d.value) ? customDays.filter(x => x !== d.value) : [...customDays, d.value].sort()
+                    if (!next.length) return
+                    setCustomDays(next); updateCron('custom', null, null, customHour, customMinute, next); resetPlan()
+                  }} className={`w-8 h-8 rounded-full text-xs font-medium transition-colors ${
+                    customDays.includes(d.value) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+                  }`}>{d.label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* === Section 6: AI Plan output === */}
+        {!aiPlan ? (
+          <button
+            onClick={() => previewMut.mutate()}
+            disabled={!canPreview || previewMut.isPending}
+            className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all ${
+              canPreview ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 shadow-lg shadow-purple-200'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {previewMut.isPending
+              ? <><Loader2 size={16} className="animate-spin" /> AI đang phân tích...</>
+              : <><Sparkles size={16} /> AI tạo kế hoạch</>}
+          </button>
+        ) : (
+          <div className="bg-white rounded-xl border-2 border-purple-200 overflow-hidden">
+            <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center justify-between">
+              <span className="text-sm font-semibold text-purple-800 flex items-center gap-2">
+                <Sparkles size={14} /> 6. Kế hoạch AI (AI tự quyết định)
+              </span>
+              {aiPlan.estimated_duration_minutes && (
+                <span className="text-xs text-purple-500 flex items-center gap-1">
+                  <Clock size={12} /> ~{aiPlan.estimated_duration_minutes} phút/ngày
+                </span>
+              )}
+            </div>
+
+            {planSummary.length > 0 && (
+              <div className="px-5 py-4 space-y-2">
+                {planSummary.map(item => (
+                  <div key={item.key} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg">
+                    <span className="text-lg shrink-0">{item.icon}</span>
+                    <span className="text-sm font-medium text-gray-900 flex-1">{item.label}</span>
+                    <span className={`text-sm font-semibold ${item.warning ? 'text-red-600' : 'text-blue-700'}`}>
+                      {item.count} {item.unit}
+                    </span>
+                    {item.warning && (
+                      <span className="text-xs text-red-600 flex items-center gap-1">
+                        <AlertTriangle size={10} /> {item.warning}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {aiPlan.safety_warnings?.length > 0 && (
+              <div className="px-5 py-2 bg-orange-50 border-t border-orange-100">
+                {aiPlan.safety_warnings.map((w, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-xs text-orange-600">
+                    <AlertTriangle size={11} /> {w}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
+              <button
+                onClick={() => { resetPlan(); previewMut.mutate() }}
+                className="flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-800"
+              >
+                <Sparkles size={12} /> Tạo lại
+              </button>
+              {planConfirmed ? (
+                <span className="flex items-center gap-1.5 text-sm text-green-600 font-medium">
+                  <Check size={14} /> Đã xác nhận
+                </span>
+              ) : (
+                <button
+                  onClick={() => setPlanConfirmed(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                >
+                  <Check size={14} /> Xác nhận & Lưu
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* === Submit === */}
+        <div className="flex justify-end gap-3 pb-8">
+          <button onClick={() => navigate('/campaigns')} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Hủy</button>
+          <button
+            onClick={() => saveMut.mutate()}
+            disabled={!canSubmit || saveMut.isPending}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              canSubmit ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            <Save size={16} /> {isEdit ? 'Cập nhật' : 'Tạo AI Pilot'}
+          </button>
         </div>
       </div>
+    </div>
   )
 }
