@@ -77,18 +77,20 @@ module.exports = async (fastify) => {
     }
   })
 
-  // POST /ai/generate - Generic AI generation (supports service-role key for agent)
+  // POST /ai/generate - Generic AI generation (supports service-role key OR agent secret)
   fastify.post('/generate', async (req, reply) => {
     const { function_name, messages, provider, model } = req.body
     if (!messages?.length) return reply.code(400).send({ error: 'messages required' })
 
-    // Allow service-role key OR authenticated user
+    // Allow service-role key, agent secret key, OR authenticated user
     const authHeader = req.headers.authorization || ''
     const isServiceKey = authHeader.includes(process.env.SUPABASE_SERVICE_ROLE_KEY || '___none___')
-    if (!isServiceKey) {
+    const agentSecret = process.env.AGENT_SECRET_KEY || ''
+    const isAgentSecret = agentSecret && authHeader.includes(agentSecret)
+    if (!isServiceKey && !isAgentSecret) {
       try { await fastify.authenticate(req, reply) } catch { return }
     }
-    const userId = req.user?.id || req.headers['x-user-id'] || (isServiceKey ? '274868cf-742d-4d8a-89e8-bf1c37766b77' : null)
+    const userId = req.user?.id || req.headers['x-user-id'] || ((isServiceKey || isAgentSecret) ? '274868cf-742d-4d8a-89e8-bf1c37766b77' : null)
 
     try {
       const orchestrator = await getOrchestratorForUser(userId, supabase)
@@ -588,18 +590,20 @@ A colossal glass server tower floating in the sky above clouds, bathed in warm g
   }
 
   // POST /ai/comment - Generate contextual comment for campaign automation
-  // Accepts both authenticated users and service-role key (for agent)
+  // Accepts authenticated users, service-role key, OR agent secret key
   fastify.post('/comment', async (req, reply) => {
     const { post_snippet, group_name, topic, style, language, user_id } = req.body
 
-    // Allow service-role key OR authenticated user
+    // Allow service-role key, agent secret key, OR authenticated user
     const authHeader = req.headers.authorization || ''
     const isServiceKey = authHeader.includes(process.env.SUPABASE_SERVICE_ROLE_KEY || '___none___')
-    if (!isServiceKey) {
+    const agentSecret = process.env.AGENT_SECRET_KEY || ''
+    const isAgentSecret = agentSecret && authHeader.includes(agentSecret)
+    if (!isServiceKey && !isAgentSecret) {
       try { await fastify.authenticate(req, reply) } catch { return }
     }
 
-    const userId = req.user?.id || user_id || (isServiceKey ? '274868cf-742d-4d8a-89e8-bf1c37766b77' : null)
+    const userId = req.user?.id || user_id || ((isServiceKey || isAgentSecret) ? '274868cf-742d-4d8a-89e8-bf1c37766b77' : null)
     if (!userId) return reply.code(400).send({ error: 'user_id required' })
 
     const lang = language === 'en' ? 'English' : 'Vietnamese'
