@@ -170,6 +170,7 @@ async function processNurtureProfiles() {
 
         await supabase.from('jobs').insert({
           type: 'nurture_feed',
+          priority: 3, // HIGH — main work
           payload: {
             account_id: acc.id,
             nurture_profile_id: profile.id,
@@ -263,6 +264,7 @@ async function scheduleGroupMonitors() {
 
         await supabase.from('jobs').insert({
           type: 'campaign_group_monitor',
+          priority: 5, // NORMAL
           payload: {
             monitored_group_id: group.id,
             account_id: acc.id,

@@ -5,6 +5,50 @@ const { getBusyNicks } = require('../lib/nick-lock')
 const { collectPerformanceData, evaluatePostStrategy, getOptimalScheduleTime, MIN_POSTS_FOR_AI } = require('./post-strategy')
 const { remember, recall, formatMemoriesForPrompt } = require('./ai-memory')
 
+// Job priority map: lower = higher priority
+// 1=CRITICAL, 3=HIGH, 5=NORMAL (default), 7=LOW, 9=BACKGROUND
+const JOB_PRIORITY = {
+  // CRITICAL — health/safety checks
+  check_health: 1,
+  check_engagement: 1,
+
+  // HIGH — main campaign work
+  campaign_nurture: 3,
+  campaign_discover_groups: 3,
+  campaign_send_friend_request: 3,
+  campaign_interact_profile: 3,
+  campaign_scan_members: 3,
+  nurture_feed: 3,
+
+  // NORMAL — content posting + monitoring
+  campaign_post: 5,
+  post_page: 5,
+  post_group: 5,
+  post_profile: 5,
+  post_page_graph: 5,
+  campaign_group_monitor: 5,
+  campaign_opportunity_react: 5,
+
+  // LOW — utility/data fetching
+  fetch_source_cookie: 7,
+  fetch_all: 7,
+  fetch_pages: 7,
+  fetch_groups: 7,
+  resolve_group: 7,
+  scan_group_feed: 7,
+  scan_group_keyword: 7,
+  watch_my_posts: 7,
+  ai_pilot: 7,
+
+  // BACKGROUND
+  cleanup: 9,
+  memory_decay: 9,
+}
+
+function getJobPriority(jobType) {
+  return JOB_PRIORITY[jobType] || 5
+}
+
 let supabase = null
 
 function initScheduler() {
@@ -136,8 +180,10 @@ async function executeCampaign(campaign) {
       scheduledAt = new Date(baseTime + delayMinutes * 60 * 1000)
     }
 
+    const postType = `post_${target.type}`
     const { error } = await supabase.from('jobs').insert({
-      type: `post_${target.type}`,
+      type: postType,
+      priority: getJobPriority(postType),
       payload: {
         content_id: contentId,
         target_id: target.id,
@@ -397,6 +443,7 @@ async function executeRoleCampaign(campaign) {
 
       const { error } = await supabase.from('jobs').insert({
         type: jobType,
+        priority: getJobPriority(jobType),
         payload: {
           campaign_id: campaign.id,
           role_id: role.id,
@@ -889,6 +936,7 @@ async function processEngagementChecks() {
   for (const [accountId, { owner_id, posts }] of Object.entries(byAccount)) {
     const { error } = await supabase.from('jobs').insert({
       type: 'check_engagement',
+      priority: getJobPriority('check_engagement'),
       payload: {
         account_id: accountId,
         post_ids: posts,
@@ -952,6 +1000,7 @@ async function processMonitoringSources() {
         const sourceUrl = source.url || `https://www.facebook.com/${source.source_type === 'group' ? 'groups/' : ''}${source.fb_source_id}`
         await supabase.from('jobs').insert({
           type: 'fetch_source_cookie',
+          priority: getJobPriority('fetch_source_cookie'),
           payload: {
             account_id: accountId,
             source_url: sourceUrl,
