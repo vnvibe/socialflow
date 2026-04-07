@@ -411,6 +411,43 @@ module.exports = async (fastify) => {
     return data
   })
 
+  // PUT /campaigns/:id/plan — Update parsed_plan for live campaigns
+  // Used by the "Sửa kế hoạch" tab in campaign detail to apply changes mid-run
+  fastify.put('/:id/plan', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { ai_plan } = req.body
+    if (!ai_plan?.roles) return reply.code(400).send({ error: 'ai_plan.roles required' })
+
+    // Verify ownership
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    // Update campaign.ai_plan (so future runs use new plan)
+    const { error: campErr } = await supabase.from('campaigns')
+      .update({ ai_plan, ai_plan_confirmed: true })
+      .eq('id', req.params.id)
+    if (campErr) return reply.code(500).send({ error: campErr.message })
+
+    // Update parsed_plan in each campaign_role to match
+    // Match by role_type — roles in ai_plan and DB share role_type
+    const { data: dbRoles } = await supabase.from('campaign_roles')
+      .select('id, role_type')
+      .eq('campaign_id', req.params.id)
+
+    if (dbRoles) {
+      for (const planRole of ai_plan.roles) {
+        const dbRole = dbRoles.find(r => r.role_type === planRole.role_type)
+        if (dbRole) {
+          await supabase.from('campaign_roles')
+            .update({ parsed_plan: planRole.steps || [] })
+            .eq('id', dbRole.id)
+        }
+      }
+    }
+
+    return { ok: true, applied_at: new Date().toISOString() }
+  })
+
   // DELETE /campaigns/:id
   fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { error } = await supabase.from('campaigns').delete().eq('id', req.params.id).eq('owner_id', req.user.id)

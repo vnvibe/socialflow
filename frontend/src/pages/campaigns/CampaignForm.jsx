@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Target, Save, ArrowLeft, Clock, Sparkles, Check, AlertTriangle, Loader2, Megaphone, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
+import EditablePlanList, { buildPlanRows, applyRowsToPlan } from '../../components/campaigns/EditablePlanList'
 
 const randMin = () => Math.floor(Math.random() * 25) + 5
 const DEFAULT_PRESETS = [
@@ -19,22 +20,6 @@ const DAY_LABELS = [
   { value: 4, label: 'T5' }, { value: 5, label: 'T6' }, { value: 6, label: 'T7' },
   { value: 0, label: 'CN' },
 ]
-
-// Hard limits per nick per day — Warning if exceeded
-const HARD_LIMITS = { join_group: 3, comment: 15, like: 80, friend_request: 10, post: 3, opportunity_comment: 2 }
-
-// Action display config — readonly preview
-const ACTION_DISPLAY = {
-  join_group:        { icon: '🔍', label: 'Thám dò nhóm',     unit: 'nhóm/nick/ngày' },
-  scan_members:      { icon: '👥', label: 'Quét thành viên',  unit: 'lần/nick/ngày' },
-  browse:            { icon: '👀', label: 'Lướt feed',        unit: 'lần/nick/ngày' },
-  like:              { icon: '👍', label: 'Like bài',         unit: 'bài/nick/ngày' },
-  comment:           { icon: '💬', label: 'Comment',          unit: 'bài/nick/ngày' },
-  send_friend_request:{ icon: '🤝', label: 'Kết bạn',         unit: 'người/nick/ngày' },
-  friend_request:    { icon: '🤝', label: 'Kết bạn',         unit: 'người/nick/ngày' },
-  post:              { icon: '📝', label: 'Đăng bài',         unit: 'bài/nick/ngày' },
-  opportunity_comment:{ icon: '📢', label: 'Quảng cáo tự nhiên', unit: 'lần/nick/ngày' },
-}
 
 const VOICE_OPTIONS = [
   { value: 'casual',     label: 'Thân thiện' },
@@ -77,8 +62,9 @@ export default function CampaignForm() {
   const [customMinute, setCustomMinute] = useState(0)
   const [customDays, setCustomDays] = useState([1, 2, 3, 4, 5, 6, 0])
 
-  // Section 6: AI plan output
+  // Section 6: AI plan output (editable rows)
   const [aiPlan, setAiPlan] = useState(null)
+  const [planRows, setPlanRows] = useState([])
   const [planConfirmed, setPlanConfirmed] = useState(false)
 
   const { data: accounts = [] } = useQuery({
@@ -113,6 +99,10 @@ export default function CampaignForm() {
       }
       if (existing.ai_plan) {
         setAiPlan(existing.ai_plan)
+        // Use scheduleMode runs to rebuild rows (will be re-derived after cron parse below)
+        const cronParts = (existing.cron_expression || '').split(' ')
+        const runs = cronParts[1]?.split(',').length || 2
+        setPlanRows(buildPlanRows(existing.ai_plan, runs))
         setPlanConfirmed(existing.ai_plan_confirmed || false)
       }
       const cron = existing.cron_expression || '0 9 * * *'
@@ -124,7 +114,8 @@ export default function CampaignForm() {
     }
   }, [existing])
 
-  const resetPlan = () => { setAiPlan(null); setPlanConfirmed(false) }
+  const resetPlan = () => { setAiPlan(null); setPlanRows([]); setPlanConfirmed(false) }
+  const runsPerDay = (DEFAULT_PRESETS.find(p => p.key === scheduleMode)?.runs || 2)
 
   const updateCron = (mode, h1, h2, cH, cM, cDays) => {
     const preset = DEFAULT_PRESETS.find(p => p.key === mode)
@@ -168,54 +159,39 @@ export default function CampaignForm() {
     brand_voice: brand.brand_voice,
   } : null
 
-  // === Compute plan summary from AI roles for display ===
-  const planSummary = (() => {
-    if (!aiPlan?.roles) return []
-    const out = []
-    const seen = new Set()
-    for (const role of aiPlan.roles) {
-      for (const step of (role.steps || [])) {
-        const key = step.quota_key || step.action
-        if (seen.has(key)) continue
-        seen.add(key)
-        const display = ACTION_DISPLAY[key] || ACTION_DISPLAY[step.action]
-        if (!display) continue
-        const max = step.count_max || step.count_min || 1
-        const runs = (DEFAULT_PRESETS.find(p => p.key === scheduleMode)?.runs || 2)
-        const dailyMax = max * runs
-        const limit = HARD_LIMITS[key]
-        out.push({
-          key, ...display,
-          count: dailyMax,
-          warning: limit && dailyMax > limit ? `vượt giới hạn ${limit}/ngày` : null,
-        })
-      }
-    }
-    return out
-  })()
-
   // === Mutations ===
   const previewMut = useMutation({
     mutationFn: () => {
-      const preset = DEFAULT_PRESETS.find(p => p.key === scheduleMode)
       return api.post('/campaigns/preview-plan', {
         mission: form.mission,
         topic: form.topic,
         account_ids: selectedAccountIds,
-        runs_per_day: preset?.runs || 2,
+        runs_per_day: runsPerDay,
         brand_config: brandPayload,
       }).then(r => r.data)
     },
-    onSuccess: (data) => { setAiPlan(data.plan); setPlanConfirmed(false) },
+    onSuccess: (data) => {
+      setAiPlan(data.plan)
+      setPlanRows(buildPlanRows(data.plan, runsPerDay))
+      setPlanConfirmed(false)
+    },
     onError: (err) => toast.error(err.response?.data?.error || 'AI không thể tạo kế hoạch'),
   })
 
+  // When user edits plan rows after AI generates, plan needs re-confirm
+  const handleRowsChange = (newRows) => {
+    setPlanRows(newRows)
+    setPlanConfirmed(false)
+  }
+
   const saveMut = useMutation({
     mutationFn: async () => {
+      // Apply edited rows back to plan steps before saving
+      const finalPlan = aiPlan ? applyRowsToPlan(aiPlan, planRows, runsPerDay) : null
       const payload = {
         ...form,
         account_ids: selectedAccountIds,
-        ai_plan: aiPlan,
+        ai_plan: finalPlan,
         ai_plan_confirmed: planConfirmed,
         brand_config: brandPayload,
         ad_mode: brandPayload ? 'ad_enabled' : 'normal',
@@ -490,24 +466,7 @@ export default function CampaignForm() {
               )}
             </div>
 
-            {planSummary.length > 0 && (
-              <div className="px-5 py-4 space-y-2">
-                {planSummary.map(item => (
-                  <div key={item.key} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg">
-                    <span className="text-lg shrink-0">{item.icon}</span>
-                    <span className="text-sm font-medium text-gray-900 flex-1">{item.label}</span>
-                    <span className={`text-sm font-semibold ${item.warning ? 'text-red-600' : 'text-blue-700'}`}>
-                      {item.count} {item.unit}
-                    </span>
-                    {item.warning && (
-                      <span className="text-xs text-red-600 flex items-center gap-1">
-                        <AlertTriangle size={10} /> {item.warning}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            <EditablePlanList rows={planRows} onChange={handleRowsChange} />
 
             {aiPlan.safety_warnings?.length > 0 && (
               <div className="px-5 py-2 bg-orange-50 border-t border-orange-100">

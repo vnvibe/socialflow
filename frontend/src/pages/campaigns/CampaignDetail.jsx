@@ -4,7 +4,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Target, ArrowLeft, Play, Pause, Edit,
   BarChart3, Users, UsersRound, PenSquare, Eye,
-  Database, FileBarChart, Settings, Loader, Menu, X,
+  Database, FileBarChart, Settings, Loader, Menu, X, Sparkles,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
@@ -18,6 +18,7 @@ import MonitorSection from './sections/MonitorSection'
 import DataCenterSection from './sections/DataCenterSection'
 import ReportsSection from './sections/ReportsSection'
 import SettingsSection from './sections/SettingsSection'
+import PlanSection from './sections/PlanSection'
 
 const STATUS_CONFIG = {
   idle:      { label: 'Chua chay', color: 'bg-gray-100 text-gray-600' },
@@ -29,6 +30,7 @@ const STATUS_CONFIG = {
 
 const SECTIONS = [
   { key: 'overview',    label: 'Tong quan',   icon: BarChart3 },
+  { key: 'plan',        label: 'Ke hoach',    icon: Sparkles },
   { key: 'nicks',       label: 'Nhan vat',    icon: Users },
   { key: 'groups',      label: 'Nhom',        icon: UsersRound },
   { key: 'content',     label: 'Noi dung',    icon: PenSquare },
@@ -40,6 +42,7 @@ const SECTIONS = [
 
 const SECTION_COMPONENTS = {
   overview:   OverviewSection,
+  plan:       PlanSection,
   nicks:      NicksSection,
   groups:     GroupsSection,
   content:    ContentSection,
