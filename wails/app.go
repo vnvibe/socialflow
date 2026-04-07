@@ -361,6 +361,16 @@ func (a *App) StartAgent() map[string]interface{} {
 		return map[string]interface{}{"error": "Agent đang chạy"}
 	}
 
+	// Check Node.js installed
+	if err := a.ensureNodeJS(); err != nil {
+		return map[string]interface{}{"error": "Cần cài Node.js trước. Tải tại: https://nodejs.org/"}
+	}
+
+	// Auto-install node_modules nếu thiếu (lần đầu chạy)
+	if err := a.ensureNodeModules(); err != nil {
+		return map[string]interface{}{"error": fmt.Sprintf("Không cài được thư viện: %s", err)}
+	}
+
 	// Fetch config from API (SaaS model — no .env needed)
 	a.addLog("Đang lấy cấu hình từ server...", "info")
 	wailsRuntime.EventsEmit(a.ctx, "setup-progress", "Đang lấy cấu hình...")
@@ -416,6 +426,9 @@ func (a *App) StartAgent() map[string]interface{} {
 		env = append(env, fmt.Sprintf("API_BASE_URL=%s", cfg.APIURL))
 		env = append(env, fmt.Sprintf("AGENT_SECRET_KEY=%s", cfg.AgentSecretKey))
 	}
+
+	// Pass user JWT so agent can authenticate with API for AI calls
+	env = append(env, fmt.Sprintf("AGENT_USER_TOKEN=%s", a.user.Token))
 
 	a.cmd.Env = env
 
@@ -511,6 +524,56 @@ func (a *App) StopAgent() bool {
 	a.cmd = nil
 	wailsRuntime.EventsEmit(a.ctx, "status", map[string]interface{}{"running": false})
 	return true
+}
+
+func (a *App) ensureNodeJS() error {
+	cmd := exec.Command("node", "--version")
+	if err := cmd.Run(); err != nil {
+		a.addLog("Chưa cài Node.js! Tải tại: https://nodejs.org/", "error")
+		return fmt.Errorf("nodejs not installed")
+	}
+	return nil
+}
+
+func (a *App) ensureNodeModules() error {
+	appRoot := a.getAppRoot()
+	nodeModules := filepath.Join(appRoot, "node_modules")
+
+	// Check if node_modules exists and has @supabase
+	supabaseDir := filepath.Join(nodeModules, "@supabase")
+	if _, err := os.Stat(supabaseDir); err == nil {
+		return nil // already installed
+	}
+
+	a.addLog("Lần đầu chạy — đang cài thư viện (~1-2 phút)...", "warn")
+	wailsRuntime.EventsEmit(a.ctx, "setup-progress", "Đang cài thư viện npm (~1-2 phút)...")
+
+	npm := "npm"
+	if runtime.GOOS == "windows" {
+		npm = "npm.cmd"
+	}
+
+	installCmd := exec.Command(npm, "install", "--production", "--no-audit", "--no-fund")
+	installCmd.Dir = appRoot
+	hideConsole(installCmd)
+
+	output, err := installCmd.CombinedOutput()
+	wailsRuntime.EventsEmit(a.ctx, "setup-progress", nil)
+
+	if err != nil {
+		a.addLog(fmt.Sprintf("npm install thất bại: %s", err), "error")
+		if len(output) > 0 {
+			tail := string(output)
+			if len(tail) > 500 {
+				tail = tail[len(tail)-500:]
+			}
+			a.addLog(tail, "error")
+		}
+		return fmt.Errorf("npm install failed: %s", err)
+	}
+
+	a.addLog("Cài thư viện xong!", "success")
+	return nil
 }
 
 func (a *App) ensurePlaywright() {
