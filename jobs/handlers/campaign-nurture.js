@@ -12,13 +12,44 @@ const { checkHardLimit, SessionTracker, applyAgeFactor, getNickAgeDays } = requi
 const R = require('../../lib/randomizer')
 const { getActionParams } = require('../../lib/plan-executor')
 const { generateComment, generateOpportunityComment } = require('../../lib/ai-comment')
-const { evaluatePosts, qualityGateComment, generateSmartComment, evaluateLeadQuality, scanGroupPosts, getBestPosts } = require('../../lib/ai-brain')
+const { evaluatePosts, qualityGateComment, generateSmartComment, evaluateLeadQuality, scanGroupPosts, getBestPosts, detectGroupLanguage } = require('../../lib/ai-brain')
 const { getSelectors, toMobileUrl, COMMENT_INPUT_SELECTORS, COMMENT_SUBMIT_SELECTORS, COMMENT_LINK_SELECTORS } = require('../../lib/mobile-selectors')
 const { ActivityLogger } = require('../../lib/activity-logger')
 
 // Group visit rate limit — max 2 nicks per group per 30 min (module-level cache)
 const groupVisitCache = new Map() // groupFbId → [{accountId, timestamp}]
 const GROUP_VISIT_WINDOW = 30 * 60 * 1000 // 30 min
+
+// === Group performance tracking helpers ===
+async function recordGroupSkip(supabase, accountId, fbGroupId) {
+  if (!supabase || !fbGroupId) return
+  try {
+    // Increment consecutive_skips, fetch new value
+    const { data: cur } = await supabase.from('fb_groups')
+      .select('consecutive_skips')
+      .eq('account_id', accountId).eq('fb_group_id', fbGroupId).single()
+    const next = (cur?.consecutive_skips || 0) + 1
+    await supabase.from('fb_groups')
+      .update({ consecutive_skips: next })
+      .eq('account_id', accountId).eq('fb_group_id', fbGroupId)
+  } catch {}
+}
+
+async function recordGroupYield(supabase, accountId, fbGroupId, eligibleCount) {
+  if (!supabase || !fbGroupId) return
+  try {
+    const { data: cur } = await supabase.from('fb_groups')
+      .select('total_yields')
+      .eq('account_id', accountId).eq('fb_group_id', fbGroupId).single()
+    await supabase.from('fb_groups')
+      .update({
+        consecutive_skips: 0, // reset
+        last_yield_at: new Date().toISOString(),
+        total_yields: (cur?.total_yields || 0) + eligibleCount,
+      })
+      .eq('account_id', accountId).eq('fb_group_id', fbGroupId)
+  } catch {}
+}
 const GROUP_VISIT_MAX = 2
 
 function canVisitGroup(groupFbId, accountId) {
@@ -141,7 +172,7 @@ async function campaignNurture(payload, supabase) {
     // ── CHỈ dùng group ĐÃ GÁN NHÃN (tag/campaign/topic) ──
     // Group không gán nhãn = không liên quan → KHÔNG dùng, KHÔNG fallback
     const { data: labeledGroups } = await supabase.from('fb_groups')
-      .select('id, fb_group_id, name, url, member_count, topic, tags, joined_via_campaign_id, ai_relevance, user_approved')
+      .select('id, fb_group_id, name, url, member_count, topic, tags, joined_via_campaign_id, ai_relevance, user_approved, consecutive_skips, last_yield_at, total_yields, language')
       .eq('account_id', account_id)
       .or('is_blocked.is.null,is_blocked.eq.false')
       .or('user_approved.is.null,user_approved.eq.true') // Skip groups user rejected (false), keep null + true
@@ -184,9 +215,18 @@ async function campaignNurture(payload, supabase) {
       console.log(`[NURTURE] ${groups.length}/${allLabeled.length} groups gán nhãn match topic "${topic}"`)
     }
 
-    // ── XOAY VÒNG: không lặp lại cùng group liên tục ──
+    // ── SMART ROTATION: ưu tiên group có score cao + recent yield ──
+    // Score-based sort: tier1 (>=8) → tier2 (5-7) → tier3 (<5)
+    // Penalty: groups with consecutive_skips >= 2 đẩy xuống cuối
     if (groups.length > 1) {
-      // Lấy group đã visit gần nhất từ activity log
+      const topicKey = (topic || '').toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
+
+      const scoreOf = (g) => {
+        const cached = g.ai_relevance?.[topicKey]
+        return cached?.score || 5
+      }
+
+      // Get recent visits to deprioritize same-group repeats within session
       const { data: recentVisits } = await supabase
         .from('campaign_activity_log')
         .select('target_name')
@@ -195,23 +235,31 @@ async function campaignNurture(payload, supabase) {
         .eq('account_id', account_id)
         .order('created_at', { ascending: false })
         .limit(groups.length)
-
       const recentNames = (recentVisits || []).map(v => v.target_name)
 
-      // Sắp xếp: group chưa visit gần đây lên đầu
       groups.sort((a, b) => {
+        // 1. Penalize consecutive skips heavily — push to bottom
+        const skipsA = a.consecutive_skips || 0
+        const skipsB = b.consecutive_skips || 0
+        if (skipsA >= 2 && skipsB < 2) return 1
+        if (skipsB >= 2 && skipsA < 2) return -1
+
+        // 2. Sort by AI relevance score (higher first)
+        const sa = scoreOf(a)
+        const sb = scoreOf(b)
+        if (sa !== sb) return sb - sa
+
+        // 3. Tiebreaker: prefer groups not visited recently
         const aRecent = recentNames.indexOf(a.name)
         const bRecent = recentNames.indexOf(b.name)
-        // -1 = chưa visit gần đây → ưu tiên cao
         if (aRecent === -1 && bRecent !== -1) return -1
         if (bRecent === -1 && aRecent !== -1) return 1
-        // Cả hai đều visit gần đây → visit cũ hơn lên trước
-        if (aRecent !== -1 && bRecent !== -1) return bRecent - aRecent
-        // Cả hai chưa visit → shuffle random
+
+        // 4. Final tiebreaker: random
         return Math.random() - 0.5
       })
 
-      console.log(`[NURTURE] Xoay vòng: ${groups.map(g => g.name?.substring(0, 25)).join(' → ')}`)
+      console.log(`[NURTURE] Smart rotation: ${groups.slice(0, 5).map(g => `${g.name?.substring(0, 20)}(s:${scoreOf(g)},sk:${g.consecutive_skips || 0})`).join(' → ')}`)
     }
   }
 
@@ -713,6 +761,33 @@ async function campaignNurture(payload, supabase) {
             if (c.fb_post_id) commentedPostIds.add(c.fb_post_id)
           }
 
+          // === EXPAND "See more" / "Xem thêm" links to get full post content ===
+          // FB truncates long posts behind these links — click them so AI sees full context
+          try {
+            const expanded = await page.evaluate(() => {
+              const articles = document.querySelectorAll('[role="article"]')
+              let clicked = 0
+              for (const article of [...articles].slice(0, 10)) {
+                // Skip nested
+                const parent = article.parentElement?.closest('[role="article"]')
+                if (parent && parent !== article) continue
+                // Find "See more" / "Xem thêm" within article (NOT in toolbar)
+                for (const el of article.querySelectorAll('div[role="button"], span[role="button"]')) {
+                  const text = (el.innerText || '').trim().toLowerCase()
+                  if (text === 'xem thêm' || text === 'see more' || text === 'xem them') {
+                    try { el.click(); clicked++ } catch {}
+                    break
+                  }
+                }
+              }
+              return clicked
+            })
+            if (expanded > 0) {
+              console.log(`[NURTURE] Expanded ${expanded} 'See more' links`)
+              await R.sleepRange(800, 1500) // wait for content to render
+            }
+          } catch {}
+
           // Extract ALL posts with content + tag comment buttons
           const commentableInfo = await page.evaluate(() => {
             const articles = document.querySelectorAll('[role="article"]')
@@ -722,14 +797,14 @@ async function campaignNurture(payload, supabase) {
               const parent = article.parentElement?.closest('[role="article"]')
               if (parent && parent !== article) continue
 
-              // Extract post body
+              // Extract post body — allow up to 5000 chars now that "See more" is expanded
               let body = ''
               const bodyEl = article.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]')
               if (bodyEl) body = bodyEl.innerText.trim()
               if (!body || body.length < 10) {
                 for (const d of article.querySelectorAll('div[dir="auto"]')) {
                   const t = d.innerText.trim()
-                  if (t.length > body.length && t.length < 2000) body = t
+                  if (t.length > body.length && t.length < 5000) body = t
                 }
               }
               if (body.length < 10) continue
@@ -761,7 +836,8 @@ async function campaignNurture(payload, supabase) {
                 }
               }
 
-              results.push({ index: results.length, postUrl, body: body.substring(0, 400), author, isTranslated })
+              // Keep up to 1500 chars per post (was 400) — AI needs context
+              results.push({ index: results.length, postUrl, body: body.substring(0, 1500), author, isTranslated })
             }
             return results
           })
@@ -782,6 +858,32 @@ async function campaignNurture(payload, supabase) {
           })
 
           console.log(`[NURTURE] Extracted ${commentableInfo.length} posts, ${eligible.length} eligible for comment`)
+
+          // === SMART SKIP: 0 eligible posts → record skip + move to next group ===
+          if (eligible.length === 0) {
+            await recordGroupSkip(supabase, account_id, group.fb_group_id)
+            console.log(`[NURTURE] Skip "${group.name}" — 0 eligible posts (consecutive skips will increment)`)
+          } else {
+            // Has eligible posts → record yield (resets consecutive_skips)
+            await recordGroupYield(supabase, account_id, group.fb_group_id, eligible.length)
+          }
+
+          // === DETECT GROUP LANGUAGE from sample of eligible posts ===
+          // Use cached group.language if known, else detect now and persist
+          let groupLanguage = group.language || null
+          if (!groupLanguage && eligible.length >= 3) {
+            try {
+              groupLanguage = detectGroupLanguage(eligible)
+              if (groupLanguage && groupLanguage !== 'unknown') {
+                // Cache to DB for future runs
+                supabase.from('fb_groups')
+                  .update({ language: groupLanguage })
+                  .eq('account_id', account_id).eq('fb_group_id', group.fb_group_id)
+                  .then(() => {}, () => {})
+                console.log(`[NURTURE] Detected group language: ${groupLanguage} for "${group.name}"`)
+              }
+            } catch {}
+          }
 
           // === AI BRAIN: Deep evaluation of which posts are worth engaging ===
           let aiSelected = []
@@ -805,6 +907,7 @@ async function campaignNurture(payload, supabase) {
                 maxPicks: Math.min(maxComments, eligible.length),
                 ownerId: payload.owner_id,
                 brandConfig, // AI now decides ad_opportunity contextually — no keyword matching
+                groupLanguage, // language hint for AI
               })
 
               if (evaluated.length > 0) {
@@ -906,6 +1009,8 @@ async function campaignNurture(payload, supabase) {
               const commentAngle = evaluation?.comment_angle || null
               const hasAdOpportunity = evaluation?.ad_opportunity === true
               const isLeadPotential = evaluation?.lead_potential === true
+              // Per-post language: from AI eval, fall back to group language, default vi
+              const postLanguage = evaluation?.comment_language || groupLanguage || 'vi'
 
               if (hasAdOpportunity) console.log(`[NURTURE] 📢 Ad opportunity on post #${post.index} by [${post.author}]`)
               if (isLeadPotential) console.log(`[NURTURE] 🎯 Lead potential: [${post.author}]`)
@@ -940,6 +1045,7 @@ async function campaignNurture(payload, supabase) {
                     brandVoice: brandConfig.brand_voice || brandConfig.tone || 'thân thiện, tự nhiên',
                     commentAngle: evaluation?.comment_angle || '',
                     existingComments,
+                    language: postLanguage,
                     userId: payload.owner_id,
                   })
                   if (oppResult?.text && oppResult.text.length > 5) {
@@ -963,6 +1069,7 @@ async function campaignNurture(payload, supabase) {
                   topic, commentAngle,
                   ownerId: payload.owner_id,
                   adConfig, hasAdOpportunity,
+                  language: postLanguage,
                 })
               }
 
@@ -971,6 +1078,7 @@ async function campaignNurture(payload, supabase) {
                 commentResult = await generateComment({
                   postText, groupName: group.name, topic,
                   style: config?.comment_style || 'casual',
+                  language: postLanguage,
                   userId: payload.owner_id,
                   templates: config?.comment_templates,
                 })

@@ -11,6 +11,7 @@ const { checkHardLimit, applyAgeFactor, getNickAgeDays } = require('../../lib/ha
 const R = require('../../lib/randomizer')
 const { getActionParams } = require('../../lib/plan-executor')
 const { filterRelevantGroups, evaluateGroup, extractGroupInfo } = require('../../lib/ai-filter')
+const { generateMembershipAnswer } = require('../../lib/ai-brain')
 const { ActivityLogger } = require('../../lib/activity-logger')
 
 // System paths to skip (not real groups)
@@ -576,14 +577,101 @@ async function campaignDiscoverGroups(payload, supabase) {
 
         if (joinBtn) {
           await humanClick(page, joinBtn)
-          await R.sleepRange(1500, 3000)
+          await R.sleepRange(2500, 4500) // wait for any modal to render
 
-          // Answer screening questions if any
-          const submitBtn = await page.$('div[aria-label="Submit"], div[aria-label="Gửi"]')
+          // === DETECT MEMBERSHIP QUESTIONS ===
+          // FB shows a dialog with text inputs/textareas asking 1-3 questions
+          let questionsAnswered = 0
+          try {
+            const questionData = await page.evaluate(() => {
+              // Look for the membership questions dialog
+              const dialog = document.querySelector('div[role="dialog"]')
+              if (!dialog) return null
+
+              const dialogText = dialog.innerText || ''
+              const looksLikeQuestions = /câu hỏi|question|trả lời|answer|membership/i.test(dialogText)
+              if (!looksLikeQuestions) return null
+
+              // Find question text — usually in span/div above each input
+              const questions = []
+              const inputs = dialog.querySelectorAll('textarea, input[type="text"]')
+              for (const input of inputs) {
+                // Walk up to find the closest question label
+                let label = ''
+                let parent = input.parentElement
+                for (let i = 0; i < 6 && parent; i++) {
+                  const text = (parent.innerText || '').split('\n').filter(t => t.length > 5 && t.length < 300)
+                  if (text.length > 0) {
+                    // Use the first non-input text line
+                    const candidate = text.find(t => !t.includes(input.placeholder || '___NONE___'))
+                    if (candidate && candidate.length > 10) { label = candidate; break }
+                  }
+                  parent = parent.parentElement
+                }
+                if (label) {
+                  // Mark input with data attribute for later
+                  input.setAttribute('data-membership-q-idx', String(questions.length))
+                  questions.push(label.substring(0, 250).trim())
+                }
+              }
+              return { questions, dialogTextSample: dialogText.substring(0, 200) }
+            })
+
+            if (questionData?.questions?.length > 0) {
+              console.log(`[CAMPAIGN-SCOUT] 📝 Membership form detected: ${questionData.questions.length} questions`)
+
+              // Get group description for context
+              const groupDesc = await page.evaluate(() => {
+                const aboutEl = document.querySelector('[data-testid="group-about-card"]')
+                return aboutEl ? (aboutEl.innerText || '').substring(0, 300) : ''
+              }).catch(() => '')
+
+              // AI generates answers
+              const answers = await generateMembershipAnswer(
+                questionData.questions,
+                {
+                  name: group.name,
+                  topic: topic || '',
+                  description: groupDesc,
+                  language: group.language || 'vi',
+                },
+                payload.owner_id
+              )
+
+              // Fill answers into inputs
+              for (let i = 0; i < answers.length; i++) {
+                const ans = answers[i]?.answer || ''
+                if (!ans) continue
+                try {
+                  const selector = `[data-membership-q-idx="${i}"]`
+                  await page.fill(selector, ans, { timeout: 3000 })
+                  await R.sleepRange(800, 1800) // human-like typing pause
+                  questionsAnswered++
+                } catch (fillErr) {
+                  console.warn(`[CAMPAIGN-SCOUT] Could not fill answer #${i}: ${fillErr.message}`)
+                }
+              }
+
+              // Save questions to DB for future reference
+              try {
+                await supabase.from('fb_groups').update({
+                  membership_questions: questionData.questions,
+                }).eq('fb_group_id', group.fb_group_id)
+              } catch {}
+
+              console.log(`[CAMPAIGN-SCOUT] ✏️ Filled ${questionsAnswered}/${answers.length} answers`)
+              await R.sleepRange(1500, 3000)
+            }
+          } catch (qErr) {
+            console.warn(`[CAMPAIGN-SCOUT] Membership question handling failed: ${qErr.message}`)
+          }
+
+          // Submit form (works whether questions existed or not)
+          const submitBtn = await page.$('div[aria-label="Submit"], div[aria-label="Gửi"], div[role="button"]:has-text("Submit"), div[role="button"]:has-text("Gửi")')
           if (submitBtn) {
             await R.sleepRange(1000, 2000)
             await humanClick(page, submitBtn)
-            await R.sleepRange(1000, 2000)
+            await R.sleepRange(1500, 3000)
           }
 
           // Detect "pending review" state (admin approval required)
