@@ -885,18 +885,28 @@ async function campaignNurture(payload, supabase) {
             } catch {}
           }
 
-          // === LANGUAGE GATE: nick profile vs group language mismatch ===
-          // If nick is VN profile and group is EN, only do likes (no commenting)
-          // Mature nicks (60+ days) can comment in foreign language groups
+          // === LANGUAGE GATE: skip English groups entirely for VN nicks ===
+          // Per user request: nick VN không tương tác với group tiếng Anh
+          // → mark group as skipped + record skip + move on to next group
           const nickLang = account.profile_language || 'vi'
-          const langMismatch = groupLanguage === 'en' && nickLang === 'vi'
-          let allowCommentInGroup = true
-          if (langMismatch && nickAge < 60) {
-            console.log(`[NURTURE] Lang mismatch: ${nickLang} nick in ${groupLanguage} group (age ${nickAge}d) — like only, no comment`)
-            allowCommentInGroup = false
-          } else if (langMismatch) {
-            console.log(`[NURTURE] Lang mismatch but nick mature (${nickAge}d) — comment allowed in ${groupLanguage}`)
+          if (groupLanguage === 'en' && nickLang === 'vi') {
+            console.log(`[NURTURE] ⏭️ Skip "${group.name}" — group is English, nick is VN (skipping entirely)`)
+            await recordGroupSkip(supabase, account_id, group.fb_group_id)
+            // Mark in DB so smart rotation deprioritizes this group permanently for VN nicks
+            try {
+              await supabase.from('fb_groups')
+                .update({ language: 'en', user_approved: false })
+                .eq('account_id', account_id).eq('fb_group_id', group.fb_group_id)
+            } catch {}
+            logger.log('visit_group', {
+              target_type: 'group', target_name: group.name, target_url: group.url,
+              result_status: 'skipped',
+              details: { reason: 'english_group_vn_nick', group_language: groupLanguage },
+            })
+            groupResults.push(result)
+            continue // skip to next group
           }
+          const allowCommentInGroup = true
 
           // === AI BRAIN: Deep evaluation of which posts are worth engaging ===
           let aiSelected = []
