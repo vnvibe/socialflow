@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -130,14 +131,8 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 
-	// Check for updates after 5s (non-blocking)
-	go func() {
-		time.Sleep(5 * time.Second)
-		result := a.CheckUpdate()
-		if hasUpdate, ok := result["hasUpdate"].(bool); ok && hasUpdate {
-			wailsRuntime.EventsEmit(a.ctx, "update-available", result)
-		}
-	}()
+	// Start auto-updater (initial check after 60s, then every 30 min)
+	a.startAutoUpdater()
 }
 
 // ─── Credential Storage ─────────────────────────────────
@@ -614,6 +609,257 @@ func (a *App) ensurePlaywright() {
 	}
 
 	wailsRuntime.EventsEmit(a.ctx, "setup-progress", nil)
+}
+
+// ─── Auto-Update (GitHub Releases) ───────────────────────
+
+const (
+	githubReleaseAPI = "https://api.github.com/repos/vnvibe/socialflow/releases/latest"
+	updateCheckEvery = 30 * time.Minute
+)
+
+type GHReleaseAsset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"browser_download_url"`
+	Size        int64  `json:"size"`
+}
+
+type GHRelease struct {
+	TagName     string           `json:"tag_name"`
+	PublishedAt string           `json:"published_at"`
+	Assets      []GHReleaseAsset `json:"assets"`
+}
+
+func lastUpdateFile() string {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".socialflow")
+	os.MkdirAll(dir, 0700)
+	return filepath.Join(dir, "last-update")
+}
+
+func (a *App) getLastAppliedUpdate() string {
+	data, err := os.ReadFile(lastUpdateFile())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func (a *App) saveLastAppliedUpdate(tag string) {
+	os.WriteFile(lastUpdateFile(), []byte(tag), 0600)
+}
+
+func fetchLatestRelease() (*GHRelease, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, _ := http.NewRequest("GET", githubReleaseAPI, nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("github api %d", resp.StatusCode)
+	}
+	var rel GHRelease
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
+}
+
+// startAutoUpdater runs background loop checking for updates every 30 min
+func (a *App) startAutoUpdater() {
+	go func() {
+		// Initial check after 60s (let app boot first)
+		time.Sleep(60 * time.Second)
+		a.checkAndApplyUpdate(true)
+
+		ticker := time.NewTicker(updateCheckEvery)
+		defer ticker.Stop()
+		for range ticker.C {
+			a.checkAndApplyUpdate(true)
+		}
+	}()
+}
+
+// checkAndApplyUpdate checks GitHub for new release and applies it silently.
+// silent=true: don't log "no update" messages, only act on real updates.
+func (a *App) checkAndApplyUpdate(silent bool) {
+	rel, err := fetchLatestRelease()
+	if err != nil {
+		if !silent {
+			a.addLog(fmt.Sprintf("Check update lỗi: %s", err), "warn")
+		}
+		return
+	}
+
+	lastApplied := a.getLastAppliedUpdate()
+	// Use tag+publishedAt as version key (so re-uploaded zip with same tag triggers update)
+	versionKey := rel.TagName + "|" + rel.PublishedAt
+	if lastApplied == versionKey {
+		return // already on this version
+	}
+
+	// Find the agent zip asset
+	var zipAsset *GHReleaseAsset
+	for i := range rel.Assets {
+		if strings.HasSuffix(rel.Assets[i].Name, ".zip") {
+			zipAsset = &rel.Assets[i]
+			break
+		}
+	}
+	if zipAsset == nil {
+		if !silent {
+			a.addLog("Release không có file zip", "warn")
+		}
+		return
+	}
+
+	a.addLog(fmt.Sprintf("Phát hiện bản mới: %s — đang cập nhật...", rel.TagName), "info")
+	wailsRuntime.EventsEmit(a.ctx, "update-available", map[string]interface{}{
+		"tag":     rel.TagName,
+		"applying": true,
+	})
+
+	if err := a.downloadAndApplyZip(zipAsset.DownloadURL); err != nil {
+		a.addLog(fmt.Sprintf("Cập nhật thất bại: %s", err), "error")
+		return
+	}
+
+	a.saveLastAppliedUpdate(versionKey)
+	a.addLog(fmt.Sprintf("Đã cập nhật %s thành công, khởi động lại agent...", rel.TagName), "success")
+	wailsRuntime.EventsEmit(a.ctx, "update-applied", map[string]interface{}{
+		"tag": rel.TagName,
+	})
+
+	// Restart agent if it was running
+	if a.running {
+		a.addLog("Đang khởi động lại agent...", "info")
+		a.StopAgent()
+		time.Sleep(2 * time.Second)
+		a.StartAgent()
+	}
+}
+
+// downloadAndApplyZip downloads release zip and replaces agent files in-place.
+// Skips SocialFlowAgent.exe (the currently-running binary cannot be replaced).
+func (a *App) downloadAndApplyZip(url string) error {
+	// Download to temp file
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("download: %s", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("download status %d", resp.StatusCode)
+	}
+
+	tmpFile, err := os.CreateTemp("", "socialflow-update-*.zip")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("save zip: %s", err)
+	}
+	tmpFile.Close()
+
+	// Open zip
+	zr, err := zip.OpenReader(tmpPath)
+	if err != nil {
+		return fmt.Errorf("open zip: %s", err)
+	}
+	defer zr.Close()
+
+	appRoot := a.getAppRoot()
+
+	// Extract — skip the exe (locked), skip top-level dir prefix
+	for _, f := range zr.File {
+		// Strip leading "socialflow-agent/" if present
+		name := f.Name
+		if idx := strings.Index(name, "/"); idx != -1 && strings.HasPrefix(name, "socialflow-agent/") {
+			name = name[idx+1:]
+		}
+		if name == "" {
+			continue
+		}
+
+		// Skip the running exe
+		if strings.EqualFold(filepath.Base(name), "SocialFlowAgent.exe") {
+			continue
+		}
+		// Skip user files
+		if name == ".env" || name == "config.env" {
+			continue
+		}
+
+		destPath := filepath.Join(appRoot, name)
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(destPath, 0755)
+			continue
+		}
+
+		// Ensure parent dir exists
+		os.MkdirAll(filepath.Dir(destPath), 0755)
+
+		// Extract file
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("read entry %s: %s", name, err)
+		}
+
+		out, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			rc.Close()
+			return fmt.Errorf("write %s: %s", name, err)
+		}
+
+		if _, err := io.Copy(out, rc); err != nil {
+			rc.Close()
+			out.Close()
+			return fmt.Errorf("copy %s: %s", name, err)
+		}
+		rc.Close()
+		out.Close()
+	}
+
+	// Re-run npm install in case package.json changed
+	a.addLog("Cài lại thư viện sau khi update...", "info")
+	if err := a.ensureNodeModulesForce(); err != nil {
+		a.addLog(fmt.Sprintf("npm install warning: %s", err), "warn")
+	}
+
+	return nil
+}
+
+// ensureNodeModulesForce always runs npm install (after update)
+func (a *App) ensureNodeModulesForce() error {
+	appRoot := a.getAppRoot()
+	npm := "npm"
+	if runtime.GOOS == "windows" {
+		npm = "npm.cmd"
+	}
+	installCmd := exec.Command(npm, "install", "--production", "--no-audit", "--no-fund")
+	installCmd.Dir = appRoot
+	hideConsole(installCmd)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		if len(output) > 0 {
+			tail := string(output)
+			if len(tail) > 300 {
+				tail = tail[len(tail)-300:]
+			}
+			a.addLog(tail, "warn")
+		}
+		return err
+	}
+	return nil
 }
 
 // ─── Version & Update ────────────────────────────────────
