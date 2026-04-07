@@ -137,6 +137,7 @@ async function poll() {
       .select('*')
       .eq('status', 'pending')
       .lte('scheduled_at', new Date().toISOString())
+      .order('priority', { ascending: true })   // lower number = higher priority
       .order('scheduled_at', { ascending: true })
       .limit(slots)
 
@@ -542,6 +543,7 @@ async function executeJob(job) {
           if (!existing?.length) {
             await supabase.from('jobs').insert({
               type: 'check-health',
+              priority: 1, // CRITICAL
               payload: { account_id: job.payload.account_id, action: 'check-health', auto_refresh: true },
               status: 'pending',
               scheduled_at: new Date(Date.now() + 60000).toISOString(), // 1 phut sau
@@ -776,6 +778,7 @@ async function checkOpportunities() {
       // Create react job
       const { error } = await supabase.from('jobs').insert({
         type: 'campaign_opportunity_react',
+        priority: 5, // NORMAL
         payload: {
           opportunity_id: opp.id,
           account_id: reactor.id,
