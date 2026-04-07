@@ -1000,6 +1000,20 @@ async function processMonitoringSources() {
           continue
         }
 
+        // Verify the assigned account is still active — don't queue jobs for checkpoint/disabled nicks
+        const { data: acct } = await supabase.from('accounts')
+          .select('is_active, status')
+          .eq('id', accountId)
+          .single()
+        if (!acct || acct.is_active === false) {
+          console.log(`[SCHEDULER] Source ${source.name || source.fb_source_id} → account ${accountId.slice(0, 8)} inactive (status: ${acct?.status || 'missing'}) — skipping fetch`)
+          // Push next_fetch out 6h to avoid spamming logs while user fixes the nick
+          await supabase.from('monitored_sources').update({
+            next_fetch_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
+          }).eq('id', source.id)
+          continue
+        }
+
         const sourceUrl = source.url || `https://www.facebook.com/${source.source_type === 'group' ? 'groups/' : ''}${source.fb_source_id}`
         await supabase.from('jobs').insert({
           type: 'fetch_source_cookie',
