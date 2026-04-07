@@ -456,6 +456,9 @@ async function executeRoleCampaign(campaign) {
           role_type: role.role_type,
           feeds_into: role.feeds_into,
           read_from: role.read_from,
+          // Brand/ads context (new SaaS form)
+          brand_config: campaign.brand_config || null,
+          ad_mode: campaign.ad_mode || 'normal',
         },
         status: 'pending',
         scheduled_at: scheduledAt.toISOString(),

@@ -130,9 +130,10 @@ async function parseMission(mission, context, userId, supabase) {
 === QUANG CAO THUONG HIEU (DA BAT) ===
 Ten thuong hieu: ${context.brandConfig.brand_name}
 ${context.brandConfig.brand_description ? `Mo ta: ${context.brandConfig.brand_description}` : ''}
-${context.brandConfig.brand_keywords?.length ? `Tu khoa kich hoat: ${context.brandConfig.brand_keywords.join(', ')}` : ''}
+${context.brandConfig.example_comment ? `Comment mau (tham khao tone): "${context.brandConfig.example_comment}"` : ''}
 ${context.brandConfig.brand_voice ? `Giong dieu: ${context.brandConfig.brand_voice}` : ''}
-=> Khi gap bai viet co tu khoa kich hoat, AI se de xuat thuong hieu mot cach tu nhien (max 2 lan/nick/ngay).
+=> AI tu nhan biet co hoi quang cao theo NGU CANH bai viet (KHONG dung keyword matching).
+=> Khi gap bai hoi/tim/than phien ve van de thuong hieu giai quyet duoc, AI se de xuat tu nhien (max 2 lan/nick/ngay).
 => Khong can them buoc rieng — buoc comment se tu xu ly.` : ''
 
     const userPrompt = `Chu de: ${context.topic || 'general'}

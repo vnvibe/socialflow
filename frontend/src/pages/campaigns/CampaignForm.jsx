@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Target, Save, ArrowLeft, Clock, Sparkles, Check, AlertTriangle, Loader2, Megaphone, X, Plus } from 'lucide-react'
+import { Target, Save, ArrowLeft, Clock, Sparkles, Check, AlertTriangle, Loader2, Megaphone, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
@@ -57,15 +57,14 @@ export default function CampaignForm() {
     cron_expression: `${randMin()} 6,10,14,18,22 * * *`,
   })
 
-  // Section 3: Ads
+  // Section 3: Ads (AI decides opportunity contextually — no keyword matching)
   const [adsEnabled, setAdsEnabled] = useState(false)
   const [brand, setBrand] = useState({
     brand_name: '',
     brand_description: '',
-    brand_keywords: [],
+    example_comment: '',
     brand_voice: 'casual',
   })
-  const [keywordInput, setKeywordInput] = useState('')
 
   // Section 4: Accounts
   const [selectedAccountIds, setSelectedAccountIds] = useState([])
@@ -108,7 +107,7 @@ export default function CampaignForm() {
         setBrand({
           brand_name: existing.brand_config.brand_name || '',
           brand_description: existing.brand_config.brand_description || '',
-          brand_keywords: existing.brand_config.brand_keywords || [],
+          example_comment: existing.brand_config.example_comment || '',
           brand_voice: existing.brand_config.brand_voice || 'casual',
         })
       }
@@ -161,25 +160,11 @@ export default function CampaignForm() {
     return ''
   }
 
-  const addKeyword = () => {
-    const k = keywordInput.trim()
-    if (!k) return
-    if (brand.brand_keywords.includes(k)) return
-    setBrand(b => ({ ...b, brand_keywords: [...b.brand_keywords, k] }))
-    setKeywordInput('')
-    resetPlan()
-  }
-
-  const removeKeyword = (k) => {
-    setBrand(b => ({ ...b, brand_keywords: b.brand_keywords.filter(x => x !== k) }))
-    resetPlan()
-  }
-
   // Build brand_config payload (only if enabled and has name)
   const brandPayload = adsEnabled && brand.brand_name.trim() ? {
     brand_name: brand.brand_name.trim(),
     brand_description: brand.brand_description.trim(),
-    brand_keywords: brand.brand_keywords,
+    example_comment: brand.example_comment.trim(),
     brand_voice: brand.brand_voice,
   } : null
 
@@ -321,8 +306,16 @@ export default function CampaignForm() {
             <p className="text-xs text-gray-500">Bật để AI có thể đề xuất sản phẩm tự nhiên trong comment khi gặp bài viết liên quan.</p>
           ) : (
             <div className="space-y-3 pt-2">
+              <div className="flex items-start gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                <Info size={14} className="text-blue-600 mt-0.5 shrink-0" />
+                <p className="text-[11px] text-blue-700 leading-relaxed">
+                  AI tự nhận biết cơ hội dựa trên ngữ cảnh bài viết — không cần nhập từ khóa kích hoạt.
+                  Khi gặp người đang hỏi/tìm/than phiền về vấn đề thương hiệu giải quyết được, AI sẽ comment tự nhiên.
+                </p>
+              </div>
+
               <div>
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Tên thương hiệu</label>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Tên thương hiệu *</label>
                 <input
                   type="text"
                   value={brand.brand_name}
@@ -331,44 +324,30 @@ export default function CampaignForm() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                 />
               </div>
+
               <div>
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Mô tả sản phẩm</label>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Mô tả sản phẩm *</label>
                 <textarea
                   value={brand.brand_description}
                   onChange={e => { setBrand({ ...brand, brand_description: e.target.value }); resetPlan() }}
                   rows={2}
-                  placeholder="VD: AI Agent giúp tự động hóa công việc, dùng được cho VPS"
+                  placeholder="VD: AI Agent tự động hóa công việc — phù hợp cho người dùng VPS / cần host nhẹ"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                 />
               </div>
+
               <div>
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Từ khóa kích hoạt</label>
-                <div className="flex gap-2 mb-2 flex-wrap">
-                  {brand.brand_keywords.map(k => (
-                    <span key={k} className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs">
-                      {k}
-                      <button onClick={() => removeKeyword(k)} className="hover:text-orange-900"><X size={10} /></button>
-                    </span>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={keywordInput}
-                    onChange={e => setKeywordInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addKeyword() } }}
-                    placeholder="VD: cần vps, thuê hosting (Enter để thêm)"
-                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={addKeyword}
-                    className="px-3 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Comment mẫu (tham khảo tone)</label>
+                <textarea
+                  value={brand.example_comment}
+                  onChange={e => { setBrand({ ...brand, example_comment: e.target.value }); resetPlan() }}
+                  rows={2}
+                  placeholder='VD: "Mình đang dùng OpenClaw thấy ổn, giá hợp lý lại không lag"'
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">AI sẽ tham khảo tone này khi viết comment có mention thương hiệu</p>
               </div>
+
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-2 block">Giọng điệu</label>
                 <div className="flex gap-2">
