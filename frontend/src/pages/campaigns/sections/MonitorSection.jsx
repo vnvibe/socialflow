@@ -66,12 +66,21 @@ export default function MonitorSection({ campaignId, campaign }) {
   const [detailPage, setDetailPage] = useState(1)
   const [refreshing, setRefreshing] = useState(false)
 
-  // Build date range from filter
+  // Build date range from filter — anchored to VN time (UTC+7) regardless of browser TZ
+  // "today" = midnight VN today (07:00 UTC same day if VN day already started, else 17:00 UTC previous day)
+  const VN_OFFSET_MS = 7 * 60 * 60 * 1000
+  const startOfTodayVN = () => {
+    const nowMs = Date.now()
+    // Shift to "VN time as if it were UTC", floor to day, shift back
+    const vnShiftedMs = nowMs + VN_OFFSET_MS
+    const vnShifted = new Date(vnShiftedMs)
+    const vnDayStartShifted = Date.UTC(vnShifted.getUTCFullYear(), vnShifted.getUTCMonth(), vnShifted.getUTCDate())
+    return new Date(vnDayStartShifted - VN_OFFSET_MS).toISOString()
+  }
   const getDateRange = () => {
-    const now = new Date()
-    if (dateFilter === 'today') return { from: new Date(now.setHours(0,0,0,0)).toISOString() }
-    if (dateFilter === '3days') return { from: new Date(Date.now() - 3 * 86400000).toISOString() }
-    if (dateFilter === '7days') return { from: new Date(Date.now() - 7 * 86400000).toISOString() }
+    if (dateFilter === 'today')  return { from: startOfTodayVN() }
+    if (dateFilter === '3days')  return { from: new Date(Date.now() - 3 * 86400000).toISOString() }
+    if (dateFilter === '7days')  return { from: new Date(Date.now() - 7 * 86400000).toISOString() }
     if (dateFilter === '30days') return { from: new Date(Date.now() - 30 * 86400000).toISOString() }
     return {}
   }
@@ -88,7 +97,8 @@ export default function MonitorSection({ campaignId, campaign }) {
   // Detail activity log
   const dateRange = getDateRange()
   const { data: detailRes, isLoading: detailLoading, refetch: refetchDetail } = useQuery({
-    queryKey: ['campaign-detail-log', campaignId, detailPage, actionFilter, statusFilter, dateFilter],
+    // Include dateRange.from in key — refetch automatically when crossing VN midnight
+    queryKey: ['campaign-detail-log', campaignId, detailPage, actionFilter, statusFilter, dateFilter, dateRange.from || ''],
     queryFn: () => api.get(`/campaigns/${campaignId}/activity-log`, {
       params: {
         page: detailPage, limit: 30,
