@@ -83,7 +83,7 @@ export default function CampaignDetail() {
   const stopMut = useMutation({
     mutationFn: () => api.post(`/campaigns/${id}/stop`),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['campaign', id] }); toast.success('Da tam dung') },
-    onError: (err) => toast.error(err.response?.data?.error || 'Loi'),
+    onError: (err) => toast.error(err.response?.data?.error || err.message || 'Khong ket noi duoc API'),
   })
 
   if (isLoading) {
