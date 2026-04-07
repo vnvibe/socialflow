@@ -4,6 +4,24 @@ const fs = require('fs')
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
+  // GET /agent/config - Agent fetches config after login (SaaS model, no .env needed)
+  fastify.get('/config', { preHandler: fastify.authenticate }, async (req, reply) => {
+    return {
+      supabase_url: process.env.SUPABASE_URL,
+      supabase_anon_key: process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
+      api_url: process.env.RAILWAY_PUBLIC_DOMAIN
+        ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+        : `http://localhost:${process.env.PORT || 3005}`,
+      agent_secret_key: process.env.AGENT_SECRET_KEY || '',
+      user_id: req.user.id,
+      agent_settings: {
+        max_concurrent: 2,
+        poll_interval: 5000,
+        heartbeat_interval: 30000,
+      },
+    }
+  })
+
   // GET /agent/status - Check if any agent is online
   fastify.get('/status', { preHandler: fastify.authenticate }, async (req, reply) => {
     const userId = req.user.id
