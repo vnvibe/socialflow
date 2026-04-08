@@ -6,7 +6,7 @@ const { getPage, releaseSession } = require('../../browser/session-pool')
 const { delay, humanScroll, humanMouseMove, humanBrowse } = require('../../browser/human')
 const { checkAccountStatus, saveDebugScreenshot } = require('./post-utils')
 
-const API_BASE = process.env.API_URL || 'https://socialflow-production.up.railway.app'
+const API_BASE = process.env.API_URL || 'https://socialflow-production-d02c.up.railway.app'
 const AGENT_KEY = process.env.AGENT_SECRET_KEY || ''
 
 async function scanGroupFeedHandler(payload, supabase) {
@@ -103,7 +103,7 @@ async function scanGroupFeedHandler(payload, supabase) {
         // Get group name
         let groupName = null
         const { data: groupData } = await supabase.from('fb_groups').select('name')
-          .eq('fb_group_id', groupId).limit(1).single()
+          .eq('fb_group_id', groupId).eq('account_id', account_id).limit(1).single()
         groupName = groupData?.name
 
         // AI Review if topics available
@@ -210,7 +210,7 @@ async function scanGroupFeedHandler(payload, supabase) {
     if (browserPage) await saveDebugScreenshot(browserPage, `scan-feed-error-${account_id}`)
     throw err
   } finally {
-    if (browserPage) await browserPage.close().catch(() => {})
+    // Keep page on FB for session reuse
     releaseSession(account_id)
   }
 }

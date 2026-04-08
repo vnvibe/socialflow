@@ -17,11 +17,18 @@ const { checkHardLimit } = require('../../lib/hard-limits')
 const { getActionParams } = require('../../lib/plan-executor')
 const R = require('../../lib/randomizer')
 const axios = require('axios')
+const { ActivityLogger } = require('../../lib/activity-logger')
 
-const API_URL = process.env.API_URL || process.env.RAILWAY_URL || 'https://socialflow-production.up.railway.app'
+const API_URL = process.env.API_URL || process.env.RAILWAY_URL || 'https://socialflow-production-d02c.up.railway.app'
 
 async function campaignPost(payload, supabase) {
   const { account_id, campaign_id, role_id, config, topic, parsed_plan } = payload
+
+  const logger = new ActivityLogger(supabase, {
+    campaign_id, role_id, account_id,
+    job_id: payload.job_id,
+    owner_id: payload.owner_id || payload.created_by,
+  })
 
   const { data: account } = await supabase
     .from('accounts')
@@ -95,14 +102,14 @@ async function campaignPost(payload, supabase) {
   let targetFbId = null
 
   if (targetType === 'page' && targetId) {
-    const { data: page } = await supabase.from('fanpages').select('*').eq('id', targetId).single()
+    const { data: page } = await supabase.from('fanpages').select('*').eq('id', targetId).eq('account_id', account_id).single()
     if (page) {
       targetUrl = page.url || `https://www.facebook.com/${page.fb_page_id}`
       targetName = page.name
       targetFbId = page.fb_page_id
     }
   } else if (targetType === 'group' && targetId) {
-    const { data: group } = await supabase.from('fb_groups').select('*').eq('id', targetId).single()
+    const { data: group } = await supabase.from('fb_groups').select('*').eq('id', targetId).eq('account_id', account_id).single()
     if (group) {
       targetUrl = group.url || `https://www.facebook.com/groups/${group.fb_group_id}`
       targetName = group.name
@@ -185,6 +192,7 @@ async function campaignPost(payload, supabase) {
     })
 
     console.log(`[CAMPAIGN-POST] Success: ${targetType} ${targetName} — ${postUrl || 'no URL captured'}`)
+    logger.log('post', { target_type: targetType, target_id: targetFbId, target_name: targetName, target_url: postUrl, details: { caption: finalCaption.substring(0, 200), content_id: contentId } })
     return {
       success: true,
       target_type: targetType,
@@ -209,10 +217,12 @@ async function campaignPost(payload, supabase) {
       campaign_id,
     }).catch(() => {})
 
+    logger.log('post', { target_type: targetType, target_id: targetFbId, target_name: targetName, result_status: 'failed', details: { error: err.message, content_id: contentId } })
     throw err
   } finally {
-    if (page) await page.goto('about:blank', { timeout: 3000 }).catch(() => {})
-    releaseSession(account_id)
+    await logger.flush().catch(() => {})
+    if (page) // Keep page on FB for session reuse
+    await releaseSession(account_id, supabase)
   }
 }
 
