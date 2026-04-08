@@ -613,8 +613,11 @@ module.exports = async (fastify) => {
 
     if (error) return reply.code(500).send({ error: error.message })
 
-    // Update account status to show checking
-    await supabase.from('accounts').update({ status: 'checking' }).eq('id', req.params.id)
+    // Update account status to show checking — defense-in-depth: scope to owner
+    await supabase.from('accounts')
+      .update({ status: 'checking' })
+      .eq('id', req.params.id)
+      .eq('owner_id', req.user.id)
 
     return { message: 'Check queued', job_id: job.id }
   })

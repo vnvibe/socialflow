@@ -78,9 +78,13 @@ module.exports = async (fastify) => {
 
     if (!account_id) return reply.code(400).send({ error: 'account_id required' })
 
-    // Verify ownership
-    const { data: acc } = await supabase.from('accounts').select('id, owner_id').eq('id', account_id).single()
-    if (!acc) return reply.code(404).send({ error: 'Account not found' })
+    // Verify ownership — must belong to current user
+    const { data: acc } = await supabase.from('accounts')
+      .select('id, owner_id')
+      .eq('id', account_id)
+      .eq('owner_id', req.user.id)
+      .single()
+    if (!acc) return reply.code(404).send({ error: 'Account not found or no access' })
 
     // Check if profile already exists
     const { data: existing } = await supabase.from('nurture_profiles').select('id').eq('account_id', account_id).single()
