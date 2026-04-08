@@ -38,6 +38,7 @@ export default function CampaignForm() {
     name: '',
     topic: '',
     mission: '',
+    language: 'vi',
     schedule_type: 'recurring',
     cron_expression: `${randMin()} 6,10,14,18,22 * * *`,
   })
@@ -84,6 +85,7 @@ export default function CampaignForm() {
         name: existing.name || '',
         topic: existing.topic || '',
         mission: existing.mission || existing.requirement || '',
+        language: existing.language || 'vi',
         schedule_type: existing.schedule_type || 'recurring',
         cron_expression: existing.cron_expression || '0 9 * * *',
       })
@@ -241,6 +243,18 @@ export default function CampaignForm() {
               placeholder="VD: vps hosting, openclaw"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Ngôn ngữ group</label>
+            <select
+              value={form.language}
+              onChange={e => { setForm({ ...form, language: e.target.value }); resetPlan() }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="vi">Tiếng Việt</option>
+              <option value="en">Tiếng Anh</option>
+              <option value="mixed">Đa ngôn ngữ</option>
+            </select>
           </div>
         </div>
 

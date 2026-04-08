@@ -309,7 +309,7 @@ module.exports = async (fastify) => {
   // POST /campaigns
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const {
-      name, topic, requirement, mission, brand_config, ad_mode,
+      name, topic, requirement, mission, language, brand_config, ad_mode,
       account_ids, ai_plan, ai_plan_confirmed,
       target_pages, target_groups, target_profiles,
       content_ids, rotation_mode, spin_mode,
@@ -326,6 +326,7 @@ module.exports = async (fastify) => {
       topic: topic || null,
       requirement: requirement || null,
       mission: mission || null,
+      language: language || 'vi',
       brand_config: brand_config || null,
       ad_mode: ad_mode || 'normal',
       account_ids: account_ids || [],
@@ -386,7 +387,7 @@ module.exports = async (fastify) => {
   // PUT /campaigns/:id
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const allowed = [
-      'name', 'topic', 'requirement', 'mission', 'brand_config', 'ad_mode',
+      'name', 'topic', 'requirement', 'mission', 'language', 'brand_config', 'ad_mode',
       'account_ids', 'ai_plan', 'ai_plan_confirmed',
       'target_pages', 'target_groups', 'target_profiles',
       'content_ids', 'rotation_mode', 'spin_mode',
@@ -1228,6 +1229,76 @@ module.exports = async (fastify) => {
     }
 
     return { data: enriched, counts }
+  })
+
+  // ── Phase 4: GET /campaigns/:id/ad-report — Ads tab data ──
+  fastify.get('/:id/ad-report', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const campaignId = req.params.id
+    // Verify ownership
+    const { data: c } = await supabase.from('campaigns')
+      .select('id').eq('id', campaignId).eq('owner_id', req.user.id).single()
+    if (!c) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { data: posts, error } = await supabase
+      .from('shared_posts')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .eq('is_ad_opportunity', true)
+      .order('detected_at', { ascending: false })
+      .limit(200)
+    if (error) return reply.code(500).send({ error: error.message })
+
+    const all = posts || []
+    const total_opportunities = all.length
+    const total_acted = all.filter(p => (p.swarm_count || 0) > 0).length
+
+    // Group by group_fb_id → enrich with group name
+    const groupIds = [...new Set(all.map(p => p.group_fb_id).filter(Boolean))]
+    let groupNameMap = {}
+    if (groupIds.length) {
+      const { data: gs } = await supabase.from('fb_groups')
+        .select('fb_group_id, name').in('fb_group_id', groupIds)
+      groupNameMap = Object.fromEntries((gs || []).map(g => [g.fb_group_id, g.name]))
+    }
+
+    const byGroupMap = {}
+    for (const p of all) {
+      const k = p.group_fb_id || 'unknown'
+      if (!byGroupMap[k]) byGroupMap[k] = { group_fb_id: k, group_name: groupNameMap[k] || k, opportunities: 0, acted: 0 }
+      byGroupMap[k].opportunities++
+      if ((p.swarm_count || 0) > 0) byGroupMap[k].acted++
+    }
+    const by_group = Object.values(byGroupMap).sort((a, b) => b.opportunities - a.opportunities)
+
+    // Recent: only those acted upon
+    const acted = all.filter(p => (p.swarm_count || 0) > 0).slice(0, 30)
+    // Resolve account_name for first swarm account
+    const accIds = [...new Set(acted.flatMap(p => p.swarm_account_ids || []))]
+    let accMap = {}
+    if (accIds.length) {
+      const { data: accs } = await supabase.from('accounts')
+        .select('id, username').in('id', accIds)
+      accMap = Object.fromEntries((accs || []).map(a => [a.id, a.username]))
+    }
+    const recent = acted.map(p => ({
+      id: p.id,
+      post_preview: (p.post_content || '').slice(0, 200),
+      post_url: p.post_url,
+      ad_reason: p.ad_reason,
+      ai_score: p.ai_score,
+      comment_posted: (p.swarm_comments && p.swarm_comments[0]) || null,
+      nick_name: accMap[(p.swarm_account_ids || [])[0]] || null,
+      acted_at: p.detected_at,
+      group_name: groupNameMap[p.group_fb_id] || p.group_fb_id,
+    }))
+
+    return {
+      total_opportunities,
+      total_acted,
+      success_rate: total_opportunities > 0 ? Math.round((total_acted / total_opportunities) * 100) : 0,
+      by_group,
+      recent,
+    }
   })
 }
 

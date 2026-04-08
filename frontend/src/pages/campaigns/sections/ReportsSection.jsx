@@ -10,6 +10,7 @@ const REPORT_TABS = [
   { key: 'comments', label: 'Comments' },
   { key: 'likes', label: 'Likes' },
   { key: 'groups', label: 'Groups' },
+  { key: 'ads', label: 'Quang cao' },
   { key: 'errors', label: 'Errors' },
 ]
 
@@ -32,6 +33,13 @@ export default function ReportsSection({ campaignId }) {
       const params = dateFrom ? `?date_from=${dateFrom}` : ''
       return api.get(`/campaigns/${campaignId}/report${params}`).then(r => r.data)
     },
+  })
+
+  // Phase 4: Ads tab data
+  const [adGroupFilter, setAdGroupFilter] = useState('')
+  const { data: adReport } = useQuery({
+    queryKey: ['campaign-ad-report', campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/ad-report`).then(r => r.data),
   })
 
   const handleExport = async () => {
@@ -231,6 +239,78 @@ export default function ReportsSection({ campaignId }) {
               <span className="text-xs text-gray-500">{g.member_count?.toLocaleString() || '?'} members</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Ads (Phase 4) */}
+      {reportTab === 'ads' && (
+        <div className="space-y-4">
+          {/* Stats cards */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+              <p className="text-2xl font-bold text-orange-600">{adReport?.total_opportunities || 0}</p>
+              <p className="text-xs text-gray-500">Tong co hoi</p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+              <p className="text-2xl font-bold text-green-600">{adReport?.total_acted || 0}</p>
+              <p className="text-xs text-gray-500">Da tuong tac</p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+              <p className="text-2xl font-bold text-purple-600">{adReport?.success_rate || 0}%</p>
+              <p className="text-xs text-gray-500">Ti le thanh cong</p>
+            </div>
+          </div>
+
+          {/* Group filter */}
+          {adReport?.by_group?.length > 0 && (
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => setAdGroupFilter('')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${!adGroupFilter ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                Tat ca ({adReport.by_group.reduce((s, g) => s + g.opportunities, 0)})
+              </button>
+              {adReport.by_group.slice(0, 8).map(g => (
+                <button key={g.group_fb_id} onClick={() => setAdGroupFilter(g.group_fb_id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium ${adGroupFilter === g.group_fb_id ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                  {(g.group_name || '?').substring(0, 25)} ({g.acted}/{g.opportunities})
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Recent table */}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            {(!adReport?.recent || adReport.recent.length === 0) ? (
+              <div className="text-center py-12 text-gray-500 text-sm">Chua co tuong tac quang cao nao</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Group</th>
+                    <th className="text-left px-3 py-2 font-medium">Bai viet</th>
+                    <th className="text-left px-3 py-2 font-medium">Comment da post</th>
+                    <th className="text-left px-3 py-2 font-medium">Nick</th>
+                    <th className="text-left px-3 py-2 font-medium">Thoi gian</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adReport.recent
+                    .filter(r => !adGroupFilter || r.group_name === (adReport.by_group.find(g => g.group_fb_id === adGroupFilter)?.group_name))
+                    .map(r => (
+                    <tr key={r.id} className="border-t border-gray-100">
+                      <td className="px-3 py-2 text-xs text-gray-700">{(r.group_name || '?').substring(0, 30)}</td>
+                      <td className="px-3 py-2 text-xs text-gray-600 max-w-xs">
+                        <div className="truncate">{r.post_preview}</div>
+                        {r.post_url && <a href={r.post_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-[10px]">Xem</a>}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-700 max-w-xs"><div className="truncate">{r.comment_posted || '-'}</div></td>
+                      <td className="px-3 py-2 text-xs text-gray-600">{r.nick_name || '-'}</td>
+                      <td className="px-3 py-2 text-xs text-gray-500">{r.acted_at ? new Date(r.acted_at).toLocaleString('vi-VN') : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 

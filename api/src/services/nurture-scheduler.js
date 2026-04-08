@@ -317,6 +317,16 @@ function initNurtureScheduler() {
     }
   })
 
+  // Phase 5: Weekly DeepSeek strategy update (every Sunday 4am)
+  cron.schedule('0 4 * * 0', async () => {
+    try {
+      const { runWeeklyStrategy } = require('./ai-strategy')
+      await runWeeklyStrategy(supabase)
+    } catch (err) {
+      console.error('[AI-STRATEGY] Weekly strategy error:', err.message)
+    }
+  })
+
   // Daily: cleanup stale jobs (every day 0:15 VN time)
   cron.schedule('15 0 * * *', async () => {
     try {
