@@ -653,6 +653,7 @@ type GHReleaseAsset struct {
 	Name        string `json:"name"`
 	DownloadURL string `json:"browser_download_url"`
 	Size        int64  `json:"size"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 type GHRelease struct {
@@ -725,14 +726,7 @@ func (a *App) checkAndApplyUpdate(silent bool) {
 		return
 	}
 
-	lastApplied := a.getLastAppliedUpdate()
-	// Use tag+publishedAt as version key (so re-uploaded zip with same tag triggers update)
-	versionKey := rel.TagName + "|" + rel.PublishedAt
-	if lastApplied == versionKey {
-		return // already on this version
-	}
-
-	// Find the agent zip asset
+	// Find the agent zip asset FIRST so we can key on its updated_at (changes on --clobber re-upload).
 	var zipAsset *GHReleaseAsset
 	for i := range rel.Assets {
 		if strings.HasSuffix(rel.Assets[i].Name, ".zip") {
@@ -745,6 +739,19 @@ func (a *App) checkAndApplyUpdate(silent bool) {
 			a.addLog("Release không có file zip", "warn")
 		}
 		return
+	}
+
+	lastApplied := a.getLastAppliedUpdate()
+	// Key on tag + asset.updated_at (re-uploaded zip via --clobber bumps updated_at,
+	// while published_at stays the same on the GitHub release).
+	// Fallback to publishedAt if asset has no updated_at (shouldn't happen).
+	zipStamp := zipAsset.UpdatedAt
+	if zipStamp == "" {
+		zipStamp = rel.PublishedAt
+	}
+	versionKey := rel.TagName + "|" + zipStamp
+	if lastApplied == versionKey {
+		return // already on this version
 	}
 
 	a.addLog(fmt.Sprintf("Phát hiện bản mới: %s — đang cập nhật...", rel.TagName), "info")
