@@ -163,7 +163,10 @@ async function poll() {
       .limit(slots)
 
     if (AGENT_USER_ID) {
-      query = query.or(`created_by.eq.${AGENT_USER_ID},created_by.is.null`)
+      // STRICT: only pick jobs explicitly created by this user.
+      // (Previously also accepted created_by IS NULL — but that allowed
+      // legacy/system jobs to be claimed by ANY logged-in agent.)
+      query = query.eq('created_by', AGENT_USER_ID)
     } else {
       const excludedUserIds = await getExcludedUserIds()
       if (excludedUserIds.length > 0) {
