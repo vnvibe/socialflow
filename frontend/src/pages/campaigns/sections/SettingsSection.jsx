@@ -26,16 +26,20 @@ export default function SettingsSection({ campaignId, campaign }) {
   const [nickStagger, setNickStagger] = useState(campaign.nick_stagger_seconds || 60)
   const [roleStagger, setRoleStagger] = useState(campaign.role_stagger_minutes || 30)
 
-  // Advertising config — stored in first campaign_role's config.advertising
-  const firstRole = campaign.campaign_roles?.[0]
-  const existingAd = firstRole?.config?.advertising || {}
-  const [adEnabled, setAdEnabled] = useState(existingAd.enabled || false)
-  const [adBrand, setAdBrand] = useState(existingAd.brand_name || '')
-  const [adProduct, setAdProduct] = useState(existingAd.product_name || '')
-  const [adDescription, setAdDescription] = useState(existingAd.product_description || '')
-  const [adWebsite, setAdWebsite] = useState(existingAd.website || '')
-  const [adFrequency, setAdFrequency] = useState(existingAd.ad_frequency ?? 30)
-  const [adCta, setAdCta] = useState(existingAd.cta_style || 'experience')
+  // Brand/advertising — canonical source is campaigns.brand_config (new SaaS shape).
+  // Fall back to legacy campaign_roles[0].config.advertising only if brand_config is empty.
+  const legacyAd = campaign.campaign_roles?.[0]?.config?.advertising || {}
+  const initialBrand = campaign.brand_config || (legacyAd.brand_name ? {
+    brand_name: legacyAd.brand_name,
+    brand_description: legacyAd.product_description || '',
+    example_comment: '',
+    brand_voice: 'casual',
+  } : null)
+  const [adEnabled, setAdEnabled] = useState(!!initialBrand)
+  const [brandName, setBrandName] = useState(initialBrand?.brand_name || '')
+  const [brandDescription, setBrandDescription] = useState(initialBrand?.brand_description || '')
+  const [exampleComment, setExampleComment] = useState(initialBrand?.example_comment || '')
+  const [brandVoice, setBrandVoice] = useState(initialBrand?.brand_voice || 'casual')
 
   useEffect(() => {
     setName(campaign.name || '')
@@ -44,15 +48,28 @@ export default function SettingsSection({ campaignId, campaign }) {
     setCronExpr(campaign.cron_expression || '')
     setNickStagger(campaign.nick_stagger_seconds || 60)
     setRoleStagger(campaign.role_stagger_minutes || 30)
-    // Reload ad config
-    const ad = campaign.campaign_roles?.[0]?.config?.advertising || {}
-    setAdEnabled(ad.enabled || false)
-    setAdBrand(ad.brand_name || '')
-    setAdProduct(ad.product_name || '')
-    setAdDescription(ad.product_description || '')
-    setAdWebsite(ad.website || '')
-    setAdFrequency(ad.ad_frequency ?? 30)
-    setAdCta(ad.cta_style || 'experience')
+    // Reload brand_config (canonical) or fall back to legacy shape
+    const bc = campaign.brand_config
+    const legacy = campaign.campaign_roles?.[0]?.config?.advertising || {}
+    if (bc) {
+      setAdEnabled(true)
+      setBrandName(bc.brand_name || '')
+      setBrandDescription(bc.brand_description || '')
+      setExampleComment(bc.example_comment || '')
+      setBrandVoice(bc.brand_voice || 'casual')
+    } else if (legacy.brand_name) {
+      setAdEnabled(legacy.enabled || false)
+      setBrandName(legacy.brand_name || '')
+      setBrandDescription(legacy.product_description || '')
+      setExampleComment('')
+      setBrandVoice('casual')
+    } else {
+      setAdEnabled(false)
+      setBrandName('')
+      setBrandDescription('')
+      setExampleComment('')
+      setBrandVoice('casual')
+    }
   }, [campaign])
 
   const updateMut = useMutation({
@@ -73,29 +90,23 @@ export default function SettingsSection({ campaignId, campaign }) {
   })
 
   const handleSave = async () => {
-    // Save campaign settings
+    // Build brand_config payload (null when ad disabled or brand_name empty)
+    const brandPayload = adEnabled && brandName.trim() ? {
+      brand_name: brandName.trim(),
+      brand_description: brandDescription.trim(),
+      example_comment: exampleComment.trim(),
+      brand_voice: brandVoice,
+    } : null
+
+    // Save campaign settings — brand_config is persisted on the campaign row (new SaaS shape).
     updateMut.mutate({
       name, topic, requirement,
       cron_expression: cronExpr,
       nick_stagger_seconds: parseInt(nickStagger),
       role_stagger_minutes: parseInt(roleStagger),
+      brand_config: brandPayload,
+      ad_mode: brandPayload ? 'ad_enabled' : 'normal',
     })
-
-    // Save advertising config to ALL roles
-    const adConfig = {
-      enabled: adEnabled,
-      brand_name: adBrand, product_name: adProduct,
-      product_description: adDescription, website: adWebsite,
-      ad_frequency: parseInt(adFrequency), cta_style: adCta,
-    }
-    for (const role of (campaign.campaign_roles || [])) {
-      const existingConfig = role.config || {}
-      try {
-        await api.put(`/campaigns/${campaignId}/roles/${role.id}`, {
-          config: { ...existingConfig, advertising: adConfig },
-        })
-      } catch {}
-    }
   }
 
   return (
@@ -203,57 +214,50 @@ export default function SettingsSection({ campaignId, campaign }) {
 
         {adEnabled && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Thuong hieu</label>
-                <input type="text" value={adBrand} onChange={e => setAdBrand(e.target.value)}
-                  placeholder="VD: TechVPS" className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">San pham</label>
-                <input type="text" value={adProduct} onChange={e => setAdProduct(e.target.value)}
-                  placeholder="VD: VPS Cloud Hosting" className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm" />
-              </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Tên thương hiệu *</label>
+              <input type="text" value={brandName} onChange={e => setBrandName(e.target.value)}
+                placeholder="VD: OpenClaw"
+                className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm" />
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Mo ta san pham</label>
-              <textarea value={adDescription} onChange={e => setAdDescription(e.target.value)} rows={2}
-                placeholder="VD: VPS gia re, toc do cao, ho tro 24/7"
-                className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm" />
+              <label className="block text-xs text-gray-500 mb-1">Mô tả sản phẩm *</label>
+              <textarea value={brandDescription} onChange={e => setBrandDescription(e.target.value)} rows={2}
+                placeholder="VD: AI Agent tự động hóa công việc — phù hợp cho người dùng VPS / cần host nhẹ"
+                className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm resize-none" />
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Website (chi hien thi, KHONG chen vao comment)</label>
-              <input type="text" value={adWebsite} onChange={e => setAdWebsite(e.target.value)}
-                placeholder="VD: techvps.com" className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm" />
+              <label className="block text-xs text-gray-500 mb-1">Comment mẫu (tham khảo tone)</label>
+              <textarea value={exampleComment} onChange={e => setExampleComment(e.target.value)} rows={2}
+                placeholder='VD: "Mình đang dùng OpenClaw thấy ổn, giá hợp lý lại không lag"'
+                className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm resize-none" />
+              <p className="text-[10px] text-gray-400 mt-1">AI sẽ tham khảo tone này khi viết comment có mention thương hiệu</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Tan suat quang cao ({adFrequency}% comment)</label>
-                <input type="range" min="0" max="100" value={adFrequency} onChange={e => setAdFrequency(e.target.value)}
-                  className="w-full" />
-                <div className="flex justify-between text-[10px] text-gray-500">
-                  <span>0% (khong QC)</span>
-                  <span>50%</span>
-                  <span>100% (luon QC)</span>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Kieu mention</label>
-                <select value={adCta} onChange={e => setAdCta(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg bg-white text-gray-700 px-3 py-2 text-sm">
-                  <option value="question">Hoi nhe — "Ban da thu X chua?"</option>
-                  <option value="suggestion">Goi y — "Minh suggest X"</option>
-                  <option value="experience">Kinh nghiem — "Minh dang dung X"</option>
-                </select>
+            <div>
+              <label className="block text-xs text-gray-500 mb-2">Giọng điệu</label>
+              <div className="flex gap-2">
+                {[
+                  { value: 'casual', label: 'Thân thiện' },
+                  { value: 'professional', label: 'Chuyên nghiệp' },
+                  { value: 'humor', label: 'Hài hước' },
+                ].map(v => (
+                  <button key={v.value} type="button" onClick={() => setBrandVoice(v.value)}
+                    className={`flex-1 px-3 py-2 rounded-lg border text-center text-xs transition-colors ${
+                      brandVoice === v.value
+                        ? 'bg-orange-50 border-orange-300 text-orange-700 font-medium'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}>
+                    {v.label}
+                  </button>
+                ))}
               </div>
             </div>
 
             <p className="text-[11px] text-gray-500">
-              AI se tu dong quyet dinh khi nao chen quang cao nhe va khi nao chi tuong tac thuan.
-              Chi mention san pham khi bai viet DUNG chu de. Khong bao gio chen link hay so dien thoai.
+              AI tự nhận biết cơ hội dựa trên ngữ cảnh bài viết — không cần keyword. Khi gặp người hỏi/tìm/than phiền về vấn đề thương hiệu giải quyết được, AI sẽ comment tự nhiên.
             </p>
           </div>
         )}
