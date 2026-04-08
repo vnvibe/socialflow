@@ -8,6 +8,7 @@ import EditablePlanList, { buildPlanRows, applyRowsToPlan } from '../../componen
 
 const randMin = () => Math.floor(Math.random() * 25) + 5
 const DEFAULT_PRESETS = [
+  { key: '247', label: '24/7', runs: 8, buildCron: () => `${randMin()} 0,3,6,9,12,15,18,21 * * *`, descFn: () => '24/7 — mỗi 3h (0h, 3h, 6h, ..., 21h)', is247: true },
   { key: 'allday', label: '6h-23h', runs: 5, buildCron: () => `${randMin()} 6,10,14,18,22 * * *`, descFn: () => '6h, 10h, 14h, 18h, 22h (5 lần)' },
   { key: 'twice', label: '2 lần/ngày', runs: 2, defaultHours: [8, 18], buildCron: (h1, h2) => `${randMin()} ${h1},${h2} * * *`, descFn: (h1, h2) => `Lúc ${h1}h và ${h2}h` },
   { key: 'daily', label: '1 lần/ngày', runs: 1, defaultHour: 9, buildCron: (h) => `${randMin()} ${h} * * *`, descFn: (h) => `Mỗi ngày lúc ${h}h` },
@@ -198,8 +199,18 @@ export default function CampaignForm() {
         brand_config: brandPayload,
         ad_mode: brandPayload ? 'ad_enabled' : 'normal',
       }
-      if (isEdit) { await api.put(`/campaigns/${id}`, payload); return id }
-      else { const res = await api.post('/campaigns', payload); return res.data.id }
+      let cid
+      if (isEdit) { await api.put(`/campaigns/${id}`, payload); cid = id }
+      else { const res = await api.post('/campaigns', payload); cid = res.data.id }
+
+      // 24/7 mode: push active_hours_start=0, end=24 to all selected nicks.
+      // Poller's per-nick active hours check bypasses when (0, 24).
+      if (scheduleMode === '247' && selectedAccountIds.length) {
+        await Promise.all(selectedAccountIds.map(aid =>
+          api.put(`/accounts/${aid}`, { active_hours_start: 0, active_hours_end: 24 }).catch(() => {})
+        ))
+      }
+      return cid
     },
     onSuccess: (cid) => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] })

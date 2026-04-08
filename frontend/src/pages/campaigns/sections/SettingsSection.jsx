@@ -6,6 +6,7 @@ import api from '../../../lib/api'
 import { useNavigate } from 'react-router-dom'
 
 const SCHEDULE_PRESETS = [
+  { label: '24/7', cron: '0 0,3,6,9,12,15,18,21 * * *', desc: '24/7 — moi 3h, khong gioi han gio', is247: true },
   { label: '6h-23h moi ngay', cron: '0 6-23/3 * * *', desc: 'Chay moi 3h tu 6h-23h' },
   { label: '2 lan/ngay', cron: '0 9,18 * * *', desc: '9h sang + 6h chieu' },
   { label: '1 lan/ngay', cron: '0 9 * * *', desc: 'Moi ngay luc 9h' },
@@ -117,6 +118,15 @@ export default function SettingsSection({ campaignId, campaign }) {
       ad_mode: brandPayload ? 'ad_enabled' : 'normal',
       account_ids: selectedAccountIds,
     })
+
+    // 24/7 mode: push active_hours_start=0, end=24 to all selected nicks.
+    // Detect via the matching SCHEDULE_PRESETS entry's is247 flag (cronExpr exact match).
+    const matchedPreset = SCHEDULE_PRESETS.find(p => p.cron === cronExpr)
+    if (matchedPreset?.is247 && selectedAccountIds.length) {
+      await Promise.all(selectedAccountIds.map(aid =>
+        api.put(`/accounts/${aid}`, { active_hours_start: 0, active_hours_end: 24 }).catch(() => {})
+      ))
+    }
   }
 
   return (
