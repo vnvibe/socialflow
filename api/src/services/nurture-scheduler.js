@@ -327,6 +327,16 @@ function initNurtureScheduler() {
     }
   })
 
+  // Phase 11: Daily KPI rebalance (every day 00:01 VN time = 17:01 UTC)
+  cron.schedule('1 0 * * *', async () => {
+    try {
+      const { rebalanceAllActive } = require('./kpi-calculator')
+      await rebalanceAllActive(supabase)
+    } catch (err) {
+      console.error('[KPI] Daily rebalance error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // Daily: cleanup stale jobs (every day 0:15 VN time)
   cron.schedule('15 0 * * *', async () => {
     try {

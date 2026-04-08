@@ -191,6 +191,13 @@ export default function OverviewSection({ campaignId, campaign, accountIds }) {
     queryFn: () => api.get(`/campaigns/${campaignId}/report`).then(r => r.data),
   })
 
+  // Phase 11: KPI today
+  const { data: kpiToday } = useQuery({
+    queryKey: ['campaign-kpi-today', campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/kpi-today`).then(r => r.data),
+    refetchInterval: 30000,
+  })
+
   // Build nick cards from campaign roles + accounts
   const { data: accountsData } = useQuery({
     queryKey: ['campaign-accounts', campaignId],
@@ -272,6 +279,70 @@ export default function OverviewSection({ campaignId, campaign, accountIds }) {
               <Bar dataKey="jobs_failed" fill="#ef4444" radius={[4, 4, 0, 0]} name="Failed" />
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Phase 11: KPI Today */}
+      {kpiToday?.rows?.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-900">KPI hôm nay</h3>
+            <span className="text-[11px] text-gray-500">
+              Like {kpiToday.kpi_config?.daily_likes || 0} · Cmt {kpiToday.kpi_config?.daily_comments || 0} ·
+              FR {kpiToday.kpi_config?.daily_friend_requests || 0} · Join {kpiToday.kpi_config?.daily_group_joins || 0}
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-gray-500">
+                <tr className="border-b border-gray-100">
+                  <th className="text-left px-2 py-1.5 font-medium">Nick</th>
+                  <th className="text-center px-2 py-1.5 font-medium">Like</th>
+                  <th className="text-center px-2 py-1.5 font-medium">Cmt</th>
+                  <th className="text-center px-2 py-1.5 font-medium">FR</th>
+                  <th className="text-center px-2 py-1.5 font-medium">Join</th>
+                  <th className="text-left px-2 py-1.5 font-medium w-32">Tổng</th>
+                  <th className="text-center px-2 py-1.5 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kpiToday.rows.map(r => {
+                  const cell = (done, tgt) => (
+                    <span className={tgt > 0 && done >= tgt ? 'text-green-600 font-semibold' : 'text-gray-700'}>
+                      {done}/{tgt}
+                    </span>
+                  )
+                  return (
+                    <tr key={r.id} className="border-b border-gray-50">
+                      <td className="px-2 py-1.5 text-gray-900">{r.username}</td>
+                      <td className="text-center px-2 py-1.5">{cell(r.done_likes, r.target_likes)}</td>
+                      <td className="text-center px-2 py-1.5">{cell(r.done_comments, r.target_comments)}</td>
+                      <td className="text-center px-2 py-1.5">{cell(r.done_friend_requests, r.target_friend_requests)}</td>
+                      <td className="text-center px-2 py-1.5">{cell(r.done_group_joins, r.target_group_joins)}</td>
+                      <td className="px-2 py-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${r.kpi_met ? 'bg-green-500' : 'bg-blue-500'} transition-all`}
+                              style={{ width: `${Math.min(100, r.progress_pct)}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-gray-500 w-8 text-right">{r.progress_pct}%</span>
+                        </div>
+                      </td>
+                      <td className="text-center px-2 py-1.5">
+                        {r.kpi_met
+                          ? <span className="text-[10px] text-green-600 font-semibold">✓ Met</span>
+                          : r.total_done > 0
+                            ? <span className="text-[10px] text-blue-600">In progress</span>
+                            : <span className="text-[10px] text-gray-400">Chưa</span>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

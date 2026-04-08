@@ -1,4 +1,5 @@
 const { parseMission } = require('../services/campaign-planner')
+const { rebalanceKPI } = require('../services/kpi-calculator')
 
 module.exports = async (fastify) => {
   const { supabase } = fastify
@@ -393,7 +394,8 @@ module.exports = async (fastify) => {
       'content_ids', 'rotation_mode', 'spin_mode',
       'schedule_type', 'cron_expression', 'interval_minutes',
       'start_at', 'end_at', 'delay_between_targets_minutes',
-      'nick_stagger_seconds', 'role_stagger_minutes', 'campaign_active_days'
+      'nick_stagger_seconds', 'role_stagger_minutes', 'campaign_active_days',
+      'kpi_config', // Phase 11
     ]
     const updates = {}
     for (const key of allowed) {
@@ -420,6 +422,12 @@ module.exports = async (fastify) => {
       } catch (cascadeErr) {
         req.log?.warn?.(`cascade account_ids failed: ${cascadeErr.message}`)
       }
+    }
+
+    // Phase 11: rebalance KPI when nicks roster or kpi_config changes
+    if (req.body.account_ids !== undefined || req.body.kpi_config !== undefined) {
+      rebalanceKPI(supabase, req.params.id).catch(err =>
+        req.log?.warn?.(`KPI rebalance after PUT failed: ${err.message}`))
     }
 
     return data
@@ -1166,7 +1174,67 @@ module.exports = async (fastify) => {
       console.warn(`[priority-groups] junction upsert failed: ${jErr.message}`)
     }
 
+    // Phase 11: bump KPI for the new tier-A group (+10 likes / +3 comments)
+    // then rebalance shares across nicks.
+    try {
+      const { data: c } = await supabase.from('campaigns').select('kpi_config').eq('id', req.params.id).single()
+      const cur = c?.kpi_config || {}
+      const bumped = {
+        ...cur,
+        daily_likes: (cur.daily_likes || 60) + 10,
+        daily_comments: (cur.daily_comments || 15) + 3,
+      }
+      await supabase.from('campaigns').update({ kpi_config: bumped }).eq('id', req.params.id)
+      rebalanceKPI(supabase, req.params.id).catch(() => {})
+    } catch (kErr) {
+      console.warn(`[priority-groups] KPI bump failed: ${kErr.message}`)
+    }
+
     return { ok: true, fb_group_id: fbGroupId, count: data?.length || 0, groups: data }
+  })
+
+  // ── Phase 11: KPI endpoints ──────────────────────────────
+  fastify.post('/:id/rebalance-kpi', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+    const result = await rebalanceKPI(supabase, req.params.id)
+    if (!result.ok) return reply.code(500).send(result)
+    return result
+  })
+
+  fastify.get('/:id/kpi-today', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id, kpi_config').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const today = new Date().toISOString().split('T')[0]
+    const { data: rows, error } = await supabase
+      .from('nick_kpi_daily')
+      .select('*')
+      .eq('campaign_id', req.params.id)
+      .eq('date', today)
+    if (error) return reply.code(500).send({ error: error.message })
+
+    const accIds = (rows || []).map(r => r.account_id)
+    let nameMap = {}
+    if (accIds.length) {
+      const { data: accs } = await supabase.from('accounts').select('id, username').in('id', accIds)
+      nameMap = Object.fromEntries((accs || []).map(a => [a.id, a.username]))
+    }
+
+    const enriched = (rows || []).map(r => {
+      const tot = (r.target_likes || 0) + (r.target_comments || 0) + (r.target_friend_requests || 0) + (r.target_group_joins || 0)
+      const done = (r.done_likes || 0) + (r.done_comments || 0) + (r.done_friend_requests || 0) + (r.done_group_joins || 0)
+      return {
+        ...r,
+        username: nameMap[r.account_id] || r.account_id?.slice(0, 8),
+        total_target: tot,
+        total_done: done,
+        progress_pct: tot > 0 ? Math.round((done / tot) * 100) : 0,
+      }
+    })
+    return { date: today, kpi_config: campaign.kpi_config, rows: enriched }
   })
 
   // GET /campaigns/:id/priority-groups — list current tier-A groups for this campaign
