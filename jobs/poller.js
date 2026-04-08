@@ -534,6 +534,31 @@ async function executeJob(job) {
     const maxAttempts = job.max_attempts || 3
     const nextAttempt = (job.attempt || 0) + 1
 
+    // ─── BROWSER_CRASH: clear profile lock + requeue, NEVER disable account ──
+    // Browser launch failures (lock files, process kill, etc) are infrastructure
+    // problems, not account problems. Don't penalize the nick.
+    if (classified.isBrowserCrash && job.payload?.account_id) {
+      try {
+        const path = require('path')
+        const os = require('os')
+        const { clearProfileLock } = require('../browser/launcher')
+        const userDataDir = path.join(os.homedir(), '.socialflow', 'profiles', job.payload.account_id, 'browser-data')
+        clearProfileLock(userDataDir)
+      } catch (clearErr) {
+        console.warn(`[JOB] clearProfileLock failed: ${clearErr.message}`)
+      }
+      // Requeue with 60s delay — don't increment attempt counter, don't fail
+      try {
+        await supabase.from('jobs').update({
+          status: 'pending',
+          scheduled_at: new Date(Date.now() + 60000).toISOString(),
+          error_message: 'BROWSER_CRASH — auto-retry after clearing profile lock',
+        }).eq('id', job.id)
+      } catch {}
+      console.log(`[JOB] BROWSER_CRASH ${handlerKey} (${job.id}) — cleared lock, requeue in 60s (no penalty)`)
+      return // skip rest of error handling
+    }
+
     // ─── Save to job_failures table ────────────────────
     try {
       await supabase.from('job_failures').insert({
@@ -552,6 +577,55 @@ async function executeJob(job) {
       })
     } catch (insertErr) {
       console.error(`[JOB] Failed to save job_failure:`, insertErr.message)
+    }
+
+    // ─── CHECKPOINT double-check: require 2 CHECKPOINT errors in last hour ──
+    // First strike → queue health check, don't disable yet (false positives common)
+    if (classified.type === 'CHECKPOINT' && job.payload?.account_id) {
+      try {
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+        const { count: recentCheckpoints } = await supabase
+          .from('job_failures')
+          .select('id', { count: 'exact', head: true })
+          .eq('account_id', job.payload.account_id)
+          .eq('error_type', 'CHECKPOINT')
+          .gte('created_at', oneHourAgo)
+
+        if ((recentCheckpoints || 0) < 2) {
+          console.log(`[JOB] CHECKPOINT first strike for ${job.payload.account_id.slice(0, 8)} — queueing health check, NOT disabling`)
+          // Queue a health check to confirm
+          try {
+            const { data: existing } = await supabase.from('jobs')
+              .select('id')
+              .eq('type', 'check-health')
+              .eq('payload->>account_id', job.payload.account_id)
+              .in('status', ['pending', 'claimed', 'running'])
+              .limit(1)
+            if (!existing?.length) {
+              await supabase.from('jobs').insert({
+                type: 'check-health',
+                priority: 1,
+                payload: { account_id: job.payload.account_id, action: 'check-health', auto_refresh: true },
+                status: 'pending',
+                scheduled_at: new Date(Date.now() + 30000).toISOString(),
+                created_by: job.created_by,
+              })
+            }
+          } catch {}
+          // Mark job as failed (single attempt) but don't disable account
+          try {
+            await supabase.from('jobs').update({
+              status: 'failed',
+              error_message: 'CHECKPOINT first strike — health check queued',
+              finished_at: new Date(),
+            }).eq('id', job.id)
+          } catch {}
+          return // bypass disable
+        }
+        console.log(`[JOB] CHECKPOINT confirmed (${recentCheckpoints} in last hour) — disabling account`)
+      } catch (checkErr) {
+        console.warn(`[JOB] CHECKPOINT double-check failed: ${checkErr.message}`)
+      }
     }
 
     // ─── Update account status if needed ───────────────

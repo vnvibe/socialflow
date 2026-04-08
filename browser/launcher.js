@@ -5,6 +5,35 @@ const fs = require('fs')
 
 const PROFILES_DIR = path.join(os.homedir(), '.socialflow', 'profiles')
 
+/**
+ * Clear leftover profile lock files from a crashed browser session.
+ * Without this, Chromium refuses to launch with "ProcessSingleton: failed to lock"
+ * causing launchPersistentContext to throw "Target ... has been closed".
+ */
+function clearProfileLock(userDataDir) {
+  const lockFiles = [
+    path.join(userDataDir, 'SingletonLock'),
+    path.join(userDataDir, 'SingletonCookie'),
+    path.join(userDataDir, 'SingletonSocket'),
+    path.join(userDataDir, 'lockfile'),
+    path.join(userDataDir, 'Default', 'LOCK'),
+    path.join(userDataDir, 'Default', 'Cookies-journal'),
+  ]
+  let cleared = 0
+  for (const lockFile of lockFiles) {
+    try {
+      if (fs.existsSync(lockFile)) {
+        fs.unlinkSync(lockFile)
+        cleared++
+      }
+    } catch (e) { /* file in use or doesn't exist — ignore */ }
+  }
+  if (cleared > 0) {
+    console.log(`[BROWSER] Cleared ${cleared} stale lock file(s) in ${userDataDir}`)
+  }
+  return cleared
+}
+
 async function launchBrowser(account, options = {}) {
   const accountId = account.id || 'default'
   const profileDir = path.join(PROFILES_DIR, accountId)
@@ -12,6 +41,9 @@ async function launchBrowser(account, options = {}) {
   fs.mkdirSync(userDataDir, { recursive: true })
 
   const storageFile = path.join(profileDir, 'storage.json')
+
+  // Clear stale lock files from previous crashed session — must run BEFORE launch
+  clearProfileLock(userDataDir)
 
   // Clear crash flags so Chromium won't show "Restore pages?" dialog
   const prefsFile = path.join(userDataDir, 'Default', 'Preferences')
@@ -158,4 +190,4 @@ async function humanType(page, selector, text) {
   }
 }
 
-module.exports = { launchBrowser, saveAndClose, delay, humanType, getCamoufoxPath }
+module.exports = { launchBrowser, saveAndClose, delay, humanType, getCamoufoxPath, clearProfileLock }
