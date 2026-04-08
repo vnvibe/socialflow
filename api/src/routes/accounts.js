@@ -2,6 +2,17 @@ const { extractCUserId, generateFingerprint } = require('../services/facebook/fb
 const { fetchPersonalInbox, replyPersonalMessage } = require('../services/facebook/fb-inbox')
 const { getAccessibleIds, canAccess } = require('../lib/access-check')
 
+// Default daily budget for new accounts — matches HARD_LIMITS in agent
+const DEFAULT_DAILY_BUDGET = {
+  like:                { used: 0, max: 80 },
+  comment:             { used: 0, max: 15 },
+  post:                { used: 0, max: 3 },
+  join_group:          { used: 0, max: 3 },
+  friend_request:      { used: 0, max: 10 },
+  opportunity_comment: { used: 0, max: 2 },
+  scan:                { used: 0, max: 15 },
+}
+
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
@@ -124,11 +135,14 @@ module.exports = async (fastify) => {
 
   // POST /accounts - Add account (save only, no validation)
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { cookie_string, username, browser_type, proxy_id, notes, fb_created_at } = req.body
+    const { cookie_string, username, browser_type, proxy_id, notes, fb_created_at, daily_budget } = req.body
     if (!cookie_string) return reply.code(400).send({ error: 'cookie_string required' })
 
     const fbUserId = extractCUserId(cookie_string)
     const fingerprint = generateFingerprint(fbUserId)
+
+    // Merge user override (if any) with defaults — never insert empty/null budget
+    const mergedBudget = { ...DEFAULT_DAILY_BUDGET, ...(daily_budget || {}) }
 
     const { data, error } = await supabase.from('accounts').insert({
       owner_id: req.user.id,
@@ -142,7 +156,8 @@ module.exports = async (fastify) => {
       timezone: fingerprint.timezone,
       status: 'unknown',
       notes,
-      fb_created_at: fb_created_at || null
+      fb_created_at: fb_created_at || null,
+      daily_budget: mergedBudget,
     }).select().single()
 
     if (error) return reply.code(500).send({ error: error.message })
@@ -641,7 +656,8 @@ module.exports = async (fastify) => {
           user_agent: fingerprint.userAgent,
           viewport: fingerprint.viewport,
           timezone: fingerprint.timezone,
-          status: 'unknown'
+          status: 'unknown',
+          daily_budget: { ...DEFAULT_DAILY_BUDGET },
         }).select().single()
 
         results.push({ fbUserId, success: !error, id: data?.id })

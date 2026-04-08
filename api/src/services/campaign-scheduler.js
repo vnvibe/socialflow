@@ -1014,6 +1014,25 @@ async function processMonitoringSources() {
           continue
         }
 
+        // Per-source dedup: skip if there's already a pending fetch_source_cookie
+        // for this same source_id. Prevents pile-up when previous run hasn't finished.
+        const { count: pendingForSource } = await supabase
+          .from('jobs')
+          .select('id', { count: 'exact', head: true })
+          .eq('type', 'fetch_source_cookie')
+          .eq('status', 'pending')
+          .eq('payload->>source_id', source.id)
+
+        if ((pendingForSource || 0) > 0) {
+          console.log(`[SCHEDULER] Source ${source.name || source.fb_source_id} already has ${pendingForSource} pending job(s) — skipping create`)
+          // Push next_fetch out by interval so we don't loop on the same source
+          const intervalMs = (source.fetch_interval_minutes || 60) * 60 * 1000
+          await supabase.from('monitored_sources').update({
+            next_fetch_at: new Date(Date.now() + intervalMs).toISOString(),
+          }).eq('id', source.id)
+          continue
+        }
+
         const sourceUrl = source.url || `https://www.facebook.com/${source.source_type === 'group' ? 'groups/' : ''}${source.fb_source_id}`
         await supabase.from('jobs').insert({
           type: 'fetch_source_cookie',
