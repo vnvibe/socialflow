@@ -10,6 +10,36 @@ const TYPE_BADGE = {
   secret: 'bg-red-100 text-red-700',
 }
 
+// Phase 9 UI helpers
+const TIER_CONFIG = {
+  A: { label: 'A', badge: 'bg-green-100 text-green-700 border-green-200', dot: 'bg-green-500', bar: 'bg-green-500' },
+  B: { label: 'B', badge: 'bg-blue-100 text-blue-700 border-blue-200', dot: 'bg-blue-500', bar: 'bg-blue-500' },
+  C: { label: 'C', badge: 'bg-yellow-100 text-yellow-800 border-yellow-200', dot: 'bg-yellow-500', bar: 'bg-yellow-500' },
+  D: { label: 'D', badge: 'bg-red-100 text-red-700 border-red-200', dot: 'bg-red-500', bar: 'bg-red-500' },
+}
+
+const LANG_CONFIG = {
+  vi: { flag: '🇻🇳', label: 'VI' },
+  en: { flag: '🇺🇸', label: 'EN' },
+  mixed: { flag: '🌐', label: 'Mixed' },
+}
+
+function timeAgo(iso) {
+  if (!iso) return null
+  const diff = Date.now() - new Date(iso).getTime()
+  if (diff < 0) return 'vừa xong'
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return 'vừa xong'
+  if (m < 60) return `${m} phút trước`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} giờ trước`
+  const d = Math.floor(h / 24)
+  if (d === 1) return 'hôm qua'
+  if (d < 30) return `${d} ngày trước`
+  const mo = Math.floor(d / 30)
+  return `${mo} tháng trước`
+}
+
 export default function GroupsSection({ campaignId, campaign, accountIds }) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
@@ -17,6 +47,8 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
   const [addInput, setAddInput] = useState('')
   const [showAll, setShowAll] = useState(false)
   const [tagFilter, setTagFilter] = useState('')
+  // Phase 9: tier filter tabs (all | A | B | C | D | pending | removed)
+  const [tierFilter, setTierFilter] = useState('all')
 
   const topicKey = (campaign?.topic || '').toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
 
@@ -119,11 +151,34 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
   const campaignGroupIds = new Set(campaignGroups.map(g => g.id))
   const allTags = [...new Set(groups.flatMap(g => g.tags || []).filter(Boolean))]
 
+  // Phase 9: resolve effective tier (junction > fb_groups)
+  const effectiveTier = (g) => g.junction_tier || g.score_tier || null
+
   const filtered = groups.filter(g => {
     if (search && !(g.name || '').toLowerCase().includes(search.toLowerCase()) && !(g.fb_group_id || '').includes(search)) return false
     if (tagFilter && !(g.tags || []).includes(tagFilter)) return false
+    if (tierFilter !== 'all') {
+      if (tierFilter === 'pending') {
+        if (!(g.pending_approval === true)) return false
+      } else if (tierFilter === 'removed') {
+        if (g.junction_status !== 'removed') return false
+      } else {
+        // A/B/C/D
+        if (effectiveTier(g) !== tierFilter) return false
+      }
+    }
     return true
   })
+
+  const tierCounts = {
+    all: groups.length,
+    A: groups.filter(g => effectiveTier(g) === 'A').length,
+    B: groups.filter(g => effectiveTier(g) === 'B').length,
+    C: groups.filter(g => effectiveTier(g) === 'C').length,
+    D: groups.filter(g => effectiveTier(g) === 'D').length,
+    pending: groups.filter(g => g.pending_approval === true).length,
+    removed: groups.filter(g => g.junction_status === 'removed').length,
+  }
 
   return (
     <div className="space-y-4">
@@ -266,6 +321,40 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
         </div>
       )}
 
+      {/* Phase 9: Tier filter tabs */}
+      <div className="flex flex-wrap gap-1.5">
+        {[
+          { key: 'all', label: 'Tất cả' },
+          { key: 'A', label: 'Tier A', tier: 'A' },
+          { key: 'B', label: 'Tier B', tier: 'B' },
+          { key: 'C', label: 'Tier C', tier: 'C' },
+          { key: 'D', label: 'Tier D', tier: 'D' },
+          { key: 'pending', label: 'Pending' },
+          { key: 'removed', label: 'Removed' },
+        ].map(t => {
+          const active = tierFilter === t.key
+          const count = tierCounts[t.key] || 0
+          const tierCfg = t.tier ? TIER_CONFIG[t.tier] : null
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTierFilter(t.key)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                active
+                  ? 'bg-purple-600 text-white border-purple-600'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {tierCfg && <span className={`w-2 h-2 rounded-full ${tierCfg.dot}`} />}
+              {t.label}
+              <span className={`px-1.5 py-0 rounded-full text-[10px] font-semibold ${
+                active ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'
+              }`}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* Search */}
       <div className="relative">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -274,15 +363,20 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
           className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" />
       </div>
 
-      {/* Table */}
+      {/* Table — Phase 9 responsive */}
+      {/* Grid templates:
+            sm  (default):  name | tier | score | review               → 4 cols
+            md  (≥768):     + nick                                      → 5 cols
+            lg  (≥1024):    + last_nurtured + language                  → 7 cols
+      */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="grid grid-cols-[1fr_80px_50px_70px_150px_80px_60px] gap-2 px-4 py-2.5 bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        <div className="grid grid-cols-[1fr_60px_70px_60px] md:grid-cols-[1fr_60px_70px_120px_60px] lg:grid-cols-[1fr_60px_80px_120px_110px_60px_60px] gap-2 px-4 py-2.5 bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase tracking-wider">
           <div>Tên nhóm</div>
-          <div>AI Score</div>
-          <div>Risk</div>
-          <div>Loại</div>
-          <div>AI Nhận xét</div>
-          <div>Tags</div>
+          <div>Tier</div>
+          <div>Score</div>
+          <div className="hidden md:block">Nick</div>
+          <div className="hidden lg:block">Last nurtured</div>
+          <div className="hidden lg:block">Lang</div>
           <div>Review</div>
         </div>
 
@@ -297,84 +391,120 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
         ) : (
           filtered.slice(0, 100).map(g => {
             const aiEval = g.ai_relevance?.[topicKey]
-            const score = aiEval?.score
-            const tier = aiEval?.tier || (score >= 8 ? 'tier1_potential' : score >= 5 ? 'tier2_prospect' : score !== undefined ? 'tier3_irrelevant' : null)
-            const tierConfig = {
-              tier1_potential: { label: 'Tiem nang', color: 'bg-green-100 text-green-700' },
-              tier2_prospect: { label: 'Trien vong', color: 'bg-blue-100 text-blue-700' },
-              tier3_irrelevant: { label: 'Khong PH', color: 'bg-gray-100 text-gray-500' },
-            }
-            const tierCfg = tierConfig[tier] || null
-            const inCampaign = campaignGroupIds.has(g.id)
+            const tier = effectiveTier(g)
+            const tierCfg = tier ? TIER_CONFIG[tier] : null
+            const score = g.junction_score ?? g.global_score ?? g.ai_join_score ?? aiEval?.score ?? null
+            const scorePct = score != null ? Math.max(0, Math.min(100, (Number(score) || 0) * 10)) : 0
+            const langCfg = g.language ? LANG_CONFIG[g.language] : null
 
             const isBlacklisted = g.skip_until && new Date(g.skip_until) > new Date()
-            const riskLevel = g.ai_risk_level
-            const RISK_BADGE = {
-              low: 'bg-green-100 text-green-700',
-              medium: 'bg-yellow-100 text-yellow-700',
-              high: 'bg-red-100 text-red-700',
-            }
+            const isRemoved = g.junction_status === 'removed'
+            const isDimmed = g.user_approved === false || isBlacklisted || tier === 'D' || isRemoved
 
             return (
-              <div key={g.id} className={`grid grid-cols-[1fr_80px_50px_70px_150px_80px_60px] gap-2 px-4 py-2.5 border-b border-gray-100 hover:bg-gray-50 transition-colors items-center text-sm ${
-                g.user_approved === false ? 'opacity-40' : isBlacklisted ? 'opacity-50 bg-red-50/30' : ''
-              }`}>
+              <div
+                key={g.id}
+                className={`grid grid-cols-[1fr_60px_70px_60px] md:grid-cols-[1fr_60px_70px_120px_60px] lg:grid-cols-[1fr_60px_80px_120px_110px_60px_60px] gap-2 px-4 py-2.5 border-b border-gray-100 hover:bg-gray-50 transition-colors items-center text-sm ${
+                  isDimmed ? 'opacity-50' : ''
+                } ${isBlacklisted ? 'bg-red-50/30' : ''}`}
+                title={aiEval?.reason || g.ai_note || ''}
+              >
+                {/* Tên nhóm */}
                 <div className="min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{g.name || g.fb_group_id}</p>
-                  <div className="flex items-center gap-2">
-                    {g.account_username && <span className="text-[10px] text-gray-400">{g.account_username}</span>}
+                  <p className="font-medium text-gray-900 truncate">
+                    {g.url ? (
+                      <a href={g.url} target="_blank" rel="noopener noreferrer" className="hover:text-purple-700">
+                        {g.name || g.fb_group_id}
+                      </a>
+                    ) : (g.name || g.fb_group_id)}
+                  </p>
+                  <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] text-gray-400">{g.member_count?.toLocaleString() || '?'} members</span>
+                    {g.group_type && (
+                      <span className={`px-1.5 py-0 rounded text-[9px] font-medium ${TYPE_BADGE[g.group_type] || 'bg-gray-100 text-gray-500'}`}>
+                        {g.group_type}
+                      </span>
+                    )}
                     {isBlacklisted && (
-                      <span className="text-[9px] text-red-500 font-medium">Blacklist đến {new Date(g.skip_until).toLocaleDateString('vi-VN')}</span>
+                      <span className="text-[9px] text-red-500 font-medium">Blacklist</span>
+                    )}
+                    {g.pending_approval && (
+                      <span className="text-[9px] text-amber-600 font-medium">Pending</span>
                     )}
                   </div>
                 </div>
-                <div className="text-xs" title={aiEval?.reason || ''}>
-                  {isBlacklisted ? (
-                    <span className="text-[10px] text-red-400 font-medium">Chặn</span>
-                  ) : tierCfg ? (
-                    <div className="flex flex-col gap-0.5">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${tierCfg.color}`}>{tierCfg.label}</span>
-                      <span className="text-gray-500 text-[10px]">{g.ai_join_score || score}/10</span>
-                    </div>
-                  ) : '--'}
-                </div>
+
+                {/* Tier badge */}
                 <div>
-                  {riskLevel ? (
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${RISK_BADGE[riskLevel] || 'bg-gray-100 text-gray-500'}`}>
-                      {riskLevel === 'low' ? 'Thấp' : riskLevel === 'medium' ? 'TB' : riskLevel === 'high' ? 'Cao' : riskLevel}
+                  {tierCfg ? (
+                    <span className={`inline-flex items-center justify-center w-7 h-6 rounded border text-[11px] font-bold ${tierCfg.badge}`}>
+                      {tierCfg.label}
                     </span>
-                  ) : <span className="text-[10px] text-gray-300">--</span>}
-                </div>
-                <div>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${TYPE_BADGE[g.group_type] || 'bg-gray-100 text-gray-500'}`}>
-                    {g.group_type || '?'}
-                  </span>
-                </div>
-                <div className="text-[11px] text-gray-600 leading-tight">
-                  {g.ai_note || aiEval?.note || aiEval?.reason || <span className="text-gray-300">Chua danh gia</span>}
-                  {aiEval?.sample_topics?.length > 0 && (
-                    <div className="flex gap-1 mt-0.5 flex-wrap">
-                      {aiEval.sample_topics.slice(0, 3).map((t, i) => (
-                        <span key={i} className="text-[9px] bg-gray-100 text-gray-500 px-1 rounded">{t}</span>
-                      ))}
-                    </div>
+                  ) : (
+                    <span className="text-[10px] text-gray-300">--</span>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-0.5">
-                  {(g.tags || []).slice(0, 2).map(tag => (
-                    <button key={tag} onClick={() => setTagFilter(tag)}
-                      className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-600 hover:bg-purple-100 cursor-pointer">
-                      #{tag}
-                    </button>
-                  ))}
-                  {!g.tags?.length && <span className="text-[10px] text-gray-300">--</span>}
+
+                {/* Score + bar */}
+                <div>
+                  {score != null ? (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[11px] text-gray-700 font-medium">{Number(score).toFixed(1)}/10</span>
+                      <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${tierCfg?.bar || 'bg-gray-300'} transition-all`}
+                          style={{ width: `${scorePct}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-gray-300">--</span>
+                  )}
                 </div>
+
+                {/* Nick phụ trách — md+ */}
+                <div className="hidden md:flex items-center gap-1.5 min-w-0">
+                  {g.account_username ? (
+                    <>
+                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                        {g.account_username.substring(0, 2).toUpperCase()}
+                      </div>
+                      <span className="text-[11px] text-gray-700 truncate">{g.account_username}</span>
+                    </>
+                  ) : (
+                    <span className="text-[10px] text-gray-300">--</span>
+                  )}
+                </div>
+
+                {/* Last nurtured — lg+ */}
+                <div className="hidden lg:block">
+                  {g.last_nurtured_at ? (
+                    <span className="text-[11px] text-gray-600" title={new Date(g.last_nurtured_at).toLocaleString('vi-VN')}>
+                      {timeAgo(g.last_nurtured_at)}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-gray-400 italic">Chưa tương tác</span>
+                  )}
+                </div>
+
+                {/* Language — lg+ */}
+                <div className="hidden lg:flex items-center gap-1">
+                  {langCfg ? (
+                    <>
+                      <span className="text-sm leading-none">{langCfg.flag}</span>
+                      <span className="text-[10px] text-gray-500">{langCfg.label}</span>
+                    </>
+                  ) : (
+                    <span className="text-[10px] text-gray-300">--</span>
+                  )}
+                </div>
+
+                {/* Review */}
                 <div className="flex items-center gap-1">
                   {g.user_approved === true ? (
-                    <span className="text-[10px] text-green-600 font-medium">Duyet</span>
+                    <CheckCircle size={14} className="text-green-600" />
                   ) : g.user_approved === false ? (
-                    <span className="text-[10px] text-red-500 font-medium">Tu choi</span>
+                    <XCircle size={14} className="text-red-500" />
                   ) : (
                     <>
                       <button
