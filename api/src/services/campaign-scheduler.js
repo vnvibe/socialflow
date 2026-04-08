@@ -78,7 +78,210 @@ function initScheduler() {
     }
   })
 
-  console.log('[SCHEDULER] Campaign + Role + Engagement + Monitoring scheduler started')
+  // ── Phase 7: scout runs on its own 4-hour cadence, independent of the
+  // campaign cron (which drives nurture/connect). Scout is short (2-3 min)
+  // and should keep the group pool fresh without waiting for browser lock
+  // collisions with nurture.
+  // Offset to :11 so we don't pile on the top-of-hour fleet-wide.
+  cron.schedule('11 */4 * * *', async () => {
+    try { await processScoutCron() }
+    catch (err) { console.error('[SCOUT-CRON] error:', err.message) }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
+  // ── Phase 7: re-verify membership for groups still pending admin approval.
+  // Every 2 hours (offset :23) — queue check_group_membership jobs.
+  cron.schedule('23 */2 * * *', async () => {
+    try { await processMembershipChecks() }
+    catch (err) { console.error('[MEMBERSHIP-CHECK] error:', err.message) }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
+  console.log('[SCHEDULER] Campaign + Role + Engagement + Monitoring + Scout + Membership scheduler started')
+}
+
+// ─── Phase 7: Scout cron (independent of campaign cron) ──────────────────
+async function processScoutCron() {
+  const { data: campaigns } = await supabase
+    .from('campaigns')
+    .select('id, name, topic, owner_id, brand_config, ad_mode, campaign_active_days, campaign_roles(id, role_type, is_active, account_ids, mission, parsed_plan, config, feeds_into, read_from, meta)')
+    .eq('is_active', true)
+    .or('status.eq.running,status.eq.active,status.is.null')
+    .limit(200)
+
+  if (!campaigns?.length) return
+
+  // Reuse busy-nick + online-agent gating from the main scheduler
+  let busyNickSet = new Set()
+  try { busyNickSet = new Set(await getBusyNicks(supabase)) } catch {}
+
+  const { data: agents } = await supabase.from('agent_heartbeats').select('agent_id')
+    .gte('last_seen', new Date(Date.now() - 120000).toISOString()).limit(1)
+  if (!agents?.length) {
+    console.log(`[SCOUT-CRON] No agent online — deferring`)
+    return
+  }
+
+  let totalCreated = 0
+  for (const campaign of campaigns) {
+    try {
+      // Day-of-week gate (same rule as campaign cron)
+      const today = new Date().getDay()
+      const activeDays = campaign.campaign_active_days || [1, 2, 3, 4, 5, 6, 0]
+      if (!activeDays.includes(today)) continue
+
+      const scoutRoles = (campaign.campaign_roles || []).filter(r => r.role_type === 'scout' && r.is_active)
+      if (!scoutRoles.length) continue
+
+      for (const role of scoutRoles) {
+        const created = await createScoutJob(campaign, role, busyNickSet)
+        if (created) totalCreated++
+      }
+    } catch (err) {
+      console.warn(`[SCOUT-CRON] campaign ${campaign.id} failed: ${err.message}`)
+    }
+  }
+  if (totalCreated > 0) {
+    console.log(`[SCOUT-CRON] Queued ${totalCreated} scout jobs across ${campaigns.length} campaigns`)
+  }
+}
+
+async function createScoutJob(campaign, role, busyNickSet = new Set()) {
+  // Dedup: skip if a scout job for this campaign is already queued/running
+  const { count } = await supabase.from('jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('type', 'campaign_discover_groups')
+    .in('status', ['pending', 'claimed', 'running'])
+    .filter('payload->>campaign_id', 'eq', campaign.id)
+  if ((count || 0) > 0) {
+    console.log(`[SCOUT-CRON] ${campaign.name || campaign.id}: scout job already queued, skip`)
+    return false
+  }
+
+  // Pick eligible nick (not busy, has join_group budget left)
+  const accountIds = (role.account_ids || []).filter(id => !busyNickSet.has(id))
+  if (!accountIds.length) {
+    console.log(`[SCOUT-CRON] ${campaign.name || campaign.id}: no available nick for scout`)
+    return false
+  }
+
+  // Budget check: find a nick with remaining join_group budget
+  let pickedAccountId = null
+  const { data: accounts } = await supabase
+    .from('accounts')
+    .select('id, daily_budget, is_active, status')
+    .in('id', accountIds)
+    .eq('is_active', true)
+    .eq('status', 'healthy')
+
+  // Round-robin offset saved on role.meta
+  const rrState = role.meta?.scout_rr_index || 0
+  const activeAccts = (accounts || []).filter(a => {
+    const b = a.daily_budget?.join_group
+    if (!b) return true // no budget = assume unlimited
+    return (b.used || 0) < (b.max || 3)
+  })
+  if (!activeAccts.length) {
+    console.log(`[SCOUT-CRON] ${campaign.name || campaign.id}: all nicks out of join_group budget`)
+    return false
+  }
+  const pick = activeAccts[rrState % activeAccts.length]
+  pickedAccountId = pick.id
+
+  // Advance round-robin
+  try {
+    await supabase.from('campaign_roles')
+      .update({ meta: { ...(role.meta || {}), scout_rr_index: (rrState + 1) % activeAccts.length } })
+      .eq('id', role.id)
+  } catch {}
+
+  // Brand keywords (Phase 6 Fix 3 — still wired here so scout cron matches main scheduler)
+  const brandKeywords = []
+  if (campaign.brand_config) {
+    if (campaign.brand_config.brand_name) brandKeywords.push(campaign.brand_config.brand_name)
+    if (Array.isArray(campaign.brand_config.brand_keywords)) {
+      brandKeywords.push(...campaign.brand_config.brand_keywords)
+    }
+  }
+  const scoutKeywords = brandKeywords.length
+    ? [...new Set([...(campaign.topic ? [campaign.topic] : []), ...brandKeywords])]
+    : null
+
+  const { error } = await supabase.from('jobs').insert({
+    type: 'campaign_discover_groups',
+    priority: getJobPriority('campaign_discover_groups'),
+    payload: {
+      campaign_id: campaign.id,
+      role_id: role.id,
+      account_id: pickedAccountId,
+      owner_id: campaign.owner_id,
+      mission: role.mission,
+      parsed_plan: role.parsed_plan,
+      config: role.config,
+      topic: campaign.topic,
+      role_type: 'scout',
+      feeds_into: role.feeds_into,
+      read_from: role.read_from,
+      brand_config: campaign.brand_config || null,
+      brand_keywords: scoutKeywords,
+      ad_mode: campaign.ad_mode || 'normal',
+    },
+    status: 'pending',
+    scheduled_at: new Date().toISOString(),
+    created_by: campaign.owner_id,
+  })
+
+  if (error) {
+    console.warn(`[SCOUT-CRON] insert failed for ${campaign.name || campaign.id}: ${error.message}`)
+    return false
+  }
+  console.log(`[SCOUT-CRON] ✓ ${campaign.name || campaign.id} → nick ${pickedAccountId.slice(0, 8)}`)
+  return true
+}
+
+// ─── Phase 7: Membership re-check cron ───────────────────────────────────
+async function processMembershipChecks() {
+  // Groups still pending admin approval. joined_at IS NULL means we never
+  // confirmed admission. Limit per-run to avoid flooding the job queue.
+  const { data: pendingGroups } = await supabase
+    .from('fb_groups')
+    .select('id, fb_group_id, url, account_id, name, joined_via_campaign_id')
+    .eq('pending_approval', true)
+    .is('joined_at', null)
+    .limit(50)
+
+  if (!pendingGroups?.length) return
+
+  // Skip groups that already have a pending membership check queued
+  const ids = pendingGroups.map(g => g.id)
+  const { data: existingChecks } = await supabase
+    .from('jobs')
+    .select('id, payload')
+    .eq('type', 'check_group_membership')
+    .in('status', ['pending', 'claimed', 'running'])
+    .limit(100)
+  const queued = new Set((existingChecks || []).map(j => j.payload?.fb_group_id).filter(Boolean))
+
+  let created = 0
+  // Stagger: each check gets a 30-180s jitter so nicks don't hammer FB at once
+  for (const g of pendingGroups) {
+    if (queued.has(g.fb_group_id)) continue
+    const delayMs = 30 * 1000 + Math.random() * 150 * 1000
+    const { error } = await supabase.from('jobs').insert({
+      type: 'check_group_membership',
+      priority: 5,
+      payload: {
+        fb_group_id: g.fb_group_id,
+        group_row_id: g.id,
+        group_url: g.url || `https://www.facebook.com/groups/${g.fb_group_id}`,
+        group_name: g.name,
+        account_id: g.account_id,
+        campaign_id: g.joined_via_campaign_id || null,
+      },
+      status: 'pending',
+      scheduled_at: new Date(Date.now() + delayMs).toISOString(),
+    })
+    if (!error) created++
+  }
+  if (created > 0) console.log(`[MEMBERSHIP-CHECK] Queued ${created} checks (${pendingGroups.length - created} skipped as dup)`)
 }
 
 async function processPendingCampaigns() {
@@ -271,8 +474,10 @@ async function processRoleCampaigns() {
 }
 
 async function executeRoleCampaign(campaign) {
+  // Phase 7: scout runs on its own 4-hour cron (processScoutCron) — skip it here
+  // so nurture/connect don't get delayed by scout acquiring the browser lock.
   const roles = (campaign.campaign_roles || [])
-    .filter(r => r.is_active)
+    .filter(r => r.is_active && r.role_type !== 'scout')
     .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
 
   if (roles.length === 0) {
