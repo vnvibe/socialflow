@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Save, Trash2, Clock, Calendar, Megaphone } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Settings, Save, Trash2, Clock, Calendar, Megaphone, Users, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../../lib/api'
 import { useNavigate } from 'react-router-dom'
@@ -25,6 +25,13 @@ export default function SettingsSection({ campaignId, campaign }) {
   const [cronExpr, setCronExpr] = useState(campaign.cron_expression || '')
   const [nickStagger, setNickStagger] = useState(campaign.nick_stagger_seconds || 60)
   const [roleStagger, setRoleStagger] = useState(campaign.role_stagger_minutes || 30)
+  const [selectedAccountIds, setSelectedAccountIds] = useState(campaign.account_ids || [])
+
+  // Fetch all accounts for picker
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: () => api.get('/accounts').then(r => r.data),
+  })
 
   // Brand/advertising — canonical source is campaigns.brand_config (new SaaS shape).
   // Fall back to legacy campaign_roles[0].config.advertising only if brand_config is empty.
@@ -48,6 +55,7 @@ export default function SettingsSection({ campaignId, campaign }) {
     setCronExpr(campaign.cron_expression || '')
     setNickStagger(campaign.nick_stagger_seconds || 60)
     setRoleStagger(campaign.role_stagger_minutes || 30)
+    setSelectedAccountIds(campaign.account_ids || [])
     // Reload brand_config (canonical) or fall back to legacy shape
     const bc = campaign.brand_config
     const legacy = campaign.campaign_roles?.[0]?.config?.advertising || {}
@@ -99,6 +107,7 @@ export default function SettingsSection({ campaignId, campaign }) {
     } : null
 
     // Save campaign settings — brand_config is persisted on the campaign row (new SaaS shape).
+    // account_ids cascades to campaign_roles on the server side.
     updateMut.mutate({
       name, topic, requirement,
       cron_expression: cronExpr,
@@ -106,6 +115,7 @@ export default function SettingsSection({ campaignId, campaign }) {
       role_stagger_minutes: parseInt(roleStagger),
       brand_config: brandPayload,
       ad_mode: brandPayload ? 'ad_enabled' : 'normal',
+      account_ids: selectedAccountIds,
     })
   }
 
@@ -196,6 +206,51 @@ export default function SettingsSection({ campaignId, campaign }) {
             />
           </div>
         </div>
+      </div>
+
+      {/* Accounts picker */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <h3 className="text-sm font-semibold text-gray-600 flex items-center gap-2">
+          <Users size={16} /> Tài khoản thực hiện
+          <span className="text-xs font-normal text-gray-500">({selectedAccountIds.length} đã chọn)</span>
+        </h3>
+        {accounts.length === 0 ? (
+          <p className="text-xs text-gray-500 italic">Chưa có tài khoản nào.</p>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              {accounts.map(a => {
+                const sel = selectedAccountIds.includes(a.id)
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedAccountIds(sel
+                        ? selectedAccountIds.filter(x => x !== a.id)
+                        : [...selectedAccountIds, a.id])
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      sel ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                    }`}
+                  >
+                    {sel && <Check size={10} />}
+                    {a.username || a.fb_user_id}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setSelectedAccountIds(accounts.map(a => a.id))}
+                className="text-[10px] text-blue-600 hover:underline">Chọn tất cả</button>
+              <button type="button" onClick={() => setSelectedAccountIds([])}
+                className="text-[10px] text-gray-500 hover:underline">Bỏ chọn</button>
+            </div>
+            <p className="text-[10px] text-gray-500 italic">
+              Thêm/bớt nick sẽ áp dụng cho tất cả roles của campaign và có hiệu lực ở lần chạy tiếp theo.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Soft Advertising */}

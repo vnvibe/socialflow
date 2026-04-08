@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { UsersRound, Plus, Trash2, Search, RefreshCw, Star, Loader, PlusCircle, MinusCircle, CheckCircle, XCircle } from 'lucide-react'
+import { UsersRound, Plus, Trash2, Search, RefreshCw, Star, Loader, PlusCircle, MinusCircle, CheckCircle, XCircle, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../../lib/api'
 
@@ -72,6 +72,39 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
     onError: (err) => toast.error(err.response?.data?.error || err.message),
   })
 
+  // ── Priority groups (tier A) ──
+  const [priorityInput, setPriorityInput] = useState('')
+  const { data: priorityGroups = [], isLoading: priorityLoading } = useQuery({
+    queryKey: ['priority-groups', campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/priority-groups`).then(r => r.data || []),
+  })
+
+  const addPriorityMut = useMutation({
+    mutationFn: (input) => {
+      const body = input.trim().includes('facebook.com')
+        ? { group_url: input.trim() }
+        : { fb_group_id: input.trim() }
+      return api.post(`/campaigns/${campaignId}/priority-groups`, body).then(r => r.data)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['priority-groups', campaignId] })
+      queryClient.invalidateQueries({ queryKey: ['campaign-groups', campaignId] })
+      toast.success('Đã thêm nhóm ưu tiên (tier A)')
+      setPriorityInput('')
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Lỗi'),
+  })
+
+  const removePriorityMut = useMutation({
+    mutationFn: (fbGroupId) => api.delete(`/campaigns/${campaignId}/priority-groups/${fbGroupId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['priority-groups', campaignId] })
+      queryClient.invalidateQueries({ queryKey: ['campaign-groups', campaignId] })
+      toast.success('Đã hạ ưu tiên')
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Lỗi'),
+  })
+
   const reviewMut = useMutation({
     mutationFn: ({ groupId, approved }) => api.put(`/campaigns/${campaignId}/groups/${groupId}/review`, { approved }),
     onSuccess: (_, { approved }) => {
@@ -125,6 +158,65 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
             <Plus size={14} /> Them nhom
           </button>
         </div>
+      </div>
+
+      {/* Priority Groups (tier A) */}
+      <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-amber-900 flex items-center gap-2">
+            <Star size={14} className="text-amber-500 fill-amber-400" /> Nhóm ưu tiên
+            <span className="text-xs font-normal text-amber-700">({priorityGroups.length})</span>
+          </h3>
+        </div>
+        <p className="text-[11px] text-amber-800/70">
+          Group ưu tiên sẽ được mark là tier A — nick sẽ tương tác trước những nhóm này. Dán URL group hoặc nhập fb_group_id.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={priorityInput}
+            onChange={e => setPriorityInput(e.target.value)}
+            placeholder="https://facebook.com/groups/123456 hoặc 123456"
+            className="flex-1 px-3 py-2 border border-amber-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            onKeyDown={e => { if (e.key === 'Enter' && priorityInput.trim()) addPriorityMut.mutate(priorityInput) }}
+          />
+          <button
+            onClick={() => addPriorityMut.mutate(priorityInput)}
+            disabled={!priorityInput.trim() || addPriorityMut.isPending}
+            className="flex items-center gap-1 px-4 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50"
+          >
+            {addPriorityMut.isPending ? <Loader size={14} className="animate-spin" /> : <Plus size={14} />}
+            Thêm
+          </button>
+        </div>
+        {priorityLoading ? (
+          <div className="text-xs text-amber-700/70">Đang tải...</div>
+        ) : priorityGroups.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {priorityGroups.map(g => (
+              <div key={g.fb_group_id} className="inline-flex items-center gap-1.5 bg-white border border-amber-300 rounded-full pl-3 pr-1.5 py-1 text-xs">
+                <Star size={10} className="text-amber-500 fill-amber-400" />
+                <a
+                  href={g.url || `https://facebook.com/groups/${g.fb_group_id}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="text-amber-900 hover:underline font-medium max-w-[200px] truncate"
+                  title={g.name || g.fb_group_id}
+                >
+                  {g.name || g.fb_group_id}
+                </a>
+                <button
+                  onClick={() => removePriorityMut.mutate(g.fb_group_id)}
+                  className="text-amber-400 hover:text-red-500 ml-1"
+                  title="Hạ ưu tiên"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-amber-700/60 italic">Chưa có nhóm ưu tiên</div>
+        )}
       </div>
 
       {/* Add Panel */}

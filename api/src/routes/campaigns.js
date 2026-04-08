@@ -409,6 +409,19 @@ module.exports = async (fastify) => {
       .single()
 
     if (error) return reply.code(500).send({ error: error.message })
+
+    // Cascade account_ids to all campaign_roles so running campaigns pick up the
+    // new nick roster on their next poll. Only do this when account_ids was provided.
+    if (Array.isArray(req.body.account_ids)) {
+      try {
+        await supabase.from('campaign_roles')
+          .update({ account_ids: req.body.account_ids })
+          .eq('campaign_id', req.params.id)
+      } catch (cascadeErr) {
+        req.log?.warn?.(`cascade account_ids failed: ${cascadeErr.message}`)
+      }
+    }
+
     return data
   })
 
@@ -1057,6 +1070,108 @@ module.exports = async (fastify) => {
 
     if (error) return reply.code(500).send({ error: error.message })
     return { ok: true, approved }
+  })
+
+  // ── POST /campaigns/:id/priority-groups ──
+  // Mark a Facebook group as priority (tier A) for a campaign. Resolves the
+  // group from a URL or raw fb_group_id, then upserts fb_groups with
+  // score_tier='A', user_approved=true, joined_via_campaign_id=campaign.id.
+  // Body: { group_url: "https://facebook.com/groups/xxx" } OR { fb_group_id: "12345" }
+  fastify.post('/:id/priority-groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    // Verify ownership
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id, account_ids, topic').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { group_url, fb_group_id: rawId, name } = req.body || {}
+    let fbGroupId = rawId || null
+    let groupUrl = group_url || null
+
+    if (group_url && !fbGroupId) {
+      // Parse fb_group_id from URL — supports facebook.com/groups/<id> and m.facebook.com variants
+      const m = String(group_url).match(/(?:facebook\.com|fb\.com)\/groups\/([^/?#]+)/i)
+      if (m) fbGroupId = m[1]
+    }
+    if (!fbGroupId) {
+      return reply.code(400).send({ error: 'group_url hoặc fb_group_id required (URL phải là facebook.com/groups/...)' })
+    }
+    if (!groupUrl) groupUrl = `https://www.facebook.com/groups/${fbGroupId}`
+
+    // Need at least one account on the campaign for the FK
+    const acctIds = campaign.account_ids || []
+    if (acctIds.length === 0) {
+      return reply.code(400).send({ error: 'Campaign chưa có nick — gán nick trước rồi thêm group ưu tiên' })
+    }
+    const accountId = acctIds[0]
+
+    // Upsert each account row (one fb_groups row per (account_id, fb_group_id))
+    const rows = acctIds.map(aid => ({
+      account_id: aid,
+      fb_group_id: fbGroupId,
+      url: groupUrl,
+      name: name || null,
+      score_tier: 'A',
+      user_approved: true,
+      joined_via_campaign_id: req.params.id,
+      topic: campaign.topic || null,
+      last_scored_at: new Date().toISOString(),
+    }))
+
+    const { data, error } = await supabase.from('fb_groups')
+      .upsert(rows, { onConflict: 'account_id,fb_group_id' })
+      .select()
+
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Try to append campaign id via existing rpc (multi-campaign support)
+    try {
+      await supabase.rpc('append_campaign_to_group', {
+        p_account_id: accountId, p_fb_group_id: fbGroupId, p_campaign_id: req.params.id,
+      })
+    } catch {}
+
+    return { ok: true, fb_group_id: fbGroupId, count: data?.length || 0, groups: data }
+  })
+
+  // GET /campaigns/:id/priority-groups — list current tier-A groups for this campaign
+  fastify.get('/:id/priority-groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { data, error } = await supabase
+      .from('fb_groups')
+      .select('id, fb_group_id, name, url, score_tier, member_count, last_scored_at, total_interactions')
+      .eq('joined_via_campaign_id', req.params.id)
+      .eq('score_tier', 'A')
+      .order('last_scored_at', { ascending: false })
+      .limit(100)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    // Dedupe by fb_group_id (multiple accounts may share the same group)
+    const seen = new Set()
+    const unique = []
+    for (const g of data || []) {
+      if (seen.has(g.fb_group_id)) continue
+      seen.add(g.fb_group_id)
+      unique.push(g)
+    }
+    return unique
+  })
+
+  // DELETE /campaigns/:id/priority-groups/:fbGroupId — demote a priority group back to tier C
+  fastify.delete('/:id/priority-groups/:fbGroupId', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { error } = await supabase.from('fb_groups')
+      .update({ score_tier: 'C' })
+      .eq('joined_via_campaign_id', req.params.id)
+      .eq('fb_group_id', req.params.fbGroupId)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return { ok: true }
   })
 
   // GET /campaigns/:id/activity-log — granular per-action log (cursor-based)
