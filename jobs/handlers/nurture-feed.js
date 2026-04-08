@@ -462,32 +462,32 @@ async function nurtureFeed(payload, supabase) {
       if (results.reacts > 0) {
         await supabase.rpc('increment_nurture_counter', {
           p_profile_id: nurture_profile_id, p_field: 'today_reacts', p_amount: results.reacts,
-        }).catch(() => {})
+        }).then(() => {}, () => {})
         await supabase.rpc('increment_nurture_counter', {
           p_profile_id: nurture_profile_id, p_field: 'total_reacts', p_amount: results.reacts,
-        }).catch(() => {})
+        }).then(() => {}, () => {})
       }
       if (results.comments > 0) {
         await supabase.rpc('increment_nurture_counter', {
           p_profile_id: nurture_profile_id, p_field: 'today_comments', p_amount: results.comments,
-        }).catch(() => {})
+        }).then(() => {}, () => {})
         await supabase.rpc('increment_nurture_counter', {
           p_profile_id: nurture_profile_id, p_field: 'total_comments', p_amount: results.comments,
-        }).catch(() => {})
+        }).then(() => {}, () => {})
       }
       if (results.stories > 0) {
         await supabase.rpc('increment_nurture_counter', {
           p_profile_id: nurture_profile_id, p_field: 'today_stories', p_amount: results.stories,
-        }).catch(() => {})
+        }).then(() => {}, () => {})
       }
 
       // Increment sessions + total
       await supabase.rpc('increment_nurture_counter', {
         p_profile_id: nurture_profile_id, p_field: 'today_sessions', p_amount: 1,
-      }).catch(() => {})
+      }).then(() => {}, () => {})
       await supabase.rpc('increment_nurture_counter', {
         p_profile_id: nurture_profile_id, p_field: 'total_sessions', p_amount: 1,
-      }).catch(() => {})
+      }).then(() => {}, () => {})
 
       // Update health score
       try {
