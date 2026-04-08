@@ -448,6 +448,33 @@ async function campaignDiscoverGroups(payload, supabase) {
         }
       }
 
+      // Phase 9 REUSE: if ANY nick already joined this group successfully, skip join
+      // and just create the campaign_groups junction row for THIS campaign.
+      try {
+        const { data: existingMember } = await supabase.from('fb_groups')
+          .select('id, name, score_tier, global_score, is_member')
+          .eq('fb_group_id', group.fb_group_id)
+          .eq('is_member', true)
+          .limit(1).maybeSingle()
+        if (existingMember) {
+          // Upsert junction: attach this group to the current campaign, pick account_id as the nick
+          await supabase.from('campaign_groups').upsert({
+            campaign_id: campaign_id || null,
+            group_id: existingMember.id,
+            assigned_nick_id: account_id,
+            score: existingMember.global_score || 5,
+            tier: existingMember.score_tier || 'C',
+            status: 'active',
+          }, { onConflict: 'campaign_id,group_id' })
+          console.log(`[CAMPAIGN-SCOUT] ♻️  Reuse "${existingMember.name}" — another nick already member, junction attached`)
+          logger.log('visit_group', {
+            target_type: 'group', target_id: group.fb_group_id, target_name: existingMember.name,
+            details: { action: 'reused_existing_member', tier: existingMember.score_tier },
+          })
+          continue
+        }
+      } catch {}
+
       visited++
 
       try {
@@ -747,19 +774,48 @@ async function campaignDiscoverGroups(payload, supabase) {
           //     ↑ falls through to membership-check cron, which will decide
           // Nurture only reads is_member=true AND pending_approval=false.
           const groupTags = (topic || '').split(/[,;]+/).map(t => t.trim().toLowerCase()).filter(t => t.length > 1)
-          await supabase.from('fb_groups').upsert({
+          // Phase 9: persist deep-eval snapshot into fb_groups (global pool)
+          const evalPosts = Array.isArray(groupInfo?.posts) ? groupInfo.posts.slice(0, 10) : []
+          const globalScore = evaluation?.score || 0
+          const tier = globalScore >= 8 ? 'A' : globalScore >= 6 ? 'B' : globalScore >= 4 ? 'C' : 'D'
+          const upsertPayload = {
             account_id,
             fb_group_id: group.fb_group_id,
             name: group.name,
             url: group.url,
             member_count: group.member_count || 0,
+            member_count_actual: groupInfo?.member_count || group.member_count || 0,
             joined_via_campaign_id: campaign_id || null,
             topic: topic || null,
             tags: groupTags,
             is_member: confirmedMember,
-            pending_approval: !confirmedMember, // anything not confirmed → pending (re-verify later)
+            pending_approval: !confirmedMember,
             joined_at: confirmedMember ? new Date().toISOString() : null,
-          }, { onConflict: 'account_id,fb_group_id' })
+            global_score: globalScore,
+            score_tier: tier,
+            evaluation_posts: evalPosts,
+            evaluated_at: new Date().toISOString(),
+            language: evaluation?.language || group.language || null,
+          }
+          const { data: upserted } = await supabase.from('fb_groups')
+            .upsert(upsertPayload, { onConflict: 'account_id,fb_group_id' })
+            .select('id').single()
+
+          // Phase 9: junction row for this campaign (only if we have a group row id)
+          if (upserted?.id && campaign_id) {
+            try {
+              await supabase.from('campaign_groups').upsert({
+                campaign_id,
+                group_id: upserted.id,
+                assigned_nick_id: account_id,
+                score: globalScore,
+                tier,
+                status: confirmedMember ? 'active' : 'paused',
+              }, { onConflict: 'campaign_id,group_id' })
+            } catch (jErr) {
+              console.warn(`[CAMPAIGN-SCOUT] junction upsert failed: ${jErr.message}`)
+            }
+          }
 
           // Append to campaign_ids array (multi-campaign support)
           if (campaign_id) {
