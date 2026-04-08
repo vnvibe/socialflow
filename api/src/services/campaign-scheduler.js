@@ -1014,18 +1014,19 @@ async function processMonitoringSources() {
           continue
         }
 
-        // Per-source dedup: skip if there's already a pending fetch_source_cookie
-        // for this same source_id. Prevents pile-up when previous run hasn't finished.
-        const { count: pendingForSource } = await supabase
+        // Dedup by account_id: skip if this nick already has any pending/running
+        // fetch_source_cookie. One nick should not run multiple fetch jobs in parallel
+        // (browser slot conflict + duplicate cookie save races).
+        const { count: pendingForAccount } = await supabase
           .from('jobs')
           .select('id', { count: 'exact', head: true })
           .eq('type', 'fetch_source_cookie')
-          .eq('status', 'pending')
-          .eq('payload->>source_id', source.id)
+          .in('status', ['pending', 'claimed', 'running'])
+          .eq('payload->>account_id', accountId)
 
-        if ((pendingForSource || 0) > 0) {
-          console.log(`[SCHEDULER] Source ${source.name || source.fb_source_id} already has ${pendingForSource} pending job(s) — skipping create`)
-          // Push next_fetch out by interval so we don't loop on the same source
+        if ((pendingForAccount || 0) > 0) {
+          console.log(`[SCHEDULER] Account ${accountId.slice(0, 8)} already has ${pendingForAccount} pending fetch job(s) — skipping ${source.name || source.fb_source_id}`)
+          // Push next_fetch out by interval so we don't loop
           const intervalMs = (source.fetch_interval_minutes || 60) * 60 * 1000
           await supabase.from('monitored_sources').update({
             next_fetch_at: new Date(Date.now() + intervalMs).toISOString(),
