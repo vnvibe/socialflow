@@ -952,35 +952,52 @@ module.exports = async (fastify) => {
     return { data, total: count }
   })
 
-  // GET /campaigns/:id/groups — Campaign-scoped groups (via campaign_ids array)
+  // GET /campaigns/:id/groups — Phase 9: read from campaign_groups junction
+  // Returns groups with junction-level tier/score/assigned nick, plus the
+  // underlying fb_groups row enriched with account username.
   fastify.get('/:id/groups', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: campaign } = await supabase.from('campaigns')
-      .select('id, campaign_roles(account_ids)')
-      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
     if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
 
-    const accountIds = [...new Set((campaign.campaign_roles || []).flatMap(r => r.account_ids || []))]
-    if (!accountIds.length) return []
-
     const { data, error } = await supabase
-      .from('fb_groups')
-      .select('id, fb_group_id, name, url, member_count, group_type, topic, ai_relevance, is_blocked, campaign_ids, account_id, joined_via_campaign_id')
-      .in('account_id', accountIds)
-      .contains('campaign_ids', [req.params.id])
-      .or('is_blocked.is.null,is_blocked.eq.false')
-      .order('name')
+      .from('campaign_groups')
+      .select('id, score, tier, status, added_at, last_nurtured_at, assigned_nick_id, fb_groups(id, fb_group_id, name, url, member_count, group_type, topic, ai_relevance, is_blocked, account_id, joined_via_campaign_id, global_score, score_tier, language, is_member, pending_approval, ai_note, ai_join_score, ai_risk_level, skip_until, tags, user_approved)')
+      .eq('campaign_id', req.params.id)
+      .neq('status', 'removed')
+      .order('tier', { ascending: true })
+      .order('score', { ascending: false })
 
     if (error) return reply.code(500).send({ error: error.message })
 
-    // Enrich with account username
-    const { data: accounts } = await supabase.from('accounts').select('id, username').in('id', accountIds)
-    const accountMap = Object.fromEntries((accounts || []).map(a => [a.id, a.username]))
+    // Enrich nicks
+    const nickIds = [...new Set((data || []).map(r => r.assigned_nick_id).filter(Boolean))]
+    let accountMap = {}
+    if (nickIds.length) {
+      const { data: accounts } = await supabase.from('accounts').select('id, username').in('id', nickIds)
+      accountMap = Object.fromEntries((accounts || []).map(a => [a.id, a.username]))
+    }
 
-    return (data || []).map(g => ({
-      ...g,
-      account_username: accountMap[g.account_id] || null,
-    }))
+    return (data || [])
+      .filter(r => r.fb_groups) // skip rows where the fb_groups FK target was deleted
+      .map(r => ({
+        // Flatten fb_groups fields for backwards compat with existing frontend
+        ...r.fb_groups,
+        // Junction-level overrides (authoritative for this campaign)
+        junction_id: r.id,
+        junction_score: r.score,
+        junction_tier: r.tier,
+        junction_status: r.status,
+        added_at: r.added_at,
+        last_nurtured_at: r.last_nurtured_at,
+        assigned_nick_id: r.assigned_nick_id,
+        account_username: accountMap[r.assigned_nick_id] || null,
+      }))
   })
+
+  // NOTE: POST /campaigns/:id/priority-groups exists further below (legacy impl).
+  // Phase 9 junction row is written by that handler via the `campaign_groups`
+  // upsert wired in — see line ~1195.
 
   // GET /campaigns/:id/leads — Campaign-scoped leads
   fastify.get('/:id/leads', { preHandler: fastify.authenticate }, async (req, reply) => {
@@ -1129,6 +1146,25 @@ module.exports = async (fastify) => {
         p_account_id: accountId, p_fb_group_id: fbGroupId, p_campaign_id: req.params.id,
       })
     } catch {}
+
+    // Phase 9: also write campaign_groups junction rows so the new nurture
+    // path (which reads via campaign_groups) can see this priority group.
+    try {
+      const junctionRows = (data || []).map(g => ({
+        campaign_id: req.params.id,
+        group_id: g.id,
+        assigned_nick_id: g.account_id,
+        score: 10,
+        tier: 'A',
+        status: 'active',
+      }))
+      if (junctionRows.length) {
+        await supabase.from('campaign_groups')
+          .upsert(junctionRows, { onConflict: 'campaign_id,group_id' })
+      }
+    } catch (jErr) {
+      console.warn(`[priority-groups] junction upsert failed: ${jErr.message}`)
+    }
 
     return { ok: true, fb_group_id: fbGroupId, count: data?.length || 0, groups: data }
   })

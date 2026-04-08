@@ -177,18 +177,45 @@ async function campaignNurture(payload, supabase) {
     }
   }
 
+  if (!groups.length && campaign_id) {
+    // Phase 9: read groups via campaign_groups junction (campaign-scoped, per-nick assigned)
+    const { data: junctionRows } = await supabase
+      .from('campaign_groups')
+      .select('id, score, tier, status, last_nurtured_at, fb_groups!inner(id, fb_group_id, name, url, member_count, topic, tags, joined_via_campaign_id, ai_relevance, user_approved, consecutive_skips, last_yield_at, total_yields, language, score_tier, engagement_rate, ai_join_score, is_member, pending_approval, is_blocked, global_score)')
+      .eq('campaign_id', campaign_id)
+      .eq('assigned_nick_id', account_id)
+      .eq('status', 'active')
+    // Flatten: keep one row per group with junction fields merged
+    const junctionGroups = (junctionRows || [])
+      .map(r => r.fb_groups && ({
+        ...r.fb_groups,
+        // Junction tier/score take precedence over global fb_groups values
+        score_tier: r.tier || r.fb_groups.score_tier,
+        _junction_id: r.id,
+        _junction_score: r.score,
+        _junction_tier: r.tier,
+        _junction_last_nurtured: r.last_nurtured_at,
+      }))
+      .filter(Boolean)
+      // Still enforce membership gates (junction status can lag)
+      .filter(g => g.is_member === true && g.pending_approval === false)
+      .filter(g => !g.is_blocked)
+      .filter(g => g.user_approved !== false)
+    if (junctionGroups.length > 0) {
+      groups = junctionGroups
+      console.log(`[NURTURE] Phase 9: ${groups.length} groups from campaign_groups junction (nick ${account_id.slice(0,8)})`)
+    }
+  }
+
   if (!groups.length) {
-    // ── CHỈ dùng group ĐÃ GÁN NHÃN (tag/campaign/topic) ──
-    // Group không gán nhãn = không liên quan → KHÔNG dùng, KHÔNG fallback
+    // Legacy fallback: fb_groups direct query (old campaigns without junction backfill)
     const { data: labeledGroups } = await supabase.from('fb_groups')
       .select('id, fb_group_id, name, url, member_count, topic, tags, joined_via_campaign_id, ai_relevance, user_approved, consecutive_skips, last_yield_at, total_yields, language, score_tier, engagement_rate, ai_join_score, is_member, pending_approval')
       .eq('account_id', account_id)
-      // Fix 1 (Phase 6): only act on groups the nick is actually admitted to.
-      // Groups still pending admin approval get filtered out — no comment, no like.
       .eq('is_member', true)
       .eq('pending_approval', false)
       .or('is_blocked.is.null,is_blocked.eq.false')
-      .or('user_approved.is.null,user_approved.eq.true') // Skip groups user rejected (false), keep null + true
+      .or('user_approved.is.null,user_approved.eq.true')
 
     const allLabeled = (labeledGroups || []).filter(g => {
       // Phase 2: skip tier D entirely (low-quality groups)
@@ -1457,6 +1484,20 @@ async function campaignNurture(payload, supabase) {
         if (yieldedAnything) update.last_yield_at = new Date().toISOString()
         await supabase.from('fb_groups').update(update)
           .eq('fb_group_id', group.fb_group_id).eq('account_id', account_id)
+        // Phase 9: mirror score/tier + last_nurtured_at into campaign_groups junction
+        if (group._junction_id) {
+          try {
+            await supabase.from('campaign_groups').update({
+              score, tier, last_nurtured_at: new Date().toISOString(),
+            }).eq('id', group._junction_id)
+          } catch {}
+        } else if (campaign_id && group.id) {
+          try {
+            await supabase.from('campaign_groups').update({
+              score, tier, last_nurtured_at: new Date().toISOString(),
+            }).eq('campaign_id', campaign_id).eq('group_id', group.id)
+          } catch {}
+        }
         console.log(`[NURTURE] 📊 ${group.name}: score=${score} tier=${tier} (eng=${engagementRate.toFixed(4)}, skips=${update.consecutive_skips})`)
       } catch (scErr) {
         console.warn(`[NURTURE] scoreGroup failed: ${scErr.message}`)
