@@ -441,6 +441,20 @@ async function executeRoleCampaign(campaign) {
       const totalDelaySec = roleDelay + nickDelay
       const scheduledAt = new Date(Date.now() + totalDelaySec * 1000)
 
+      // Fix 3 (Phase 6): scout searches both topic AND brand keywords so it finds
+      // groups relevant to the brand even when the campaign topic is generic.
+      // brand_keywords are pulled from brand_config if present.
+      const brandKeywords = []
+      if (campaign.brand_config) {
+        if (campaign.brand_config.brand_name) brandKeywords.push(campaign.brand_config.brand_name)
+        if (Array.isArray(campaign.brand_config.brand_keywords)) {
+          brandKeywords.push(...campaign.brand_config.brand_keywords)
+        }
+      }
+      const scoutKeywords = role.role_type === 'scout' && brandKeywords.length
+        ? [...new Set([...(campaign.topic ? [campaign.topic] : []), ...brandKeywords])]
+        : null
+
       const { error } = await supabase.from('jobs').insert({
         type: jobType,
         priority: getJobPriority(jobType),
@@ -458,6 +472,7 @@ async function executeRoleCampaign(campaign) {
           read_from: role.read_from,
           // Brand/ads context (new SaaS form)
           brand_config: campaign.brand_config || null,
+          brand_keywords: scoutKeywords, // Fix 3: scout uses these as extra search keywords
           ad_mode: campaign.ad_mode || 'normal',
         },
         status: 'pending',
