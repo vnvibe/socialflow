@@ -824,6 +824,27 @@ async function campaignDiscoverGroups(payload, supabase) {
             }) } catch {}
           }
 
+          // Schedule first membership check if join is pending (20min delay)
+          if (!confirmedMember && upserted?.id) {
+            try {
+              await supabase.from('jobs').insert({
+                type: 'check_group_membership',
+                priority: 3,
+                payload: {
+                  fb_group_id: group.fb_group_id,
+                  group_row_id: upserted.id,
+                  account_id,
+                  group_name: group.name,
+                  campaign_id: campaign_id || null,
+                  attempt: 1,
+                },
+                status: 'pending',
+                scheduled_at: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+              })
+              console.log(`[CAMPAIGN-SCOUT] Scheduled membership check in 20min for pending "${group.name}"`)
+            } catch {}
+          }
+
           joined++
           joinedGroups.push(group)
           console.log(`[CAMPAIGN-SCOUT] ✓ Joined: ${group.name} (${group.member_count || '?'} members)`)
