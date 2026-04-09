@@ -998,12 +998,15 @@ func (a *App) downloadAndApplyZip(url string) error {
 
 	// Extract — skip the exe (locked), skip top-level dir prefix
 	for _, f := range zr.File {
+		// Normalize backslashes (PowerShell Compress-Archive uses \ on Windows)
+		// to forward slashes before any path logic.
+		name := strings.ReplaceAll(f.Name, "\\", "/")
+
 		// Strip leading "socialflow-agent/" if present
-		name := f.Name
-		if idx := strings.Index(name, "/"); idx != -1 && strings.HasPrefix(name, "socialflow-agent/") {
-			name = name[idx+1:]
+		if strings.HasPrefix(name, "socialflow-agent/") {
+			name = name[len("socialflow-agent/"):]
 		}
-		if name == "" {
+		if name == "" || name == "/" {
 			continue
 		}
 
