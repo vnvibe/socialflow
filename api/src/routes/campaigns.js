@@ -412,6 +412,9 @@ module.exports = async (fastify) => {
 
     if (error) return reply.code(500).send({ error: error.message })
 
+    // Phase 15: hoisted so the return payload can see it regardless of branch
+    let newNickIdsForOnboard = []
+
     // Cascade account_ids to all campaign_roles so running campaigns pick up the
     // new nick roster on their next poll. Only do this when account_ids was provided.
     if (Array.isArray(req.body.account_ids)) {
@@ -440,12 +443,12 @@ module.exports = async (fastify) => {
         for (const row of existingJunction || []) {
           if (row.assigned_nick_id) oldNickIds.add(row.assigned_nick_id)
         }
-        const newNickIds = (req.body.account_ids || []).filter(id => !oldNickIds.has(id))
-        if (newNickIds.length) {
+        newNickIdsForOnboard = (req.body.account_ids || []).filter(id => !oldNickIds.has(id))
+        if (newNickIdsForOnboard.length) {
           const { data: theirGroups } = await supabase
             .from('fb_groups')
             .select('id, account_id, global_score, score_tier, ai_join_score')
-            .in('account_id', newNickIds)
+            .in('account_id', newNickIdsForOnboard)
             .eq('is_member', true)
             .eq('pending_approval', false)
             .or('is_blocked.is.null,is_blocked.eq.false')
@@ -460,11 +463,133 @@ module.exports = async (fastify) => {
           if (rows.length) {
             await supabase.from('campaign_groups')
               .upsert(rows, { onConflict: 'campaign_id,group_id' })
-            console.log(`[PUT campaigns/${req.params.id.slice(0,8)}] auto-assigned ${rows.length} groups to ${newNickIds.length} new nicks`)
+            console.log(`[PUT campaigns/${req.params.id.slice(0,8)}] auto-assigned ${rows.length} groups to ${newNickIdsForOnboard.length} new nicks`)
           }
         }
       } catch (assignErr) {
         req.log?.warn?.(`[PUT campaigns] auto-assign groups failed: ${assignErr.message}`)
+      }
+
+      // Phase 15: onboarding — for each new nick, if they have <3 active groups
+      // in this campaign, create a priority scout job to populate their pool.
+      // Respects warmup (nicks under 21 days get skipped — too young to join).
+      // Fires "onboarding_started" notification so the user has feedback.
+      if (newNickIdsForOnboard.length) {
+        try {
+          // Find the scout role on this campaign
+          const { data: roles } = await supabase.from('campaign_roles')
+            .select('id, role_type, mission, parsed_plan, config, feeds_into, read_from')
+            .eq('campaign_id', req.params.id)
+            .eq('is_active', true)
+          const scoutRole = (roles || []).find(r => r.role_type === 'scout')
+
+          // Need full campaign (with topic + brand_config) for scout payload
+          const { data: fullCampaign } = await supabase.from('campaigns')
+            .select('id, name, topic, owner_id, brand_config, ad_mode')
+            .eq('id', req.params.id).single()
+
+          // Brand keywords for scout (Phase 6 Fix 3)
+          const brandKeywords = []
+          if (fullCampaign?.brand_config) {
+            if (fullCampaign.brand_config.brand_name) brandKeywords.push(fullCampaign.brand_config.brand_name)
+            if (Array.isArray(fullCampaign.brand_config.brand_keywords)) {
+              brandKeywords.push(...fullCampaign.brand_config.brand_keywords)
+            }
+          }
+          const scoutKeywords = brandKeywords.length
+            ? [...new Set([...(fullCampaign?.topic ? [fullCampaign.topic] : []), ...brandKeywords])]
+            : null
+
+          let scoutJobsCreated = 0
+          let skippedTooYoung = 0
+          let skippedEnoughGroups = 0
+
+          for (const nickId of newNickIdsForOnboard) {
+            // Count active campaign_groups for this (campaign, nick)
+            const { count: groupCount } = await supabase.from('campaign_groups')
+              .select('id', { count: 'exact', head: true })
+              .eq('campaign_id', req.params.id)
+              .eq('assigned_nick_id', nickId)
+              .eq('status', 'active')
+
+            if ((groupCount || 0) >= 3) {
+              skippedEnoughGroups++
+              continue
+            }
+
+            // Warmup gate: need nick age >= 21 days to run scout (join groups)
+            const { data: nick } = await supabase.from('accounts')
+              .select('id, username, is_active, status, fb_created_at, created_at')
+              .eq('id', nickId).single()
+            if (!nick || !nick.is_active || nick.status === 'expired' || nick.status === 'checkpoint') continue
+
+            const createdAt = nick.fb_created_at || nick.created_at
+            const ageDays = createdAt ? Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000) : 0
+            if (ageDays < 21) {
+              console.log(`[ONBOARD] Nick ${nick.username || nickId.slice(0,8)} too young (${ageDays}d < 21d) — skipping scout`)
+              skippedTooYoung++
+              continue
+            }
+
+            // Dedup: skip if a scout job already pending/claimed/running for this (campaign, nick)
+            const { count: existingScout } = await supabase.from('jobs')
+              .select('id', { count: 'exact', head: true })
+              .eq('type', 'campaign_discover_groups')
+              .eq('account_id', nickId)
+              .in('status', ['pending', 'claimed', 'running'])
+              .filter('payload->>campaign_id', 'eq', req.params.id)
+            if ((existingScout || 0) > 0) continue
+
+            // Create priority scout job (priority 2 — higher than normal scout=3)
+            const { error: jobErr } = await supabase.from('jobs').insert({
+              type: 'campaign_discover_groups',
+              priority: 2,
+              payload: {
+                campaign_id: req.params.id,
+                role_id: scoutRole?.id || null,
+                account_id: nickId,
+                owner_id: fullCampaign?.owner_id || req.user.id,
+                mission: scoutRole?.mission || null,
+                parsed_plan: scoutRole?.parsed_plan || null,
+                config: scoutRole?.config || null,
+                topic: fullCampaign?.topic || null,
+                role_type: 'scout',
+                feeds_into: scoutRole?.feeds_into || null,
+                read_from: scoutRole?.read_from || null,
+                brand_config: fullCampaign?.brand_config || null,
+                brand_keywords: scoutKeywords,
+                ad_mode: fullCampaign?.ad_mode || 'normal',
+                reason: 'new_nick_onboarding',
+              },
+              status: 'pending',
+              scheduled_at: new Date().toISOString(),
+              created_by: req.user.id,
+            })
+            if (!jobErr) {
+              scoutJobsCreated++
+              console.log(`[ONBOARD] Created priority scout job for new nick ${nick.username || nickId.slice(0,8)} (${groupCount || 0}/3 groups)`)
+            }
+          }
+
+          // Single "onboarding started" notification summarizing the batch
+          if (scoutJobsCreated > 0 || skippedTooYoung > 0) {
+            const parts = []
+            if (scoutJobsCreated > 0) parts.push(`${scoutJobsCreated} nick đang scout nhóm`)
+            if (skippedTooYoung > 0) parts.push(`${skippedTooYoung} nick quá trẻ (<21d) — chỉ warmup`)
+            if (skippedEnoughGroups > 0) parts.push(`${skippedEnoughGroups} nick đã đủ nhóm`)
+            try {
+              await supabase.from('notifications').insert({
+                user_id: req.user.id,
+                type: 'nick_onboarding_started',
+                title: `Đang onboard ${newNickIdsForOnboard.length} nick mới`,
+                body: `Chiến dịch "${fullCampaign?.name || ''}" — ${parts.join(' · ')}. Scout sẽ tự động tìm nhóm phù hợp.`,
+                level: 'info',
+              })
+            } catch {}
+          }
+        } catch (onboardErr) {
+          req.log?.warn?.(`[ONBOARD] failed: ${onboardErr.message}`)
+        }
       }
     }
 
@@ -474,7 +599,11 @@ module.exports = async (fastify) => {
         req.log?.warn?.(`KPI rebalance after PUT failed: ${err.message}`))
     }
 
-    return data
+    // Phase 15: surface new-nick count so the UI can toast about onboarding
+    return {
+      ...data,
+      _onboarding: { new_nicks_count: newNickIdsForOnboard.length },
+    }
   })
 
   // PUT /campaigns/:id/plan — Update parsed_plan for live campaigns

@@ -82,12 +82,22 @@ export default function SettingsSection({ campaignId, campaign }) {
   }, [campaign])
 
   const updateMut = useMutation({
-    mutationFn: (data) => api.put(`/campaigns/${campaignId}`, data),
-    onSuccess: () => {
+    mutationFn: (data) => api.put(`/campaigns/${campaignId}`, data).then(r => r.data),
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['campaign', campaignId] })
-      toast.success('Da luu')
+      queryClient.invalidateQueries({ queryKey: ['campaign-groups', campaignId] })
+      toast.success('Đã lưu')
+      // Phase 15: onboarding feedback when new nicks were added
+      const n = result?._onboarding?.new_nicks_count || 0
+      if (n > 0) {
+        setTimeout(() => {
+          toast((t) => `Đang onboard ${n} nick mới — scout sẽ tự tìm nhóm phù hợp`, {
+            icon: '🚀', duration: 6000,
+          })
+        }, 400)
+      }
     },
-    onError: (err) => toast.error(err.response?.data?.error || 'Loi'),
+    onError: (err) => toast.error(err.response?.data?.error || 'Lỗi'),
   })
 
   const deleteMut = useMutation({
