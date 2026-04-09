@@ -19,7 +19,7 @@ const R = require('../../lib/randomizer')
 const axios = require('axios')
 const { ActivityLogger } = require('../../lib/activity-logger')
 
-const API_URL = process.env.API_URL || process.env.RAILWAY_URL || 'http://103.142.24.60:3005'
+const API_URL = process.env.API_URL || process.env.RAILWAY_URL || 'https://103-142-24-60.sslip.io'
 
 async function campaignPost(payload, supabase) {
   const { account_id, campaign_id, role_id, config, topic, parsed_plan } = payload
