@@ -337,6 +337,31 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
+  // Phase 17: AI Operations Manager — 3 levels
+  // Level 1: Hourly monitor (every hour at :05 VN)
+  cron.schedule('5 * * * *', async () => {
+    try {
+      const { runHourlyMonitor } = require('./ai-ops-manager')
+      await runHourlyMonitor(supabase)
+    } catch (err) { console.error('[AI-OPS] hourly error:', err.message) }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
+  // Level 2: Daily plan (6:00 AM VN every day)
+  cron.schedule('0 6 * * *', async () => {
+    try {
+      const { runDailyPlan } = require('./ai-ops-manager')
+      await runDailyPlan(supabase)
+    } catch (err) { console.error('[AI-OPS] daily plan error:', err.message) }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
+  // Level 3: Weekly strategy (Sunday 5:30 AM VN)
+  cron.schedule('30 5 * * 0', async () => {
+    try {
+      const { runWeeklyStrategy } = require('./ai-ops-manager')
+      await runWeeklyStrategy(supabase)
+    } catch (err) { console.error('[AI-OPS] weekly strategy error:', err.message) }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // Phase 13: Hourly AI Pilot health check (every hour at :17 VN time)
   // - Flag campaigns where AI Pilot hasn't fired in 24h+
   // - Flag consecutive 'critical' assessments

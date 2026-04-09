@@ -16,6 +16,8 @@ const ACTION_ICONS = {
   join_group: Users, friend_request: UserPlus, send_friend_request: UserPlus,
   browse: Eye, ai_filter: Bot, ai_evaluate_posts: Bot,
   comment_rejected: XCircle, scan_members: Search, post: ScrollText,
+  // Phase 17: ops entries
+  ops_monitor: Eye, daily_plan: Brain, weekly_strategy: Brain,
 }
 
 const ACTION_LABELS = {
@@ -25,6 +27,8 @@ const ACTION_LABELS = {
   ai_filter: 'AI Filter', ai_evaluate_posts: 'AI Danh gia',
   comment_rejected: 'Comment bi tu choi', scan_members: 'Scan thanh vien',
   post: 'Dang bai',
+  // Phase 17
+  ops_monitor: '🔍 Monitor', daily_plan: '📋 Daily Plan', weekly_strategy: '📊 Weekly',
 }
 
 const STATUS_COLORS = {
@@ -223,6 +227,18 @@ export default function MonitorSection({ campaignId, campaign }) {
   const aiPilotLogs = aiPilotReport?.recent_decisions || []
   const [expandedPilot, setExpandedPilot] = useState(null)
   const [expandedMemType, setExpandedMemType] = useState(null)
+
+  // Phase 17: latest daily plan + latest ops monitor for AI Pilot tab
+  const { data: dailyPlanLog } = useQuery({
+    queryKey: ['daily-plan', campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/activity-log`, {
+      params: { action_type: 'daily_plan', limit: 1 },
+    }).then(r => {
+      const rows = r.data?.data || (Array.isArray(r.data) ? r.data : [])
+      return rows[0] || null
+    }),
+    enabled: subTab === 'ai_pilot',
+  })
 
   const deleteMemoryMut = useMutation({
     mutationFn: (memoryId) => api.delete(`/campaigns/${campaignId}/ai-pilot-memory/${memoryId}`),
@@ -733,6 +749,48 @@ export default function MonitorSection({ campaignId, campaign }) {
             <div className="flex items-center justify-center py-16"><Loader size={24} className="animate-spin text-blue-500" /></div>
           ) : (
             <>
+              {/* Phase 17: Daily Plan card */}
+              {dailyPlanLog?.details?.plan && (
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">📋</span>
+                    <h3 className="text-sm font-semibold text-blue-900">Kế hoạch hôm nay</h3>
+                    <span className="text-[10px] text-blue-500 ml-auto">
+                      {dailyPlanLog.created_at ? formatDistanceToNow(new Date(dailyPlanLog.created_at), { locale: vi, addSuffix: true }) : ''}
+                    </span>
+                  </div>
+                  <p className="text-sm text-blue-800 font-medium">{dailyPlanLog.details.plan.today_focus}</p>
+                  {dailyPlanLog.details.plan.peak_hours?.length > 0 && (
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <span className="text-[10px] text-blue-600">Peak:</span>
+                      {dailyPlanLog.details.plan.peak_hours.map(h => (
+                        <span key={h} className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">{h}h</span>
+                      ))}
+                    </div>
+                  )}
+                  {dailyPlanLog.details.plan.watch_for?.length > 0 && (
+                    <div className="mt-2">
+                      {dailyPlanLog.details.plan.watch_for.map((w, i) => (
+                        <span key={i} className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded mr-1">⚡ {w}</span>
+                      ))}
+                    </div>
+                  )}
+                  {dailyPlanLog.details.plan.nick_guidance?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {dailyPlanLog.details.plan.nick_guidance.map((g, i) => (
+                        <span key={i} className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+                          g.mode === 'boost' ? 'bg-green-100 text-green-700' :
+                          g.mode === 'rest' ? 'bg-red-100 text-red-700' :
+                          'bg-gray-100 text-gray-600'
+                        }`}>
+                          {g.mode === 'boost' ? '🚀' : g.mode === 'rest' ? '😴' : '➡️'} {(g.nick_id || '').slice(0, 8)} {g.mode}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Warnings banner */}
               {aiPilotReport?.warnings?.length > 0 && (
                 <div className="space-y-2">

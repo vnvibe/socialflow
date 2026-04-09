@@ -218,6 +218,29 @@ export default function OverviewSection({ campaignId, campaign, accountIds }) {
     enabled: accountIds.length > 0,
   })
 
+  // Phase 17: latest ops_monitor for status widget
+  const { data: lastOpsMonitor } = useQuery({
+    queryKey: ['last-ops-monitor', campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/activity-log`, {
+      params: { action_type: 'ops_monitor', limit: 1 },
+    }).then(r => {
+      const rows = r.data?.data || (Array.isArray(r.data) ? r.data : [])
+      return rows[0] || null
+    }),
+    refetchInterval: 60000,
+  })
+
+  // Phase 17: latest daily_plan for today_focus
+  const { data: lastDailyPlan } = useQuery({
+    queryKey: ['last-daily-plan', campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/activity-log`, {
+      params: { action_type: 'daily_plan', limit: 1 },
+    }).then(r => {
+      const rows = r.data?.data || (Array.isArray(r.data) ? r.data : [])
+      return rows[0] || null
+    }),
+  })
+
   // Post strategy data
   const { data: strategy } = useQuery({
     queryKey: ['post-strategy', campaignId],
@@ -279,6 +302,44 @@ export default function OverviewSection({ campaignId, campaign, accountIds }) {
               <Bar dataKey="jobs_failed" fill="#ef4444" radius={[4, 4, 0, 0]} name="Failed" />
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Phase 17: Ops Status widget */}
+      {(lastOpsMonitor || lastDailyPlan) && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <span>🤖</span> AI Ops
+            </h3>
+            {lastOpsMonitor && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                lastOpsMonitor.result_status === 'critical' ? 'bg-red-100 text-red-700' :
+                lastOpsMonitor.result_status === 'warning' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-green-100 text-green-700'
+              }`}>
+                {lastOpsMonitor.result_status === 'critical' ? '🚨 Critical' :
+                 lastOpsMonitor.result_status === 'warning' ? '⚠️ Warning' : '✅ Good'}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            {lastOpsMonitor?.details?.analysis?.headline && (
+              <div className="col-span-1 sm:col-span-2">
+                <p className="text-gray-500 text-[10px]">Last monitor</p>
+                <p className="text-gray-800 font-medium">{lastOpsMonitor.details.analysis.headline}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  {lastOpsMonitor.created_at ? formatDistanceToNow(new Date(lastOpsMonitor.created_at), { locale: vi, addSuffix: true }) : ''}
+                </p>
+              </div>
+            )}
+            {lastDailyPlan?.details?.plan?.today_focus && (
+              <div>
+                <p className="text-gray-500 text-[10px]">Today focus</p>
+                <p className="text-blue-700 font-medium">{lastDailyPlan.details.plan.today_focus}</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
