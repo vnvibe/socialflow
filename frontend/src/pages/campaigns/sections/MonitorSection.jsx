@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   Eye, ScrollText, MessageCircle, Clock, CheckCircle, XCircle,
   Loader, RefreshCw, ThumbsUp, UserPlus, Users, Search,
   ExternalLink, AlertTriangle, Bot, Filter, Brain, ChevronDown, ChevronUp, ArrowUp,
+  Trash2, TrendingUp, TrendingDown, Minus,
 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import api from '../../../lib/api'
 import { format, formatDistanceToNow } from 'date-fns'
 import { vi } from 'date-fns/locale'
@@ -211,17 +213,25 @@ export default function MonitorSection({ campaignId, campaign }) {
     enabled: subTab === 'engagement',
   })
 
-  // AI Pilot decisions
-  const { data: aiPilotRes, isLoading: aiPilotLoading } = useQuery({
-    queryKey: ['ai-pilot-decisions', campaignId],
-    queryFn: () => api.get(`/campaigns/${campaignId}/activity-log`, {
-      params: { action_type: 'ai_control', limit: 20 },
-    }).then(r => r.data),
+  // Phase 13: AI Pilot comprehensive report (replaces raw activity-log query)
+  const { data: aiPilotReport, isLoading: aiPilotLoading, refetch: refetchPilot } = useQuery({
+    queryKey: ['ai-pilot-report', campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/ai-pilot-report`).then(r => r.data),
     enabled: subTab === 'ai_pilot',
     refetchInterval: 30000,
   })
-  const aiPilotLogs = (aiPilotRes?.data || (Array.isArray(aiPilotRes) ? aiPilotRes : []))
+  const aiPilotLogs = aiPilotReport?.recent_decisions || []
   const [expandedPilot, setExpandedPilot] = useState(null)
+  const [expandedMemType, setExpandedMemType] = useState(null)
+
+  const deleteMemoryMut = useMutation({
+    mutationFn: (memoryId) => api.delete(`/campaigns/${campaignId}/ai-pilot-memory/${memoryId}`),
+    onSuccess: () => {
+      refetchPilot()
+      toast.success('Đã xóa memory')
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Lỗi xóa memory'),
+  })
 
   return (
     <div className="space-y-4">
@@ -716,94 +726,235 @@ export default function MonitorSection({ campaignId, campaign }) {
         </div>
       )}
 
-      {/* AI Pilot Tab */}
+      {/* AI Pilot Tab — Phase 13 */}
       {subTab === 'ai_pilot' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {aiPilotLoading ? (
             <div className="flex items-center justify-center py-16"><Loader size={24} className="animate-spin text-blue-500" /></div>
-          ) : aiPilotLogs.length === 0 ? (
-            <div className="text-center py-16 text-gray-400">
-              <Brain size={48} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm font-medium">AI Pilot chưa đưa quyết định nào</p>
-              <p className="text-xs mt-1">Campaign cần chạy ít nhất 3 lần để AI Pilot bắt đầu đánh giá</p>
-              <p className="text-xs text-gray-300 mt-0.5">Đã chạy: {campaign?.total_runs || 0} lần (trigger mỗi 3 lần)</p>
-            </div>
           ) : (
-            aiPilotLogs.map((log, idx) => {
-              const d = log.details || {}
-              const assessment = AI_ASSESSMENT[d.assessment] || AI_ASSESSMENT[log.result_status] || { label: d.assessment || log.result_status || '?', color: 'bg-gray-100 text-gray-600' }
-              const isExpanded = expandedPilot === idx
+            <>
+              {/* Warnings banner */}
+              {aiPilotReport?.warnings?.length > 0 && (
+                <div className="space-y-2">
+                  {aiPilotReport.warnings.map((w, i) => {
+                    const cfg = w.level === 'critical'
+                      ? { bg: 'bg-red-50 border-red-200', icon: 'text-red-600', text: 'text-red-800' }
+                      : w.level === 'warning'
+                        ? { bg: 'bg-amber-50 border-amber-200', icon: 'text-amber-600', text: 'text-amber-800' }
+                        : { bg: 'bg-blue-50 border-blue-200', icon: 'text-blue-600', text: 'text-blue-800' }
+                    return (
+                      <div key={i} className={`flex items-start gap-2 px-3 py-2 rounded-lg border ${cfg.bg}`}>
+                        <AlertTriangle size={14} className={`${cfg.icon} mt-0.5 shrink-0`} />
+                        <p className={`text-xs ${cfg.text}`}>{w.message}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
-              return (
-                <div key={log.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  {/* Header */}
-                  <button
-                    onClick={() => setExpandedPilot(isExpanded ? null : idx)}
-                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Brain size={16} className="text-purple-500" />
-                      <span className="text-sm font-medium text-gray-900">
-                        Run #{d.run_number || '?'}
-                      </span>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${assessment.color}`}>
-                        {assessment.label}
-                      </span>
-                      <span className="text-xs text-gray-400">
-                        {d.applied_count || 0} điều chỉnh áp dụng
-                      </span>
+              {/* Summary cards */}
+              {aiPilotReport?.summary && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                    <p className="text-2xl font-bold text-purple-600">{aiPilotReport.summary.total_decisions}</p>
+                    <p className="text-[10px] text-gray-500">Tổng quyết định</p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                    <p className="text-sm font-bold text-gray-900">
+                      {aiPilotReport.summary.last_fired_at
+                        ? formatDistanceToNow(new Date(aiPilotReport.summary.last_fired_at), { locale: vi, addSuffix: true })
+                        : 'Chưa fire'}
+                    </p>
+                    <p className="text-[10px] text-gray-500">Lần fire cuối</p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                    <p className="text-2xl font-bold text-blue-600">
+                      {aiPilotReport.effectiveness?.accuracy_pct != null
+                        ? `${aiPilotReport.effectiveness.accuracy_pct}%`
+                        : '--'}
+                    </p>
+                    <p className="text-[10px] text-gray-500">
+                      Hiệu quả ({aiPilotReport.effectiveness?.decisions_that_helped || 0}/{aiPilotReport.effectiveness?.total_settled || 0})
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      {aiPilotReport.summary.overall_trend === 'improving' && <TrendingUp size={16} className="text-green-600" />}
+                      {aiPilotReport.summary.overall_trend === 'declining' && <TrendingDown size={16} className="text-red-600" />}
+                      {aiPilotReport.summary.overall_trend === 'stable' && <Minus size={16} className="text-gray-500" />}
+                      <p className={`text-sm font-bold ${
+                        aiPilotReport.summary.overall_trend === 'improving' ? 'text-green-600' :
+                        aiPilotReport.summary.overall_trend === 'declining' ? 'text-red-600' : 'text-gray-700'
+                      }`}>
+                        {aiPilotReport.summary.overall_trend === 'improving' ? 'Cải thiện' :
+                         aiPilotReport.summary.overall_trend === 'declining' ? 'Giảm' : 'Ổn định'}
+                      </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400">
-                        {log.created_at ? formatDistanceToNow(new Date(log.created_at), { locale: vi, addSuffix: true }) : ''}
-                      </span>
-                      {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
-                    </div>
-                  </button>
+                    <p className="text-[10px] text-gray-500">Xu hướng 3d</p>
+                  </div>
+                </div>
+              )}
 
-                  {/* Expanded content */}
-                  {isExpanded && (
-                    <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-3">
-                      {/* Recommendation */}
-                      {d.recommendation && (
-                        <div className="bg-blue-50 rounded-lg px-3 py-2">
-                          <p className="text-xs font-medium text-blue-700 mb-0.5">Đề xuất</p>
-                          <p className="text-sm text-blue-900">{d.recommendation}</p>
-                        </div>
-                      )}
+              {/* Recent decisions */}
+              {aiPilotLogs.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-200">
+                  <Brain size={40} className="mx-auto mb-2 opacity-30" />
+                  <p className="text-sm font-medium">Chưa có quyết định nào</p>
+                  <p className="text-[11px] mt-1">Đã chạy: {campaign?.total_runs || 0} lần (trigger mỗi 3 lần)</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase">Quyết định gần đây ({aiPilotLogs.length})</h3>
+                  {aiPilotLogs.map((d, idx) => {
+                    const assessment = AI_ASSESSMENT[d.assessment] || { label: d.assessment || '?', color: 'bg-gray-100 text-gray-600' }
+                    const isExpanded = expandedPilot === idx
+                    const effBadge = d.was_effective === true
+                      ? { text: '✅ Hiệu quả', cls: 'bg-green-100 text-green-700' }
+                      : d.was_effective === false
+                        ? { text: '❌ Không hiệu quả', cls: 'bg-red-100 text-red-700' }
+                        : { text: '⏳ Chờ đánh giá', cls: 'bg-gray-100 text-gray-500' }
 
-                      {/* Adjustments */}
-                      {d.adjustments?.length > 0 && (
-                        <div>
-                          <p className="text-xs font-medium text-gray-500 mb-1.5">Điều chỉnh ({d.adjustments.length})</p>
-                          <div className="space-y-1.5">
-                            {d.adjustments.map((adj, i) => (
-                              <div key={i} className="flex items-start gap-2 bg-gray-50 rounded-lg px-3 py-2">
-                                <span className="text-lg leading-none mt-0.5">{AI_ACTION_ICONS[adj.action] || '•'}</span>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-xs font-mono text-gray-500">{(adj.role_id || '').slice(0, 8)}</span>
-                                    <span className="text-xs font-medium text-gray-900">{adj.action}</span>
-                                    {adj.field && <span className="text-[10px] text-gray-400">{adj.field}={adj.new_value ?? adj.value}</span>}
-                                  </div>
-                                  {adj.reason && <p className="text-xs text-gray-500 mt-0.5">{adj.reason}</p>}
+                    return (
+                      <div key={d.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                        <button
+                          onClick={() => setExpandedPilot(isExpanded ? null : idx)}
+                          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Brain size={16} className="text-purple-500" />
+                            <span className="text-sm font-medium text-gray-900">Run #{d.run_number || '?'}</span>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${assessment.color}`}>
+                              {assessment.label}
+                            </span>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${effBadge.cls}`}>
+                              {effBadge.text}
+                            </span>
+                            <span className="text-xs text-gray-400">{d.applied_count || 0} applied</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-gray-400">
+                              {d.fired_at ? formatDistanceToNow(new Date(d.fired_at), { locale: vi, addSuffix: true }) : ''}
+                            </span>
+                            {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                          </div>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-3">
+                            {d.recommendation && (
+                              <div className="bg-blue-50 rounded-lg px-3 py-2">
+                                <p className="text-xs font-medium text-blue-700 mb-0.5">Đề xuất</p>
+                                <p className="text-sm text-blue-900">{d.recommendation}</p>
+                              </div>
+                            )}
+
+                            {d.adjustments?.length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium text-gray-500 mb-1.5">Điều chỉnh ({d.adjustments.length})</p>
+                                <div className="space-y-1.5">
+                                  {d.adjustments.map((adj, i) => (
+                                    <div key={i} className="flex items-start gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                                      <span className="text-lg leading-none mt-0.5">{AI_ACTION_ICONS[adj.action] || '•'}</span>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs font-mono text-gray-500">{(adj.role_id || '').slice(0, 8)}</span>
+                                          <span className="text-xs font-medium text-gray-900">{adj.action}</span>
+                                          {adj.field && <span className="text-[10px] text-gray-400">{adj.field}={adj.new_value ?? adj.value}</span>}
+                                        </div>
+                                        {adj.reason && <p className="text-xs text-gray-500 mt-0.5">{adj.reason}</p>}
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                            )}
 
-                      {/* Meta */}
-                      <div className="flex items-center gap-4 text-[10px] text-gray-400">
-                        <span>Activities phân tích: {d.activity_count || '?'}</span>
-                        <span>Thời gian: {log.created_at ? format(new Date(log.created_at), 'dd/MM HH:mm', { locale: vi }) : ''}</span>
+                            {/* Effectiveness windows */}
+                            {(d.before_window?.total > 0 || d.after_window?.total > 0) && (
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="bg-gray-50 rounded-lg px-3 py-2">
+                                  <p className="text-[10px] text-gray-500 mb-0.5">24h TRƯỚC</p>
+                                  <p className="text-xs text-gray-900">{d.before_window.total} actions</p>
+                                  {d.before_window.success_rate != null && (
+                                    <p className="text-[10px] text-gray-500">{Math.round(d.before_window.success_rate * 100)}% success</p>
+                                  )}
+                                </div>
+                                <div className="bg-gray-50 rounded-lg px-3 py-2">
+                                  <p className="text-[10px] text-gray-500 mb-0.5">24h SAU</p>
+                                  <p className="text-xs text-gray-900">{d.after_window.total} actions</p>
+                                  {d.after_window.success_rate != null && (
+                                    <p className="text-[10px] text-gray-500">{Math.round(d.after_window.success_rate * 100)}% success</p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-4 text-[10px] text-gray-400">
+                              <span>Activities phân tích: {d.activity_count || '?'}</span>
+                              <span>{d.fired_at ? format(new Date(d.fired_at), 'dd/MM HH:mm', { locale: vi }) : ''}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
+                    )
+                  })}
                 </div>
-              )
-            })
+              )}
+
+              {/* Memory panel */}
+              {aiPilotReport?.current_strategy?.memories_count > 0 && (
+                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">
+                    AI Memories ({aiPilotReport.current_strategy.memories_count})
+                  </h3>
+                  <div className="space-y-2">
+                    {Object.entries(aiPilotReport.current_strategy.memories_by_type || {}).map(([type, mems]) => {
+                      const isOpen = expandedMemType === type
+                      const typeLabel = type === 'campaign_pattern' ? 'Campaign patterns'
+                        : type === 'nick_behavior' ? 'Nick behavior'
+                        : type === 'group_response' ? 'Group response'
+                        : type
+                      return (
+                        <div key={type} className="border border-gray-100 rounded-lg overflow-hidden">
+                          <button
+                            onClick={() => setExpandedMemType(isOpen ? null : type)}
+                            className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-50"
+                          >
+                            <span className="text-xs font-medium text-gray-700">{typeLabel} <span className="text-gray-400">({mems.length})</span></span>
+                            {isOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                          </button>
+                          {isOpen && (
+                            <div className="border-t border-gray-100 divide-y divide-gray-50">
+                              {mems.map(m => (
+                                <div key={m.id} className="flex items-start gap-2 px-3 py-2 text-xs">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-mono font-medium text-gray-800">{m.key}</span>
+                                      <span className="text-[10px] text-purple-600">{Math.round((m.confidence || 0) * 100)}% confidence</span>
+                                      <span className="text-[10px] text-gray-400">{m.evidence_count || 0} evidence</span>
+                                    </div>
+                                    <p className="text-[11px] text-gray-600 mt-0.5 break-words">
+                                      {typeof m.value === 'string' ? m.value : JSON.stringify(m.value).slice(0, 200)}
+                                    </p>
+                                  </div>
+                                  <button
+                                    onClick={() => { if (confirm('Xóa memory này?')) deleteMemoryMut.mutate(m.id) }}
+                                    className="p-1 text-gray-300 hover:text-red-500 transition-colors"
+                                    title="Xóa memory"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

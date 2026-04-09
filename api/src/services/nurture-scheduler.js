@@ -337,6 +337,18 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
+  // Phase 13: Hourly AI Pilot health check (every hour at :17 VN time)
+  // - Flag campaigns where AI Pilot hasn't fired in 24h+
+  // - Flag consecutive 'critical' assessments
+  // - Insert user notification rows (dedup: max 1 per campaign per code per day)
+  cron.schedule('17 * * * *', async () => {
+    try {
+      await checkAIPilotHealth(supabase)
+    } catch (err) {
+      console.error('[AI-PILOT-HEALTH] error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // Daily: cleanup stale jobs (every day 0:15 VN time)
   cron.schedule('15 0 * * *', async () => {
     try {
@@ -376,6 +388,94 @@ function initNurtureScheduler() {
   })
 
   console.log('[NURTURE] Scheduler initialized (every 5 min) — includes group monitor + weekly memory decay + daily cleanup')
+}
+
+// Phase 13: Hourly AI Pilot health check.
+// Inserts user-facing notifications when a campaign's AI Pilot looks unhealthy.
+// Dedup: for each (campaign, code) pair, insert at most one notification per day.
+async function checkAIPilotHealth(supabase) {
+  const { data: campaigns } = await supabase
+    .from('campaigns')
+    .select('id, name, owner_id, total_runs, is_active')
+    .eq('is_active', true)
+    .limit(200)
+  if (!campaigns?.length) return
+
+  let notifsCreated = 0
+  for (const campaign of campaigns) {
+    // Skip campaigns that haven't run enough to trigger AI Pilot yet (needs >= 3 runs)
+    if ((campaign.total_runs || 0) < 3) continue
+
+    const { data: decisions } = await supabase
+      .from('campaign_activity_log')
+      .select('id, created_at, result_status, details')
+      .eq('campaign_id', campaign.id)
+      .eq('action_type', 'ai_control')
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    const warnings = []
+    const lastFireMs = decisions?.[0]?.created_at ? new Date(decisions[0].created_at).getTime() : null
+    const hoursSince = lastFireMs ? (Date.now() - lastFireMs) / 3600000 : null
+
+    if (hoursSince === null || hoursSince > 24) {
+      warnings.push({
+        code: 'ai_pilot_stale',
+        level: 'warning',
+        title: `AI Pilot im lặng — ${campaign.name || campaign.id.slice(0, 8)}`,
+        body: hoursSince === null
+          ? 'AI Pilot chưa từng fire cho campaign này. Cần ít nhất 3 campaign runs để trigger.'
+          : `AI Pilot chưa fire trong ${Math.round(hoursSince)}h qua. Kiểm tra scheduler + total_runs.`,
+      })
+    }
+
+    if (decisions && decisions.length >= 3) {
+      const last3 = decisions.slice(0, 3)
+      if (last3.every(d => d.details?.assessment === 'critical')) {
+        warnings.push({
+          code: 'ai_pilot_critical_streak',
+          level: 'urgent',
+          title: `AI Pilot báo CRITICAL 3 lần liên tiếp — ${campaign.name || campaign.id.slice(0, 8)}`,
+          body: 'Campaign đang gặp vấn đề nghiêm trọng. Xem tab AI Pilot → recent decisions để biết chi tiết.',
+        })
+      }
+      if (last3.every(d => (d.details?.applied_count || 0) === 0)) {
+        warnings.push({
+          code: 'ai_pilot_zero_applied',
+          level: 'warning',
+          title: `AI Pilot không apply được quyết định — ${campaign.name || campaign.id.slice(0, 8)}`,
+          body: '3 quyết định gần nhất đều applied_count=0. Có thể adjustments format sai hoặc target_role không tồn tại.',
+        })
+      }
+    }
+
+    // Dedup: for each warning code, check if we already inserted one in the last 24h
+    for (const w of warnings) {
+      try {
+        const since = new Date(Date.now() - 24 * 3600000).toISOString()
+        const { count } = await supabase.from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', campaign.owner_id)
+          .eq('type', w.code)
+          .gte('created_at', since)
+        if ((count || 0) > 0) continue // already notified in last 24h
+
+        await supabase.from('notifications').insert({
+          user_id: campaign.owner_id,
+          type: w.code,
+          title: w.title,
+          body: w.body,
+          level: w.level,
+        })
+        notifsCreated++
+      } catch (err) {
+        console.warn(`[AI-PILOT-HEALTH] insert notification failed: ${err.message}`)
+      }
+    }
+  }
+  if (notifsCreated > 0) {
+    console.log(`[AI-PILOT-HEALTH] Created ${notifsCreated} notifications across ${campaigns.length} campaigns`)
+  }
 }
 
 module.exports = { initNurtureScheduler }

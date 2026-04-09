@@ -1293,6 +1293,186 @@ module.exports = async (fastify) => {
     return { ok: true }
   })
 
+  // ── Phase 13: AI Pilot report + memory panel ───────────────────────────
+  // GET /campaigns/:id/ai-pilot-report
+  // Comprehensive dashboard data: summary, recent decisions (with
+  // effectiveness heuristic), memories grouped by type, health signals.
+  fastify.get('/:id/ai-pilot-report', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id, name, total_runs, cron_expression')
+      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    // 1) Pull last 30 ai_control decisions
+    const { data: decisions } = await supabase
+      .from('campaign_activity_log')
+      .select('id, created_at, result_status, details')
+      .eq('campaign_id', req.params.id)
+      .eq('action_type', 'ai_control')
+      .order('created_at', { ascending: false })
+      .limit(30)
+
+    // 2) Pull aggregate activity per day (last 14 days) for effectiveness comparison
+    const since = new Date(Date.now() - 14 * 86400000).toISOString()
+    const { data: recentActs } = await supabase
+      .from('campaign_activity_log')
+      .select('created_at, action_type, result_status')
+      .eq('campaign_id', req.params.id)
+      .neq('action_type', 'ai_control')
+      .gte('created_at', since)
+      .limit(5000)
+
+    // Bucket activities by day for the 24h-before/24h-after effectiveness check
+    const bucket = (iso) => new Date(iso).toISOString().slice(0, 13) // hourly buckets
+    const hourlyStats = {}
+    for (const a of recentActs || []) {
+      const h = bucket(a.created_at)
+      if (!hourlyStats[h]) hourlyStats[h] = { total: 0, success: 0 }
+      hourlyStats[h].total++
+      if (a.result_status === 'success') hourlyStats[h].success++
+    }
+    const windowStats = (fromTs, toTs) => {
+      let total = 0, success = 0
+      for (const [h, s] of Object.entries(hourlyStats)) {
+        const t = new Date(h + ':00:00.000Z').getTime()
+        if (t >= fromTs && t < toTs) { total += s.total; success += s.success }
+      }
+      return { total, success, rate: total > 0 ? success / total : null }
+    }
+
+    // 3) Compute effectiveness per decision
+    const enrichedDecisions = (decisions || []).map((d, i) => {
+      const firedAt = new Date(d.created_at).getTime()
+      const before = windowStats(firedAt - 24 * 3600000, firedAt)
+      const after = windowStats(firedAt, firedAt + 24 * 3600000)
+      const isSettled = Date.now() - firedAt >= 24 * 3600000
+      let wasEffective = null
+      if (isSettled && before.total >= 5 && after.total >= 5) {
+        // "Effective" = success rate improved OR activity volume increased meaningfully
+        const rateImproved = after.rate !== null && before.rate !== null && (after.rate - before.rate) >= 0.05
+        const volumeImproved = after.total >= before.total * 1.15
+        wasEffective = rateImproved || volumeImproved
+      }
+      return {
+        id: d.id,
+        fired_at: d.created_at,
+        assessment: d.details?.assessment || d.result_status || 'unknown',
+        recommendation: d.details?.recommendation || null,
+        adjustments: d.details?.adjustments || [],
+        applied_count: d.details?.applied_count || 0,
+        run_number: d.details?.run_number || null,
+        activity_count: d.details?.activity_count || 0,
+        was_effective: wasEffective, // true | false | null (pending)
+        before_window: { total: before.total, success_rate: before.rate },
+        after_window: { total: after.total, success_rate: after.rate },
+      }
+    })
+
+    // 4) Effectiveness rollup
+    const settled = enrichedDecisions.filter(d => d.was_effective !== null)
+    const helpful = settled.filter(d => d.was_effective === true).length
+    const hurt = settled.filter(d => d.was_effective === false).length
+    const accuracy = settled.length > 0 ? Math.round((helpful / settled.length) * 100) : null
+
+    // 5) Overall trend — compare last 3 days vs previous 3 days
+    const now = Date.now()
+    const last3 = windowStats(now - 3 * 86400000, now)
+    const prev3 = windowStats(now - 6 * 86400000, now - 3 * 86400000)
+    let overall_trend = 'stable'
+    if (last3.rate !== null && prev3.rate !== null) {
+      if (last3.rate - prev3.rate >= 0.05 || last3.total >= prev3.total * 1.2) overall_trend = 'improving'
+      else if (prev3.rate - last3.rate >= 0.05 || last3.total <= prev3.total * 0.8) overall_trend = 'declining'
+    }
+
+    // 6) Pull memories, grouped by memory_type
+    const { data: memories } = await supabase
+      .from('ai_pilot_memory')
+      .select('id, memory_type, key, value, confidence, evidence_count, last_updated_at, account_id, group_fb_id')
+      .eq('campaign_id', req.params.id)
+      .gte('confidence', 0.15)
+      .order('confidence', { ascending: false })
+      .limit(100)
+
+    const memoriesByType = {}
+    for (const m of memories || []) {
+      const t = m.memory_type || 'other'
+      if (!memoriesByType[t]) memoriesByType[t] = []
+      memoriesByType[t].push(m)
+    }
+
+    // 7) Last fired, next fire estimate
+    const last_fired_at = decisions?.[0]?.created_at || null
+    const hoursSinceLastFire = last_fired_at ? (Date.now() - new Date(last_fired_at).getTime()) / 3600000 : null
+
+    // AI Pilot fires every 3rd campaign run. Parse cron to estimate next fire.
+    let next_fire_at = null
+    try {
+      if (campaign.cron_expression) {
+        const { CronExpressionParser } = require('cron-parser')
+        const iter = CronExpressionParser.parse(campaign.cron_expression, { currentDate: new Date() })
+        // Not precise (we'd need to know current run_number % 3) — just return next 3 scheduled runs
+        const next3 = [iter.next().toISOString(), iter.next().toISOString(), iter.next().toISOString()]
+        next_fire_at = next3[2] // worst-case: 3 runs from now
+      }
+    } catch {}
+
+    // 8) Health signals for warning panel
+    const warnings = []
+    if (hoursSinceLastFire !== null && hoursSinceLastFire > 24) {
+      warnings.push({ level: 'warning', code: 'stale_last_fire', message: `AI Pilot chưa fire trong ${Math.round(hoursSinceLastFire)}h qua` })
+    }
+    if (decisions && decisions.length >= 3) {
+      const last3dec = decisions.slice(0, 3)
+      if (last3dec.every(d => d.details?.assessment === 'critical')) {
+        warnings.push({ level: 'critical', code: 'consecutive_critical', message: '3 quyết định gần nhất đều critical — campaign đang gặp vấn đề nghiêm trọng' })
+      }
+      if (last3dec.every(d => (d.details?.applied_count || 0) === 0)) {
+        warnings.push({ level: 'warning', code: 'zero_applied', message: '3 quyết định gần nhất không apply được gì — cần debug' })
+      }
+    }
+    if ((campaign.total_runs || 0) < 3) {
+      warnings.push({ level: 'info', code: 'not_enough_runs', message: `Campaign mới chạy ${campaign.total_runs || 0}/3 lần — AI Pilot sẽ bắt đầu đánh giá sau` })
+    }
+
+    return {
+      summary: {
+        total_decisions: (decisions || []).length,
+        total_runs: campaign.total_runs || 0,
+        last_fired_at,
+        hours_since_last_fire: hoursSinceLastFire !== null ? Math.round(hoursSinceLastFire * 10) / 10 : null,
+        next_fire_at,
+        overall_trend,
+        last_3d_activity: last3,
+        prev_3d_activity: prev3,
+      },
+      recent_decisions: enrichedDecisions,
+      effectiveness: {
+        total_settled: settled.length,
+        decisions_that_helped: helpful,
+        decisions_that_hurt: hurt,
+        accuracy_pct: accuracy,
+      },
+      current_strategy: {
+        memories_count: (memories || []).length,
+        memories_by_type: memoriesByType,
+      },
+      warnings,
+    }
+  })
+
+  // DELETE /campaigns/:id/ai-pilot-memory/:memoryId — user can purge a bad memory
+  fastify.delete('/:id/ai-pilot-memory/:memoryId', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+    const { error } = await supabase.from('ai_pilot_memory')
+      .delete()
+      .eq('id', req.params.memoryId)
+      .eq('campaign_id', req.params.id)
+    if (error) return reply.code(500).send({ error: error.message })
+    return { ok: true }
+  })
+
   // GET /campaigns/:id/activity-log — granular per-action log (cursor-based)
   fastify.get('/:id/activity-log', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: campaign } = await supabase.from('campaigns')
