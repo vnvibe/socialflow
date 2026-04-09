@@ -83,14 +83,18 @@ async function checkGroupMembershipHandler(payload, supabase) {
       return { hasComposer, isPending, isRejected, hasJoinButton, snippet: text.substring(0, 300) }
     }).catch(() => ({ hasComposer: false, isPending: false, isRejected: false, hasJoinButton: false, snippet: '' }))
 
+    const attempt = payload.attempt || 1
     let updates = null
     let verdict = 'unknown'
+
     if (status.hasComposer && !status.hasJoinButton) {
       verdict = 'admitted'
       updates = {
         is_member: true,
         pending_approval: false,
         joined_at: new Date().toISOString(),
+        membership_check_attempts: attempt,
+        membership_last_checked_at: new Date().toISOString(),
       }
     } else if (status.isRejected || status.hasJoinButton) {
       verdict = 'rejected_or_removed'
@@ -98,25 +102,83 @@ async function checkGroupMembershipHandler(payload, supabase) {
         is_member: false,
         pending_approval: false,
         score_tier: 'D',
+        membership_check_attempts: attempt,
+        membership_last_checked_at: new Date().toISOString(),
       }
-    } else if (status.isPending) {
-      verdict = 'still_pending'
-      // No update — keep pending_approval=true
-    } else {
-      // Ambiguous: composer missing but no explicit pending/reject markers.
-      // Likely still pending (FB sometimes hides composer until scroll). Leave alone.
-      verdict = 'ambiguous'
+    } else if (status.isPending || verdict === 'unknown') {
+      verdict = status.isPending ? 'still_pending' : 'ambiguous'
+
+      // Track attempt + schedule next check with exponential backoff
+      const backoffMinutes = [20, 60, 120, 360, 1440] // 20m, 1h, 2h, 6h, 24h
+      const nextDelay = (backoffMinutes[Math.min(attempt, backoffMinutes.length - 1)]) * 60 * 1000
+
+      updates = {
+        membership_check_attempts: attempt,
+        membership_last_checked_at: new Date().toISOString(),
+      }
+
+      // After 5 attempts AND > 72h since first seen → give up, mark tier D
+      const groupRowId = group_row_id || null
+      if (attempt > 5) {
+        try {
+          const { data: grp } = await supabase.from('fb_groups')
+            .select('created_at').eq('id', groupRowId || '').single()
+          const hoursSinceCreated = grp?.created_at
+            ? (Date.now() - new Date(grp.created_at).getTime()) / 3600000
+            : 0
+          if (hoursSinceCreated > 72) {
+            verdict = 'pending_too_long'
+            updates.score_tier = 'D'
+            updates.pending_approval = false
+            updates.is_member = false
+            console.log(`[CHECK-MEMBER] ${group_name || fb_group_id} → pending_too_long (${attempt} attempts, ${Math.round(hoursSinceCreated)}h) → tier D`)
+          }
+        } catch {}
+      }
+
+      // Re-queue with backoff (only if not giving up)
+      if (verdict !== 'pending_too_long') {
+        try {
+          await supabase.from('jobs').insert({
+            type: 'check_group_membership',
+            priority: 5,
+            payload: {
+              ...payload,
+              attempt: attempt + 1,
+            },
+            status: 'pending',
+            scheduled_at: new Date(Date.now() + nextDelay).toISOString(),
+          })
+          const delayLabel = nextDelay < 3600000
+            ? `${Math.round(nextDelay / 60000)}min`
+            : `${Math.round(nextDelay / 3600000)}h`
+          console.log(`[CHECK-MEMBER] ${group_name || fb_group_id} → ${verdict} (attempt ${attempt}) → next check in ${delayLabel}`)
+        } catch {}
+      }
     }
 
-    if (updates && group_row_id) {
-      await supabase.from('fb_groups').update(updates).eq('id', group_row_id)
-    } else if (updates) {
-      await supabase.from('fb_groups').update(updates)
-        .eq('account_id', account_id).eq('fb_group_id', fb_group_id)
+    // Apply updates
+    if (updates) {
+      if (group_row_id) {
+        await supabase.from('fb_groups').update(updates).eq('id', group_row_id)
+      } else {
+        await supabase.from('fb_groups').update(updates)
+          .eq('account_id', account_id).eq('fb_group_id', fb_group_id)
+      }
+    }
+
+    // If admitted, also activate the campaign_groups junction row
+    if (verdict === 'admitted' && payload.campaign_id && group_row_id) {
+      try {
+        await supabase.from('campaign_groups')
+          .update({ status: 'active' })
+          .eq('campaign_id', payload.campaign_id)
+          .eq('group_id', group_row_id)
+      } catch {}
     }
 
     console.log(`[CHECK-MEMBER] ${group_name || fb_group_id} → ${verdict}`)
-    return { success: true, verdict, updated: !!updates, snippet: status.snippet.substring(0, 120) }
+    return { success: true, verdict, attempt, updated: !!updates, snippet: status.snippet.substring(0, 120) }
   } finally {
     if (session) await releaseSession(account_id).catch(() => {})
   }
