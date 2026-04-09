@@ -302,10 +302,12 @@ async function checkHealthHandler(payload, supabase) {
       updates.fb_user_id = result.userId
     }
 
-    // Auto-recovery: if now healthy but was disabled by error → re-enable
-    // ONLY for checkpoint/expired/at_risk, NOT for manually disabled accounts
+    // Auto-recovery: if now healthy but was disabled by error → re-enable.
+    // Covers checkpoint/expired/at_risk/unknown. 'unknown' is set when
+    // check_health itself errors out (line ~324), so a follow-up healthy
+    // check should recover the nick. 'disabled' is user-manual → never touch.
     const oldStatus = account.status
-    const wasAutoDisabled = ['checkpoint', 'expired', 'at_risk'].includes(oldStatus)
+    const wasAutoDisabled = ['checkpoint', 'expired', 'at_risk', 'unknown'].includes(oldStatus)
     if (status === 'healthy' && account.is_active === false && wasAutoDisabled) {
       updates.is_active = true
       console.log(`[HEALTH] ✓ Auto-recovered nick ${account_id.slice(0, 8)}: ${oldStatus} → healthy, re-enabled`)

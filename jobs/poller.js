@@ -245,15 +245,22 @@ async function poll() {
         }
       }
 
-      // Per-nick account status check (skip disabled/checkpoint/expired accounts)
-      if (accId) {
+      // Per-nick account status check (skip disabled/checkpoint/expired accounts).
+      // Phase 15 fix: diagnostic jobs (check_health, check_group_membership,
+      // fetch_source_cookie) MUST bypass this gate — they're the mechanism to
+      // RECOVER an inactive nick. Only cancel user-facing interaction jobs.
+      const BYPASS_ACTIVE_CHECK = new Set([
+        'check_health', 'check_engagement', 'check_group_membership',
+        'fetch_source_cookie', 'warmup_browse',
+      ])
+      if (accId && !BYPASS_ACTIVE_CHECK.has(job.type)) {
         const statusOk = await checkAccountActive(accId)
         if (!statusOk) {
           // Auto-cancel job for inactive nick — prevent infinite skip loop
           try {
             await supabase.from('jobs').update({ status: 'cancelled', error_message: 'account_not_active' }).eq('id', job.id).eq('status', 'pending')
           } catch {}
-          console.log(`[POLLER] Nick ${accId.slice(0,8)} not active — CANCELLED job ${job.id}`)
+          console.log(`[POLLER] Nick ${accId.slice(0,8)} not active — CANCELLED ${job.type} job ${job.id}`)
           continue
         }
       }
