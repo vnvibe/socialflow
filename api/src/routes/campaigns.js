@@ -422,6 +422,50 @@ module.exports = async (fastify) => {
       } catch (cascadeErr) {
         req.log?.warn?.(`cascade account_ids failed: ${cascadeErr.message}`)
       }
+
+      // Phase 14: auto-assign existing groups to newly added nicks.
+      // Compare old vs new account_ids to detect additions, then for each new
+      // nick, pull their is_member=true fb_groups and upsert campaign_groups rows.
+      try {
+        const oldNickIds = new Set()
+        // Pull previous roster from campaign_roles (pre-cascade snapshot).
+        // Since we just cascaded above, we need the pre-update value — fetch from
+        // the campaign object BEFORE the update. Easier: compute set diff using
+        // the new roster and the existing junction assigned_nick_ids.
+        const { data: existingJunction } = await supabase
+          .from('campaign_groups')
+          .select('assigned_nick_id')
+          .eq('campaign_id', req.params.id)
+          .eq('status', 'active')
+        for (const row of existingJunction || []) {
+          if (row.assigned_nick_id) oldNickIds.add(row.assigned_nick_id)
+        }
+        const newNickIds = (req.body.account_ids || []).filter(id => !oldNickIds.has(id))
+        if (newNickIds.length) {
+          const { data: theirGroups } = await supabase
+            .from('fb_groups')
+            .select('id, account_id, global_score, score_tier, ai_join_score')
+            .in('account_id', newNickIds)
+            .eq('is_member', true)
+            .eq('pending_approval', false)
+            .or('is_blocked.is.null,is_blocked.eq.false')
+          const rows = (theirGroups || []).map(g => ({
+            campaign_id: req.params.id,
+            group_id: g.id,
+            assigned_nick_id: g.account_id,
+            score: g.global_score || g.ai_join_score || 5,
+            tier: g.score_tier || 'C',
+            status: 'active',
+          }))
+          if (rows.length) {
+            await supabase.from('campaign_groups')
+              .upsert(rows, { onConflict: 'campaign_id,group_id' })
+            console.log(`[PUT campaigns/${req.params.id.slice(0,8)}] auto-assigned ${rows.length} groups to ${newNickIds.length} new nicks`)
+          }
+        }
+      } catch (assignErr) {
+        req.log?.warn?.(`[PUT campaigns] auto-assign groups failed: ${assignErr.message}`)
+      }
     }
 
     // Phase 11: rebalance KPI when nicks roster or kpi_config changes
@@ -1291,6 +1335,154 @@ module.exports = async (fastify) => {
 
     if (error) return reply.code(500).send({ error: error.message })
     return { ok: true }
+  })
+
+  // ── Phase 14: Reference campaigns + import groups ──────────────────────
+  // GET /campaigns/:id/reference-campaigns
+  // List other active campaigns owned by the same user (same topic/language
+  // preferred) with a count of how many groups each one has. Used to
+  // populate the "Import from another campaign" modal.
+  fastify.get('/:id/reference-campaigns', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: current } = await supabase.from('campaigns')
+      .select('id, topic, language')
+      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!current) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { data: campaigns } = await supabase.from('campaigns')
+      .select('id, name, topic, language, is_active, status, created_at')
+      .eq('owner_id', req.user.id)
+      .neq('id', req.params.id)
+      .order('is_active', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    if (!campaigns?.length) return []
+
+    // Count active campaign_groups per campaign
+    const ids = campaigns.map(c => c.id)
+    const { data: counts } = await supabase.from('campaign_groups')
+      .select('campaign_id')
+      .in('campaign_id', ids)
+      .eq('status', 'active')
+    const countMap = {}
+    for (const r of counts || []) {
+      countMap[r.campaign_id] = (countMap[r.campaign_id] || 0) + 1
+    }
+
+    // Sort: same topic/language first, then by group count desc
+    const scored = campaigns.map(c => {
+      let rank = 0
+      if (c.topic && current.topic && c.topic.toLowerCase() === current.topic.toLowerCase()) rank += 10
+      if (c.language === current.language) rank += 5
+      if (c.is_active) rank += 2
+      return { ...c, groups_count: countMap[c.id] || 0, _rank: rank }
+    }).filter(c => c.groups_count > 0)
+    scored.sort((a, b) => (b._rank - a._rank) || (b.groups_count - a.groups_count))
+
+    return scored.map(({ _rank, ...c }) => c)
+  })
+
+  // POST /campaigns/:id/import-groups
+  // Body: { source_campaign_ids: ["uuid1", "uuid2"] }
+  // Copies campaign_groups rows from source campaigns into the target.
+  // Dedup by group_id (skip groups already in target). For each imported
+  // group, prefer a nick that's already is_member=true on that group (from
+  // the current campaign's roster); if none, skip and report in the response.
+  fastify.post('/:id/import-groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: target } = await supabase.from('campaigns')
+      .select('id, owner_id, campaign_roles(account_ids)')
+      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!target) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const sourceIds = Array.isArray(req.body?.source_campaign_ids) ? req.body.source_campaign_ids : []
+    if (!sourceIds.length) return reply.code(400).send({ error: 'source_campaign_ids required' })
+
+    // Verify source campaigns belong to the same owner
+    const { data: sourceCamps } = await supabase.from('campaigns')
+      .select('id').in('id', sourceIds).eq('owner_id', req.user.id)
+    const validSourceIds = (sourceCamps || []).map(c => c.id)
+    if (!validSourceIds.length) return reply.code(400).send({ error: 'No valid source campaigns' })
+
+    // Target campaign's nicks (eligible for assignment)
+    const targetNicks = [...new Set((target.campaign_roles || []).flatMap(r => r.account_ids || []))]
+
+    // Pull source campaign_groups joined with fb_groups for tier/score
+    const { data: sourceRows } = await supabase.from('campaign_groups')
+      .select('group_id, score, tier, fb_groups(id, fb_group_id, account_id, is_member, pending_approval, is_blocked)')
+      .in('campaign_id', validSourceIds)
+      .eq('status', 'active')
+
+    // Group by fb_group_id for dedup (one source row per unique group)
+    const byGroupId = new Map()
+    for (const r of sourceRows || []) {
+      if (!r.fb_groups) continue
+      const fgid = r.fb_groups.fb_group_id
+      if (!byGroupId.has(fgid)) byGroupId.set(fgid, r)
+    }
+
+    // Pull existing target junction to skip dupes
+    const { data: existingTarget } = await supabase.from('campaign_groups')
+      .select('group_id, fb_groups(fb_group_id)')
+      .eq('campaign_id', req.params.id)
+    const existingFbGids = new Set((existingTarget || []).map(r => r.fb_groups?.fb_group_id).filter(Boolean))
+
+    // For each candidate group, find a target-campaign nick that already
+    // has membership on that group (query fb_groups for the same fb_group_id
+    // scoped to target nicks).
+    let imported = 0
+    let skippedDupe = 0
+    let skippedNoMember = 0
+    const rowsToInsert = []
+
+    for (const [fbGid, src] of byGroupId.entries()) {
+      if (existingFbGids.has(fbGid)) { skippedDupe++; continue }
+
+      // Find a target nick that is_member of this fb_group_id
+      let assignedNick = null
+      let assignedGroupId = null
+      if (targetNicks.length) {
+        const { data: memberRows } = await supabase.from('fb_groups')
+          .select('id, account_id, global_score, score_tier')
+          .eq('fb_group_id', fbGid)
+          .in('account_id', targetNicks)
+          .eq('is_member', true)
+          .eq('pending_approval', false)
+          .limit(1)
+        if (memberRows?.length) {
+          assignedNick = memberRows[0].account_id
+          assignedGroupId = memberRows[0].id
+        }
+      }
+
+      if (!assignedNick) {
+        // No target nick is a member yet. Skip — scout will need to join first.
+        skippedNoMember++
+        continue
+      }
+
+      rowsToInsert.push({
+        campaign_id: req.params.id,
+        group_id: assignedGroupId,
+        assigned_nick_id: assignedNick,
+        score: src.score || 5,
+        tier: src.tier || 'C',
+        status: 'active',
+      })
+    }
+
+    if (rowsToInsert.length) {
+      const { error } = await supabase.from('campaign_groups')
+        .upsert(rowsToInsert, { onConflict: 'campaign_id,group_id' })
+      if (error) return reply.code(500).send({ error: error.message })
+      imported = rowsToInsert.length
+    }
+
+    return {
+      imported,
+      skipped_duplicate: skippedDupe,
+      skipped_no_member: skippedNoMember,
+      total_candidates: byGroupId.size,
+    }
   })
 
   // ── Phase 13: AI Pilot report + memory panel ───────────────────────────

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { UsersRound, Plus, Trash2, Search, RefreshCw, Star, Loader, PlusCircle, MinusCircle, CheckCircle, XCircle, X } from 'lucide-react'
+import { UsersRound, Plus, Trash2, Search, RefreshCw, Star, Loader, PlusCircle, MinusCircle, CheckCircle, XCircle, X, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../../lib/api'
 
@@ -137,6 +137,27 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
     onError: (err) => toast.error(err.response?.data?.error || 'Lỗi'),
   })
 
+  // Phase 14: import groups from reference campaigns
+  const [showImport, setShowImport] = useState(false)
+  const [selectedSourceIds, setSelectedSourceIds] = useState([])
+
+  const { data: refCampaigns = [], isLoading: refLoading } = useQuery({
+    queryKey: ['reference-campaigns', campaignId],
+    queryFn: () => api.get(`/campaigns/${campaignId}/reference-campaigns`).then(r => r.data || []),
+    enabled: showImport,
+  })
+
+  const importGroupsMut = useMutation({
+    mutationFn: (sourceIds) => api.post(`/campaigns/${campaignId}/import-groups`, { source_campaign_ids: sourceIds }).then(r => r.data),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['campaign-groups', campaignId] })
+      toast.success(`Đã import ${result.imported} nhóm · bỏ qua ${result.skipped_duplicate} trùng · ${result.skipped_no_member} chưa có nick là member`)
+      setShowImport(false)
+      setSelectedSourceIds([])
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Lỗi import'),
+  })
+
   const reviewMut = useMutation({
     mutationFn: ({ groupId, approved }) => api.put(`/campaigns/${campaignId}/groups/${groupId}/review`, { approved }),
     onSuccess: (_, { approved }) => {
@@ -207,6 +228,13 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
             {isLoading ? 'Dang tai...' : 'Refresh'}
           </button>
           <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm text-purple-700 border border-purple-200 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
+            title="Import nhóm từ chiến dịch khác"
+          >
+            <Download size={14} /> Import từ CD khác
+          </button>
+          <button
             onClick={() => setShowAdd(!showAdd)}
             className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
@@ -214,6 +242,93 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
           </button>
         </div>
       </div>
+
+      {/* Phase 14: Import from other campaigns modal */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowImport(false)}>
+          <div className="bg-white rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Download size={16} className="text-purple-600" /> Import nhóm từ chiến dịch khác
+              </h3>
+              <button onClick={() => { setShowImport(false); setSelectedSourceIds([]) }} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-5 py-4 overflow-y-auto flex-1">
+              <p className="text-xs text-gray-500 mb-3">
+                Chọn các chiến dịch nguồn. Nhóm sẽ được copy sang chiến dịch này, dedup theo fb_group_id.
+                Nếu không có nick nào trong CD hiện tại là member của nhóm → sẽ skip (cần scout join trước).
+              </p>
+
+              {refLoading ? (
+                <div className="flex items-center justify-center py-8"><Loader size={20} className="animate-spin text-purple-500" /></div>
+              ) : refCampaigns.length === 0 ? (
+                <div className="text-center py-8 text-sm text-gray-400">
+                  Không có chiến dịch nào khác có nhóm
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {refCampaigns.map(c => {
+                    const isSelected = selectedSourceIds.includes(c.id)
+                    return (
+                      <label
+                        key={c.id}
+                        className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                          isSelected ? 'border-purple-300 bg-purple-50' : 'border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => setSelectedSourceIds(ids =>
+                            isSelected ? ids.filter(id => id !== c.id) : [...ids, c.id]
+                          )}
+                          className="mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-gray-900">{c.name}</span>
+                            {c.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Đang chạy</span>}
+                            {c.language && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{c.language}</span>}
+                          </div>
+                          <div className="flex items-center gap-3 mt-0.5 text-[11px] text-gray-500">
+                            {c.topic && <span>Topic: {c.topic}</span>}
+                            <span className="font-semibold text-purple-600">{c.groups_count} nhóm</span>
+                          </div>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
+              <span className="text-[11px] text-gray-500">
+                Đã chọn {selectedSourceIds.length} / {refCampaigns.length} chiến dịch
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setShowImport(false); setSelectedSourceIds([]) }}
+                  className="px-4 py-1.5 text-sm text-gray-500 hover:text-gray-700"
+                >
+                  Hủy
+                </button>
+                <button
+                  disabled={!selectedSourceIds.length || importGroupsMut.isPending}
+                  onClick={() => importGroupsMut.mutate(selectedSourceIds)}
+                  className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {importGroupsMut.isPending ? <Loader size={14} className="animate-spin" /> : <Download size={14} />}
+                  Import
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Priority Groups (tier A) */}
       <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 space-y-3">
