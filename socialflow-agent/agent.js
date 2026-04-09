@@ -1,28 +1,46 @@
 // Load config: config.env > .env > lib/config.js
 const path = require('path')
 const fs = require('fs')
+const { execSync } = require('child_process')
 const envFile = fs.existsSync(path.join(__dirname, 'config.env')) ? 'config.env' : '.env'
 require('dotenv').config({ path: path.join(__dirname, envFile) })
-const { startPoller, getStopPoller } = require('./jobs/poller')
-const { checkFFmpeg } = require('./video/processor')
+const { startPoller, getStopPoller, getPool } = require('./jobs/poller')
 const os = require('os')
 
 const MAX_CONNECT_RETRIES = 10
 const CONNECT_RETRY_DELAY = 5000 // 5s between retries
 
+/**
+ * Kill zombie Chromium processes từ session trước (chỉ kill socialflow profiles)
+ */
+function killZombieChromium() {
+  try {
+    const profileDir = path.join(os.homedir(), '.socialflow', 'profiles')
+    if (process.platform === 'win32') {
+      // Use PowerShell (wmic removed in Win11) to find Chromium with our profile dir
+      const escaped = profileDir.replace(/\\/g, '\\\\')
+      const result = execSync(
+        `powershell -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escaped}*' } | Select-Object -ExpandProperty ProcessId"`,
+        { encoding: 'utf8', timeout: 8000 }
+      ).trim()
+      const pids = result.split(/\r?\n/).map(s => s.trim()).filter(s => /^\d+$/.test(s))
+      for (const pid of pids) {
+        try { execSync(`taskkill /F /PID ${pid}`, { timeout: 3000, stdio: 'ignore' }) } catch {}
+      }
+      if (pids.length) console.log(`[CLEANUP] Killed ${pids.length} zombie Chromium process(es)`)
+    } else {
+      execSync(`pkill -f "${profileDir}" || true`, { timeout: 5000 })
+    }
+  } catch {}
+}
+
 async function main() {
+  // Kill leftover Chromium from previous crashed session
+  killZombieChromium()
+
   console.log('========================================')
   console.log('  SocialFlow Agent starting...')
   console.log('========================================')
-
-  // Check dependencies
-  try {
-    await checkFFmpeg()
-    console.log('[OK] FFmpeg found')
-  } catch (err) {
-    console.warn('[WARN] FFmpeg not found - video processing disabled')
-    console.warn('  Install FFmpeg: https://ffmpeg.org/download.html')
-  }
 
   // Check Supabase connection with retry
   const { supabase } = require('./lib/supabase')
@@ -48,14 +66,30 @@ async function main() {
   // Start heartbeat
   const { config } = require('./lib/supabase')
   const AGENT_ID = process.env.AGENT_ID || config.AGENT_ID || `${os.hostname()}-${process.pid}`
+  const pkg = require('./package.json')
   let heartbeatFails = 0
   async function heartbeat() {
     try {
+      const pool = getPool()
+      const memUsage = process.memoryUsage()
       await supabase.from('agent_heartbeats').upsert({
         agent_id: AGENT_ID,
+        machine_name: os.hostname(),
+        owner_id: process.env.AGENT_USER_ID || null,
+        version: pkg.version,
+        status: 'online',
+        platform: os.platform(),
+        cpu_usage: os.loadavg()[0],
+        mem_usage: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
+        running_jobs: pool.size,
+        running_accounts: [...pool.interactionNicks, ...pool.utilityNicks],
+        jobs_today: pool.jobsToday,
+        jobs_failed: pool.jobsFailed,
+        last_seen_at: new Date().toISOString(),
+        // Keep legacy fields for backward compat
         last_seen: new Date().toISOString(),
         hostname: os.hostname(),
-        platform: os.platform()
+        ...(process.env.AGENT_USER_ID && { user_id: process.env.AGENT_USER_ID }),
       }, { onConflict: 'agent_id' })
       if (heartbeatFails > 0) {
         console.log(`[HEARTBEAT] Reconnected after ${heartbeatFails} failures`)
@@ -69,8 +103,35 @@ async function main() {
     }
   }
   heartbeat()
-  const heartbeatInterval = setInterval(heartbeat, 10000)
+  const heartbeatInterval = setInterval(heartbeat, 30000) // 30s instead of 10s
   console.log('[OK] Heartbeat started')
+
+  // Phase 12: keep Railway API awake while agent is running.
+  // Ping /health every 3 minutes — Railway free-tier sleeps after ~15min idle,
+  // so this prevents cold starts during active agent sessions. Fire-and-forget.
+  const API_URL = process.env.API_URL || process.env.API_BASE_URL
+  let keepAliveInterval = null
+  if (API_URL) {
+    const https = require('https')
+    const http = require('http')
+    const { URL } = require('url')
+    const pingHealth = () => {
+      try {
+        const u = new URL(`${API_URL}/health`)
+        const lib = u.protocol === 'https:' ? https : http
+        const req = lib.request({
+          hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: u.pathname, method: 'GET', timeout: 10000,
+        }, (res) => { res.resume() /* drain */ })
+        req.on('error', () => {}) // silent
+        req.on('timeout', () => req.destroy())
+        req.end()
+      } catch {}
+    }
+    pingHealth() // fire immediately
+    keepAliveInterval = setInterval(pingHealth, 3 * 60 * 1000) // every 3 min
+    console.log(`[OK] Keep-alive ping started → ${API_URL}/health every 3min`)
+  }
 
   // Start job poller (before signal handlers so stopPoller is available)
   startPoller()
@@ -82,6 +143,7 @@ async function main() {
     isShuttingDown = true
     console.log(`\n[AGENT] Shutting down (${signal})...`)
     clearInterval(heartbeatInterval)
+    if (keepAliveInterval) clearInterval(keepAliveInterval)
     // Stop poller & close browser sessions
     try {
       await getStopPoller()()
@@ -103,6 +165,14 @@ async function main() {
   process.on('SIGINT', () => cleanup('SIGINT'))
   process.on('SIGTERM', () => cleanup('SIGTERM'))
   process.on('SIGHUP', () => cleanup('SIGHUP'))
+  // Windows: Ctrl+C in terminal sends this
+  if (process.platform === 'win32') {
+    process.on('beforeExit', () => cleanup('beforeExit'))
+    process.on('uncaughtException', async (err) => {
+      console.error('[AGENT] Uncaught exception:', err.message)
+      await cleanup('uncaughtException')
+    })
+  }
   console.log('[OK] Job poller started (polling every 5s)')
   console.log('Agent running. Waiting for jobs...')
 }
