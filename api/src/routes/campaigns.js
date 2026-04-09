@@ -488,10 +488,25 @@ module.exports = async (fastify) => {
       })
       .eq('id', req.params.id)
       .eq('owner_id', req.user.id)
-      .select()
+      .select('*, campaign_roles(*)')
       .single()
 
     if (error) return reply.code(500).send({ error: error.message })
+
+    // Phase 12: dispatch jobs immediately on Start instead of waiting for
+    // the next scheduler tick (which can be an hour away). Runs in the
+    // background so the HTTP response returns instantly.
+    try {
+      const { executeRoleCampaign } = require('../services/campaign-scheduler')
+      // Also rebalance KPI for the active nick roster
+      const { rebalanceKPI } = require('../services/kpi-calculator')
+      rebalanceKPI(supabase, req.params.id).catch(() => {})
+      executeRoleCampaign(data).catch(err =>
+        req.log?.warn?.(`[START] executeRoleCampaign failed: ${err.message}`))
+    } catch (dispatchErr) {
+      req.log?.warn?.(`[START] dispatch error: ${dispatchErr.message}`)
+    }
+
     return data
   })
 

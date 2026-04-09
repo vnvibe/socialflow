@@ -1288,4 +1288,4 @@ async function processMonitoringSources() {
   }
 }
 
-module.exports = { initScheduler, executeCampaign }
+module.exports = { initScheduler, executeCampaign, executeRoleCampaign }
