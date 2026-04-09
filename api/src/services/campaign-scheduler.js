@@ -239,49 +239,50 @@ async function createScoutJob(campaign, role, busyNickSet = new Set()) {
 
 // ─── Phase 7: Membership re-check cron ───────────────────────────────────
 async function processMembershipChecks() {
-  // Groups still pending admin approval. joined_at IS NULL means we never
-  // confirmed admission. Limit per-run to avoid flooding the job queue.
-  const { data: pendingGroups } = await supabase
-    .from('fb_groups')
-    .select('id, fb_group_id, url, account_id, name, joined_via_campaign_id')
-    .eq('pending_approval', true)
-    .is('joined_at', null)
-    .limit(50)
+  // Only verify groups that belong to an ACTIVE campaign via campaign_groups
+  // junction. Orphaned fb_groups (no junction row) are ignored — they'll get
+  // picked up when scout reuse logic attaches them to a campaign.
+  const { data: pendingRows } = await supabase
+    .from('campaign_groups')
+    .select('group_id, campaign_id, assigned_nick_id, fb_groups!inner(id, fb_group_id, url, name, pending_approval, is_member)')
+    .eq('status', 'active')
+    .eq('fb_groups.pending_approval', true)
+    .eq('fb_groups.is_member', false)
+    .limit(20)
 
-  if (!pendingGroups?.length) return
+  if (!pendingRows?.length) return
 
-  // Skip groups that already have a pending membership check queued
-  const ids = pendingGroups.map(g => g.id)
+  // Dedup: skip groups that already have a pending check queued
   const { data: existingChecks } = await supabase
     .from('jobs')
-    .select('id, payload')
+    .select('payload')
     .eq('type', 'check_group_membership')
     .in('status', ['pending', 'claimed', 'running'])
     .limit(100)
-  const queued = new Set((existingChecks || []).map(j => j.payload?.fb_group_id).filter(Boolean))
+  const queued = new Set((existingChecks || []).map(j => j.payload?.group_row_id).filter(Boolean))
 
   let created = 0
-  // Stagger: each check gets a 30-180s jitter so nicks don't hammer FB at once
-  for (const g of pendingGroups) {
-    if (queued.has(g.fb_group_id)) continue
+  for (const r of pendingRows) {
+    const fg = r.fb_groups
+    if (!fg || queued.has(fg.id)) continue
     const delayMs = 30 * 1000 + Math.random() * 150 * 1000
     const { error } = await supabase.from('jobs').insert({
       type: 'check_group_membership',
-      priority: 5,
+      priority: 3,
       payload: {
-        fb_group_id: g.fb_group_id,
-        group_row_id: g.id,
-        group_url: g.url || `https://www.facebook.com/groups/${g.fb_group_id}`,
-        group_name: g.name,
-        account_id: g.account_id,
-        campaign_id: g.joined_via_campaign_id || null,
+        fb_group_id: fg.fb_group_id,
+        group_row_id: fg.id,
+        group_url: fg.url || `https://www.facebook.com/groups/${fg.fb_group_id}`,
+        group_name: fg.name,
+        account_id: r.assigned_nick_id,
+        campaign_id: r.campaign_id,
       },
       status: 'pending',
       scheduled_at: new Date(Date.now() + delayMs).toISOString(),
     })
     if (!error) created++
   }
-  if (created > 0) console.log(`[MEMBERSHIP-CHECK] Queued ${created} checks (${pendingGroups.length - created} skipped as dup)`)
+  if (created > 0) console.log(`[MEMBERSHIP-CHECK] Queued ${created} campaign-scoped checks`)
 }
 
 async function processPendingCampaigns() {
