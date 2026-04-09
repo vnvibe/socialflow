@@ -536,6 +536,50 @@ async function executeRoleCampaign(campaign) {
     console.warn(`[SCHEDULER] Nick lock check failed: ${err.message} — proceeding without lock`)
   }
 
+  // ── Phase 16: Wave scheduling ────────────────────────────────────────────
+  // If wave_config.enabled, only a subset of nicks are active in the current
+  // time window. Nicks rotate across waves so FB sees varied timing patterns.
+  const waveConfig = campaign.wave_config || { enabled: false }
+  let waveFilteredNickSet = null // null = no filter (all nicks active)
+  if (waveConfig.enabled && Array.isArray(waveConfig.waves) && waveConfig.waves.length > 0) {
+    // VN hour (Asia/Ho_Chi_Minh = UTC+7)
+    const vnHour = new Date(Date.now() + 7 * 3600 * 1000).getUTCHours()
+    const currentWave = waveConfig.waves.find(w => vnHour >= w.start && vnHour < w.end)
+    if (!currentWave) {
+      console.log(`[WAVE] Campaign ${campaign.name || campaign.id.slice(0,8)}: hour ${vnHour} outside all waves — skipping this tick`)
+      const nextRun = calculateNextRun(campaign)
+      await supabase.from('campaigns').update({ next_run_at: nextRun }).eq('id', campaign.id)
+      return
+    }
+
+    // Pull account health data for scoring
+    const { data: accountsForWave } = await supabase.from('accounts')
+      .select('id, status, fb_created_at, created_at')
+      .in('id', [...activeAccountSet])
+    const nickScores = (accountsForWave || []).map(a => {
+      let score = 100
+      if (a.status === 'at_risk') score -= 40
+      if (a.status === 'unknown') score -= 20
+      const created = a.fb_created_at || a.created_at
+      const age = created ? Math.floor((Date.now() - new Date(created).getTime()) / 86400000) : 0
+      if (age < 14) score -= 40
+      else if (age < 30) score -= 30
+      return { id: a.id, score: Math.max(0, score) }
+    }).sort((a, b) => b.score - a.score)
+
+    const ratio = currentWave.nick_ratio || 0.4
+    const count = Math.max(1, Math.ceil(nickScores.length * ratio))
+    // Rotate: wave index based on current hour so different nicks are picked each window
+    const waveIdx = waveConfig.waves.indexOf(currentWave)
+    const offset = (waveIdx * count) % nickScores.length
+    const selected = []
+    for (let i = 0; i < count; i++) {
+      selected.push(nickScores[(offset + i) % nickScores.length].id)
+    }
+    waveFilteredNickSet = new Set(selected)
+    console.log(`[WAVE] Campaign ${campaign.name || campaign.id.slice(0,8)}: wave ${currentWave.start}-${currentWave.end}h, ${selected.length}/${nickScores.length} nicks (ratio ${ratio})`)
+  }
+
   let jobsCreated = 0
   let jobsSkipped = 0
   let roleDelay = 0
@@ -580,9 +624,13 @@ async function executeRoleCampaign(campaign) {
   }
 
   for (const role of sortedRoles) {
-    const accountIds = (role.account_ids || []).filter(id => activeAccountSet.has(id))
+    let accountIds = (role.account_ids || []).filter(id => activeAccountSet.has(id))
+    // Phase 16: further filter by wave selection (if enabled)
+    if (waveFilteredNickSet) {
+      accountIds = accountIds.filter(id => waveFilteredNickSet.has(id))
+    }
     if (accountIds.length === 0) {
-      console.log(`[SCHEDULER] Role ${role.name || role.role_type} has no active accounts, skipping`)
+      console.log(`[SCHEDULER] Role ${role.name || role.role_type} has no active accounts${waveFilteredNickSet ? ' (wave-filtered)' : ''}, skipping`)
       continue
     }
 

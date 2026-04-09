@@ -510,6 +510,7 @@ module.exports = async (fastify) => {
       'start_at', 'end_at', 'delay_between_targets_minutes',
       'nick_stagger_seconds', 'role_stagger_minutes', 'campaign_active_days',
       'kpi_config', // Phase 11
+      'wave_config', // Phase 16
     ]
     const updates = {}
     for (const key of allowed) {

@@ -133,6 +133,8 @@ const nickSessionStart = new Map()     // account_id → timestamp when session 
 const nickRestUntil = new Map()        // account_id → { until, durationMin }
 const nickBudgetExhaustedLog = new Set() // "budget_log:{accId}:{actionType}" — suppress spam logs
 const nickWarmupBlockedLog = new Set()   // "{accId}:{actionType}" — suppress warm-up spam logs (1 log/nick/action)
+// Phase 16: group visit isolation — max 2 different nicks visiting same group in 30min
+const groupVisitLog = new Map()        // fb_group_id → [{ nickId, ts }]
 const BUDGET_CACHE_TTL = 60000         // 1 min
 const STATUS_CACHE_TTL = 60000         // 1 min
 const MAX_HOURLY_ACTIONS = 50          // cumulative across all types
@@ -367,6 +369,18 @@ async function poll() {
             }
           }
         } catch {}
+      }
+
+      // Phase 16: group visit isolation — max 2 different nicks in same group within 30min.
+      // Only for nurture/interact/monitor jobs that target a specific group.
+      if (accId && ['campaign_nurture', 'campaign_interact_profile', 'campaign_group_monitor'].includes(job.type)) {
+        // Clean expired entries every check (cheap — map is small)
+        const now = Date.now()
+        for (const [gid, visits] of groupVisitLog.entries()) {
+          const fresh = visits.filter(v => now - v.ts < 30 * 60 * 1000)
+          if (fresh.length === 0) groupVisitLog.delete(gid)
+          else groupVisitLog.set(gid, fresh)
+        }
       }
 
       // Per-nick hourly rate limit (max 50 actions/hour across all types)
@@ -1214,4 +1228,20 @@ async function checkBudgetBeforeClaim(accountId, actionType) {
   }
 }
 
-module.exports = { startPoller, getStopPoller: () => stopPoller, getPool }
+// Phase 16: group isolation — handlers call this after visiting a group
+function recordGroupVisit(fbGroupId, nickId) {
+  if (!fbGroupId || !nickId) return
+  const visits = groupVisitLog.get(fbGroupId) || []
+  visits.push({ nickId, ts: Date.now() })
+  groupVisitLog.set(fbGroupId, visits)
+}
+
+function canVisitGroup(fbGroupId, nickId) {
+  if (!fbGroupId) return true
+  const visits = (groupVisitLog.get(fbGroupId) || []).filter(v => Date.now() - v.ts < 30 * 60 * 1000)
+  const uniqueNicks = new Set(visits.map(v => v.nickId))
+  if (uniqueNicks.has(nickId)) return true // this nick already visited → ok
+  return uniqueNicks.size < 2 // max 2 different nicks per 30min
+}
+
+module.exports = { startPoller, getStopPoller: () => stopPoller, getPool, recordGroupVisit, canVisitGroup }

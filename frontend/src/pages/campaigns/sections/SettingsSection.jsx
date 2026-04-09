@@ -43,6 +43,10 @@ export default function SettingsSection({ campaignId, campaign }) {
     example_comment: '',
     brand_voice: 'casual',
   } : null)
+  // Phase 16: wave scheduling
+  const initWave = campaign.wave_config || { enabled: false }
+  const [waveEnabled, setWaveEnabled] = useState(initWave.enabled || false)
+
   const [adEnabled, setAdEnabled] = useState(!!initialBrand)
   const [brandName, setBrandName] = useState(initialBrand?.brand_name || '')
   const [brandDescription, setBrandDescription] = useState(initialBrand?.brand_description || '')
@@ -57,6 +61,7 @@ export default function SettingsSection({ campaignId, campaign }) {
     setNickStagger(campaign.nick_stagger_seconds || 60)
     setRoleStagger(campaign.role_stagger_minutes || 30)
     setSelectedAccountIds(campaign.account_ids || [])
+    setWaveEnabled(campaign.wave_config?.enabled || false)
     // Reload brand_config (canonical) or fall back to legacy shape
     const bc = campaign.brand_config
     const legacy = campaign.campaign_roles?.[0]?.config?.advertising || {}
@@ -119,6 +124,16 @@ export default function SettingsSection({ campaignId, campaign }) {
 
     // Save campaign settings — brand_config is persisted on the campaign row (new SaaS shape).
     // account_ids cascades to campaign_roles on the server side.
+    // Phase 16: build wave_config payload
+    const wavePayload = waveEnabled
+      ? { enabled: true, wave_duration_minutes: 180, waves: [
+          { start: 6, end: 9, nick_ratio: 0.4 },
+          { start: 10, end: 13, nick_ratio: 0.3 },
+          { start: 14, end: 17, nick_ratio: 0.3 },
+          { start: 19, end: 22, nick_ratio: 0.4 },
+        ]}
+      : { enabled: false }
+
     updateMut.mutate({
       name, topic, requirement,
       cron_expression: cronExpr,
@@ -127,6 +142,7 @@ export default function SettingsSection({ campaignId, campaign }) {
       brand_config: brandPayload,
       ad_mode: brandPayload ? 'ad_enabled' : 'normal',
       account_ids: selectedAccountIds,
+      wave_config: wavePayload,
     })
 
     // 24/7 mode: push active_hours_start=0, end=24 to all selected nicks.
@@ -225,6 +241,43 @@ export default function SettingsSection({ campaignId, campaign }) {
               className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
             />
           </div>
+        </div>
+
+        {/* Phase 16: Wave scheduling toggle */}
+        <div className="pt-3 border-t border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-700">Phân chia theo đợt sóng (Wave)</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">Chia nicks thành từng đợt, mỗi đợt chạy trong khung giờ riêng</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setWaveEnabled(!waveEnabled)}
+              className={`relative w-10 h-5 rounded-full transition-colors ${waveEnabled ? 'bg-blue-600' : 'bg-gray-200'}`}
+            >
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${waveEnabled ? 'left-5' : 'left-0.5'}`} />
+            </button>
+          </div>
+          {waveEnabled && (
+            <div className="mt-3 bg-gray-50 rounded-lg p-3">
+              <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
+                {[
+                  { label: '6h-9h', pct: '40%', color: 'bg-blue-200 text-blue-800' },
+                  { label: '10h-13h', pct: '30%', color: 'bg-green-200 text-green-800' },
+                  { label: '14h-17h', pct: '30%', color: 'bg-yellow-200 text-yellow-800' },
+                  { label: '19h-22h', pct: '40%', color: 'bg-purple-200 text-purple-800' },
+                ].map(w => (
+                  <div key={w.label} className={`rounded px-2 py-2 ${w.color}`}>
+                    <p className="font-bold">{w.label}</p>
+                    <p>{w.pct} nicks</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-500 mt-2 text-center">
+                Mỗi wave chọn % nicks khác nhau. Nicks khỏe hơn, tuổi cao hơn được ưu tiên.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
