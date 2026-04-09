@@ -577,15 +577,30 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
                   )}
                 </div>
 
-                {/* Nick phụ trách — md+ */}
-                <div className="hidden md:flex items-center gap-1.5 min-w-0">
-                  {g.account_username ? (
-                    <>
-                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
-                        {g.account_username.substring(0, 2).toUpperCase()}
+                {/* Nick phụ trách — md+ (avatar stack for multi-nick) */}
+                <div className="hidden md:flex items-center min-w-0">
+                  {(g.assigned_nicks?.length || g.account_username) ? (
+                    <div className="flex items-center">
+                      <div className="flex -space-x-1.5">
+                        {(g.assigned_nicks || [{ id: g.assigned_nick_id, username: g.account_username }]).slice(0, 4).map((n, i) => (
+                          <div key={n.id || i} title={n.username || '?'}
+                            className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 text-white flex items-center justify-center text-[10px] font-bold border-2 border-white shrink-0"
+                            style={{ zIndex: 10 - i }}>
+                            {(n.username || '?').substring(0, 2).toUpperCase()}
+                          </div>
+                        ))}
+                        {(g.assigned_nicks?.length || 0) > 4 && (
+                          <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-[9px] font-bold border-2 border-white shrink-0">
+                            +{g.assigned_nicks.length - 4}
+                          </div>
+                        )}
                       </div>
-                      <span className="text-[11px] text-gray-700 truncate">{g.account_username}</span>
-                    </>
+                      {(g.assigned_nicks?.length || 0) <= 2 && (
+                        <span className="text-[11px] text-gray-700 truncate ml-1.5">
+                          {(g.assigned_nicks || [{ username: g.account_username }]).map(n => n.username).filter(Boolean).join(', ')}
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     <span className="text-[10px] text-gray-300">--</span>
                   )}

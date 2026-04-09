@@ -1172,12 +1172,12 @@ module.exports = async (fastify) => {
       accountMap = Object.fromEntries((accounts || []).map(a => [a.id, a.username]))
     }
 
-    return (data || [])
-      .filter(r => r.fb_groups) // skip rows where the fb_groups FK target was deleted
+    // Fix 2: dedup by fb_group_id — same FB group assigned to multiple nicks
+    // should appear as 1 row with a nicks[] array, not N duplicate rows.
+    const flat = (data || [])
+      .filter(r => r.fb_groups)
       .map(r => ({
-        // Flatten fb_groups fields for backwards compat with existing frontend
         ...r.fb_groups,
-        // Junction-level overrides (authoritative for this campaign)
         junction_id: r.id,
         junction_score: r.score,
         junction_tier: r.tier,
@@ -1187,6 +1187,30 @@ module.exports = async (fastify) => {
         assigned_nick_id: r.assigned_nick_id,
         account_username: accountMap[r.assigned_nick_id] || null,
       }))
+
+    const byFbGid = new Map()
+    for (const row of flat) {
+      const key = row.fb_group_id
+      if (!byFbGid.has(key)) {
+        byFbGid.set(key, {
+          ...row,
+          assigned_nicks: [{ id: row.assigned_nick_id, username: row.account_username }],
+        })
+      } else {
+        const existing = byFbGid.get(key)
+        existing.assigned_nicks.push({ id: row.assigned_nick_id, username: row.account_username })
+        // Keep the best junction score/tier
+        if ((row.junction_score || 0) > (existing.junction_score || 0)) {
+          existing.junction_score = row.junction_score
+          existing.junction_tier = row.junction_tier
+        }
+        // Keep most recent last_nurtured_at
+        if (row.last_nurtured_at && (!existing.last_nurtured_at || row.last_nurtured_at > existing.last_nurtured_at)) {
+          existing.last_nurtured_at = row.last_nurtured_at
+        }
+      }
+    }
+    return [...byFbGid.values()]
   })
 
   // NOTE: POST /campaigns/:id/priority-groups exists further below (legacy impl).
@@ -1374,6 +1398,28 @@ module.exports = async (fastify) => {
       rebalanceKPI(supabase, req.params.id).catch(() => {})
     } catch (kErr) {
       console.warn(`[priority-groups] KPI bump failed: ${kErr.message}`)
+    }
+
+    // Fix 1+3: if group name is null/placeholder, queue a resolve_group job
+    // to scrape real name + member_count from Facebook. Handler already exists.
+    const needsResolve = (data || []).some(g => !g.name || g.name === `Group ${fbGroupId}` || g.name.startsWith('Group '))
+    if (needsResolve && acctIds.length) {
+      try {
+        await supabase.from('jobs').insert({
+          type: 'resolve_group',
+          priority: 5,
+          payload: {
+            account_id: acctIds[0],
+            fb_group_id: fbGroupId,
+            group_url: groupUrl,
+            owner_id: req.user.id,
+          },
+          status: 'pending',
+          scheduled_at: new Date().toISOString(),
+          created_by: req.user.id,
+        })
+        console.log(`[priority-groups] Queued resolve_group for ${fbGroupId}`)
+      } catch {}
     }
 
     return { ok: true, fb_group_id: fbGroupId, count: data?.length || 0, groups: data }
