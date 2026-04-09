@@ -6,7 +6,7 @@ const { getPage, releaseSession } = require('../../browser/session-pool')
 const { delay, humanScroll, humanMouseMove, humanBrowse } = require('../../browser/human')
 const { checkAccountStatus, saveDebugScreenshot } = require('./post-utils')
 
-const API_BASE = process.env.API_URL || 'http://103.142.24.60:3005'
+const API_BASE = process.env.API_URL || 'https://103-142-24-60.sslip.io'
 const AGENT_KEY = process.env.AGENT_SECRET_KEY || ''
 
 async function scanGroupFeedHandler(payload, supabase) {
