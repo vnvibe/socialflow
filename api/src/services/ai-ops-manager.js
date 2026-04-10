@@ -116,12 +116,36 @@ Phân tích ngắn (JSON):
 Chỉ trả JSON.`, 200)
       }
 
+      // Phase 19: analyze AI decisions effectiveness (last 6h)
+      let decisionStats = null
+      try {
+        const { data: recentDecisions } = await supabase
+          .from('campaign_activity_log')
+          .select('details, account_id')
+          .eq('campaign_id', campaign.id)
+          .eq('action_type', 'ai_next_action')
+          .gte('created_at', new Date(Date.now() - 6 * 3600000).toISOString())
+          .limit(50)
+        if (recentDecisions?.length) {
+          const intervals = recentDecisions.map(d => d.details?.decision?.next_nurture_minutes).filter(Boolean)
+          const avgInterval = intervals.length ? Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length) : null
+          const scoutSuggested = recentDecisions.filter(d => d.details?.decision?.scout_new_groups).length
+          const restSuggested = recentDecisions.filter(d => d.details?.decision?.rest_reason).length
+          decisionStats = {
+            total_decisions: recentDecisions.length,
+            avg_interval_minutes: avgInterval,
+            scout_suggested: scoutSuggested,
+            rest_suggested: restSuggested,
+          }
+        }
+      } catch {}
+
       const status = analysis?.status || (anomalies.length > 0 ? 'warning' : 'good')
 
       await supabase.from('campaign_activity_log').insert({
         campaign_id: campaign.id, owner_id: campaign.owner_id,
         action_type: 'ops_monitor', result_status: status,
-        details: { stats, anomalies, analysis, generated_at: new Date().toISOString() },
+        details: { stats, anomalies, analysis, decisionStats, generated_at: new Date().toISOString() },
       })
 
       if (status === 'critical' || status === 'warning') {
@@ -320,6 +344,45 @@ Chỉ trả JSON.`, 600)
           key: learning.key, value: learning.value, confidence: learning.confidence || 0.6,
         })
       }
+
+      // Phase 19: self-improving memory — learn optimal nurture interval from
+      // actual AI decisions this week. Future daily plans will read this memory
+      // and use it to calibrate their suggestions.
+      try {
+        const { data: weekDecisions } = await supabase
+          .from('campaign_activity_log')
+          .select('details')
+          .eq('campaign_id', campaign.id)
+          .eq('action_type', 'ai_next_action')
+          .gte('created_at', since7d)
+          .limit(200)
+        if (weekDecisions?.length >= 5) {
+          const intervals = weekDecisions.map(d => d.details?.decision?.next_nurture_minutes).filter(Boolean)
+          const avgInterval = intervals.length ? Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length) : null
+          // Track whether shorter intervals correlated with more comments
+          const withComments = weekDecisions.filter(d => (d.details?.session?.comments || 0) > 0)
+          const withoutComments = weekDecisions.filter(d => (d.details?.session?.comments || 0) === 0)
+          const avgIntervalWithComments = withComments.length
+            ? Math.round(withComments.map(d => d.details?.decision?.next_nurture_minutes || 45).reduce((a, b) => a + b, 0) / withComments.length)
+            : null
+
+          if (avgInterval) {
+            await remember(supabase, {
+              campaignId: campaign.id, memoryType: 'campaign_pattern',
+              key: 'optimal_nurture_interval',
+              value: {
+                avg_minutes: avgInterval,
+                avg_with_comments: avgIntervalWithComments,
+                total_decisions: weekDecisions.length,
+                comment_sessions: withComments.length,
+                empty_sessions: withoutComments.length,
+              },
+              confidence: Math.min(0.9, 0.5 + weekDecisions.length * 0.02),
+            })
+            console.log(`[AI-OPS] Learned: avg nurture interval ${avgInterval}min (${withComments.length} sessions had comments)`)
+          }
+        }
+      } catch {}
 
       await supabase.from('campaign_activity_log').insert({
         campaign_id: campaign.id, owner_id: campaign.owner_id,
