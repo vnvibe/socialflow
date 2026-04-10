@@ -62,13 +62,13 @@ class ActivityLogger {
       comment: 'done_comments',
       friend_request: 'done_friend_requests',
       join_group: 'done_group_joins',
-      // ad/opportunity comments still count as comments
       opportunity_comment: 'done_comments',
     }
     const field = FIELD_MAP[actionType]
     if (!field) return
     if (!this.context.campaign_id || !this.context.account_id) return
-    const today = new Date().toISOString().split('T')[0]
+    // VN date (UTC+7) — must match kpi-calculator.js vnToday()
+    const today = new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0]
     this.supabase.rpc('increment_kpi', {
       p_campaign_id: this.context.campaign_id,
       p_account_id: this.context.account_id,

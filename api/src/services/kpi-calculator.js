@@ -32,6 +32,13 @@ function nickWeight(nick) {
 
 const DEFAULT_KPI = { daily_likes: 60, daily_comments: 15, daily_friend_requests: 10, daily_group_joins: 9 }
 
+// VN date (UTC+7) — both cron AND agent must use the same timezone for dates.
+// The daily cron fires at 00:01 VN = 17:01 UTC, so UTC date is YESTERDAY.
+// Without this, rebalance writes targets for the wrong date.
+function vnToday() {
+  return new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0]
+}
+
 async function rebalanceKPI(supabase, campaignId) {
   if (!campaignId) return { ok: false, reason: 'no campaign_id' }
 
@@ -48,37 +55,44 @@ async function rebalanceKPI(supabase, campaignId) {
     return { ok: true, nicks: 0 }
   }
 
+  // Fix: only filter by is_active, not status. Expired/unknown nicks still
+  // get KPI rows so they don't bypass the gate when they come back online.
   const { data: nicks } = await supabase
     .from('accounts')
     .select('id, status, fb_created_at, created_at')
     .in('id', allNickIds)
     .eq('is_active', true)
-    .in('status', ['healthy', 'unknown', 'at_risk'])
 
   if (!nicks?.length) {
     console.log(`[KPI] Campaign ${campaignId.slice(0,8)} has no eligible nicks`)
     return { ok: true, nicks: 0 }
   }
 
-  const weighted = nicks.map(n => ({ id: n.id, weight: nickWeight(n) }))
-  const totalWeight = weighted.reduce((s, n) => s + n.weight, 0) || 1
-  const kpi = { ...DEFAULT_KPI, ...(campaign.kpi_config || {}) }
+  let weighted = nicks.map(n => ({ id: n.id, weight: nickWeight(n) }))
+  let totalWeight = weighted.reduce((s, n) => s + n.weight, 0)
+  // Guard: if all weights = 0 (all nicks very young), distribute equally
+  if (totalWeight === 0) {
+    weighted = weighted.map(n => ({ ...n, weight: 1 }))
+    totalWeight = weighted.length
+  }
 
-  const today = new Date().toISOString().split('T')[0]
+  const kpi = { ...DEFAULT_KPI, ...(campaign.kpi_config || {}) }
+  const today = vnToday()
+
   const rows = weighted.map(n => {
     const share = n.weight / totalWeight
     return {
       campaign_id: campaignId,
       account_id: n.id,
       date: today,
-      target_likes: Math.round(kpi.daily_likes * share),
-      target_comments: Math.round(kpi.daily_comments * share),
-      target_friend_requests: Math.round(kpi.daily_friend_requests * share),
-      target_group_joins: Math.round(kpi.daily_group_joins * share),
+      // Minimum targets so target is never 0 (prevents kpi_met=true bypass)
+      target_likes: Math.max(5, Math.round(kpi.daily_likes * share)),
+      target_comments: Math.max(2, Math.round(kpi.daily_comments * share)),
+      target_friend_requests: Math.max(1, Math.round(kpi.daily_friend_requests * share)),
+      target_group_joins: Math.max(1, Math.round(kpi.daily_group_joins * share)),
     }
   })
 
-  // Upsert preserves done_* counters because we're not setting them.
   const { error: upErr } = await supabase
     .from('nick_kpi_daily')
     .upsert(rows, { onConflict: 'campaign_id,account_id,date' })
@@ -87,7 +101,7 @@ async function rebalanceKPI(supabase, campaignId) {
     return { ok: false, reason: upErr.message }
   }
 
-  console.log(`[KPI] Rebalanced ${nicks.length} nicks for campaign ${campaignId.slice(0,8)} (total weight ${totalWeight.toFixed(2)})`)
+  console.log(`[KPI] Rebalanced ${nicks.length} nicks for campaign ${campaignId.slice(0,8)} date=${today} (total weight ${totalWeight.toFixed(2)}, targets: L${rows[0]?.target_likes}/C${rows[0]?.target_comments})`)
   return { ok: true, nicks: nicks.length, totalWeight, targets: rows }
 }
 
@@ -109,4 +123,4 @@ async function rebalanceAllActive(supabase) {
   return n
 }
 
-module.exports = { rebalanceKPI, rebalanceAllActive, nickWeight, getNickAgeDays, DEFAULT_KPI }
+module.exports = { rebalanceKPI, rebalanceAllActive, nickWeight, getNickAgeDays, DEFAULT_KPI, vnToday }
