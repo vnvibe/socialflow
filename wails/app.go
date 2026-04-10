@@ -234,6 +234,8 @@ type App struct {
 	// Phase 10: connectivity tracking
 	online      bool
 	onlineSince time.Time
+	// Phase 18: pre-emptive token refresh
+	tokenRefreshStop chan struct{}
 }
 
 const maxLogs = 500
@@ -437,6 +439,11 @@ func (a *App) Login(email, password string) map[string]interface{} {
 	// Save credentials for next time
 	a.saveCredentials(email, password)
 
+	// Phase 18: start pre-emptive token refresh (45 min cycle).
+	// Supabase JWT expires in 1h — refreshing at 45min avoids the
+	// reactive 401 → re-login → "Mất kết nối" false alarm cycle.
+	a.startTokenRefresh()
+
 	a.addLog(fmt.Sprintf("Đã đăng nhập: %s", a.user.Email), "success")
 	wailsRuntime.EventsEmit(a.ctx, "user", a.user)
 
@@ -449,6 +456,7 @@ func (a *App) Login(email, password string) map[string]interface{} {
 }
 
 func (a *App) Logout() bool {
+	a.stopTokenRefresh()
 	a.StopAgent()
 	a.user = nil
 	a.clearCredentials()
@@ -753,6 +761,73 @@ func (a *App) ensurePlaywright() {
 	}
 
 	wailsRuntime.EventsEmit(a.ctx, "setup-progress", nil)
+}
+
+// ─── Phase 18: Pre-emptive token refresh ─────────────────
+
+func (a *App) startTokenRefresh() {
+	a.stopTokenRefresh() // kill any previous goroutine
+	a.tokenRefreshStop = make(chan struct{})
+	stop := a.tokenRefreshStop
+
+	go func() {
+		ticker := time.NewTicker(45 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				saved := a.loadCredentials()
+				if saved == nil || saved["email"] == "" || saved["password"] == "" {
+					continue
+				}
+				// Silent re-login — same Supabase endpoint as Login()
+				body, _ := json.Marshal(map[string]string{
+					"email":    saved["email"],
+					"password": saved["password"],
+				})
+				url := fmt.Sprintf("%s/auth/v1/token?grant_type=password", supabaseURL)
+				req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("apikey", supabaseAnon)
+				client := &http.Client{Timeout: 10 * time.Second}
+				resp, err := client.Do(req)
+				if err != nil {
+					continue
+				}
+				var result map[string]interface{}
+				json.NewDecoder(resp.Body).Decode(&result)
+				resp.Body.Close()
+				if resp.StatusCode != 200 {
+					continue
+				}
+				newToken, _ := result["access_token"].(string)
+				if newToken == "" {
+					continue
+				}
+
+				a.mu.Lock()
+				if a.user != nil {
+					a.user.Token = newToken
+				}
+				a.mu.Unlock()
+
+				a.addLog("Token tự động làm mới (45 phút)", "info")
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+func (a *App) stopTokenRefresh() {
+	if a.tokenRefreshStop != nil {
+		select {
+		case <-a.tokenRefreshStop:
+			// already closed
+		default:
+			close(a.tokenRefreshStop)
+		}
+	}
 }
 
 // ─── Phase 10: Connectivity watcher ──────────────────────
