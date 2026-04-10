@@ -987,6 +987,16 @@ module.exports = async (fastify) => {
         .slice(0, 10)
         .map(j => ({ job_id: j.id, type: j.type, error_message: j.error_message, created_at: j.created_at }))
 
+      // === ACTIVITY-BASED DAILY (14 days) — replaces jobs-only chart ===
+      // Build from campaign_activity_log for real action counts (likes, comments, etc)
+      const activityDailyMap = {}
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(now)
+        d.setDate(d.getDate() - i)
+        const key = d.toISOString().slice(0, 10)
+        activityDailyMap[key] = { date: key, likes: 0, comments: 0, joins: 0, visits: 0, friend_requests: 0 }
+      }
+
       // === PER-ACTION STATS from activity_log ===
       const { data: activityRows } = await supabase
         .from('campaign_activity_log')
@@ -1004,6 +1014,18 @@ module.exports = async (fastify) => {
         if (a.result_status === 'success') { actionSummary[a.action_type].success++; actionSummary[a.action_type].total++ }
         else if (a.result_status === 'failed') { actionSummary[a.action_type].failed++; actionSummary[a.action_type].total++ }
         else if (a.result_status === 'skipped') { actionSummary[a.action_type].skipped++ }
+
+        // Populate activity daily chart (only success actions)
+        if (a.result_status === 'success' && a.created_at) {
+          const day = a.created_at.slice(0, 10)
+          if (activityDailyMap[day]) {
+            if (a.action_type === 'like' || a.action_type === 'react') activityDailyMap[day].likes++
+            else if (a.action_type === 'comment' || a.action_type === 'opportunity_comment') activityDailyMap[day].comments++
+            else if (a.action_type === 'join_group') activityDailyMap[day].joins++
+            else if (a.action_type === 'visit_group') activityDailyMap[day].visits++
+            else if (a.action_type === 'friend_request' || a.action_type === 'send_friend_request') activityDailyMap[day].friend_requests++
+          }
+        }
       }
 
       // Per-nick action breakdown
@@ -1095,6 +1117,7 @@ module.exports = async (fastify) => {
           total_skipped: activities.filter(a => a.result_status === 'skipped').length,
         },
         daily: Object.values(dailyMap),
+        activity_daily: Object.values(activityDailyMap),
         by_role: Object.values(roleMap),
         by_account: Object.values(accountMap),
         action_summary: actionSummary,
@@ -1422,6 +1445,33 @@ module.exports = async (fastify) => {
         console.log(`[priority-groups] Queued resolve_group for ${fbGroupId}`)
       } catch {}
     }
+
+    // Fix 4: auto-scout for nicks that aren't yet members of the priority group.
+    // Check each upserted fb_groups row — if is_member=false, queue a
+    // campaign_discover_groups job that will navigate to the group and join.
+    try {
+      const nonMembers = (data || []).filter(g => !g.is_member)
+      for (const g of nonMembers.slice(0, 3)) { // max 3 scout jobs
+        await supabase.from('jobs').insert({
+          type: 'campaign_discover_groups',
+          priority: 2,
+          payload: {
+            campaign_id: req.params.id,
+            account_id: g.account_id,
+            owner_id: req.user.id,
+            topic: campaign.topic || '',
+            role_type: 'scout',
+            target_group_url: groupUrl,
+            target_fb_group_id: fbGroupId,
+            reason: 'priority_group_auto_join',
+          },
+          status: 'pending',
+          scheduled_at: new Date().toISOString(),
+          created_by: req.user.id,
+        })
+      }
+      if (nonMembers.length) console.log(`[priority-groups] Queued ${Math.min(nonMembers.length, 3)} scout jobs to join ${fbGroupId}`)
+    } catch {}
 
     return { ok: true, fb_group_id: fbGroupId, count: data?.length || 0, groups: data }
   })

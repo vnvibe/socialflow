@@ -249,16 +249,16 @@ export default function OverviewSection({ campaignId, campaign, accountIds }) {
 
   const accounts = accountsData || []
   const isRunning = campaign.status === 'running' || campaign.is_active
-  const daily = report?.daily || []
+  const daily = report?.activity_daily || report?.daily || []
 
   return (
     <div className="space-y-6">
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard title="Queue Pending" value={stats?.pending ?? '-'} icon={Clock} color="yellow" />
-        <StatCard title="Queue Done" value={stats?.done ?? '-'} icon={CheckCircle} color="green" />
-        <StatCard title="Friends Sent" value={stats?.friends_sent ?? '-'} icon={UserPlus} color="blue" />
-        <StatCard title="Jobs Failed" value={stats?.failed ?? '-'} icon={XCircle} color="red" />
+        <StatCard title="Queue Pending" value={stats?.queue?.pending ?? '-'} icon={Clock} color="yellow" />
+        <StatCard title="Jobs Done" value={stats?.jobs?.done ?? '-'} icon={CheckCircle} color="green" />
+        <StatCard title="Friends Sent" value={stats?.friends?.sent ?? '-'} icon={UserPlus} color="blue" />
+        <StatCard title="Jobs Failed" value={stats?.jobs?.failed ?? '-'} icon={XCircle} color="red" />
       </div>
 
       {/* Campaign Info */}
@@ -288,18 +288,19 @@ export default function OverviewSection({ campaignId, campaign, accountIds }) {
         </div>
       </div>
 
-      {/* Daily Activity Chart */}
+      {/* Daily Activity Chart — from activity_log (likes/comments/joins) */}
       {daily.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Hoat dong 14 ngay</h3>
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Hoạt động 14 ngày</h3>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={daily}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
               <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }} />
-              <Bar dataKey="jobs_done" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Done" />
-              <Bar dataKey="jobs_failed" fill="#ef4444" radius={[4, 4, 0, 0]} name="Failed" />
+              <Bar dataKey="likes" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Likes" stackId="a" />
+              <Bar dataKey="comments" fill="#22c55e" radius={[4, 4, 0, 0]} name="Comments" stackId="a" />
+              <Bar dataKey="joins" fill="#a855f7" radius={[4, 4, 0, 0]} name="Joins" stackId="a" />
             </BarChart>
           </ResponsiveContainer>
         </div>
