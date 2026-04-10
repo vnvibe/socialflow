@@ -344,7 +344,8 @@ async function poll() {
       const campaignIdForKpi = job.payload?.campaign_id
       if (accId && campaignIdForKpi && kpiField) {
         try {
-          const today = new Date().toISOString().split('T')[0]
+          // VN date (UTC+7) — must match kpi-calculator.js + activity-logger.js
+          const today = new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0]
           const { data: kpiRow } = await supabase.from('nick_kpi_daily')
             .select('kpi_met, target_likes, done_likes, target_comments, done_comments, target_friend_requests, done_friend_requests, target_group_joins, done_group_joins')
             .eq('campaign_id', campaignIdForKpi)
@@ -352,13 +353,15 @@ async function poll() {
             .eq('date', today)
             .maybeSingle()
           if (kpiRow) {
-            // Whole-nick KPI met → free slot entirely
-            if (kpiRow.kpi_met) {
+            // Guard: if all targets=0, the row was created by increment_kpi
+            // before rebalance ran — ignore kpi_met (it would be true because
+            // target=0 OR done>=target, both trivially satisfied).
+            const hasTargets = (kpiRow.target_likes || 0) > 0 || (kpiRow.target_comments || 0) > 0
+            if (kpiRow.kpi_met && hasTargets) {
               console.log(`[POLLER] Nick ${accId.slice(0,8)} KPI met today — yielding slot`)
               continue
             }
-            // Action-specific check: if THIS action's target is met but others
-            // aren't, we still skip THIS job and let other job types proceed.
+            // Action-specific check
             const targetField = `target_${kpiField}`
             const doneField = `done_${kpiField}`
             const tgt = kpiRow[targetField] || 0
