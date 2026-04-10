@@ -193,22 +193,21 @@ Mỗi bài viết phía trên có thể đi kèm các comment hiện có (dòng 
 
 ${langBlock}${adSection}
 === CÁCH CHẤM ĐIỂM ===
-- 8-10: Người viết ĐANG HỎI / TÌM KIẾM giải pháp "${topic}" VÀ bạn BIẾT CÂU TRẢ LỜI cụ thể
-- 6-7: Bài thảo luận "${topic}", bạn có kinh nghiệm CỤ THỂ (tên tool, con số, config) để góp ý
-- 4-5: Bạn chỉ có thể comment chung chung → BỎ QUA (KHÔNG chọn)
-- 1-3: Bài off-topic, spam, hoặc quảng cáo → BỎ QUA
+- 8-10: Người viết ĐANG HỎI / TÌM KIẾM giải pháp liên quan "${topic}" → comment trả lời cụ thể
+- 6-7: Bài thảo luận / chia sẻ kinh nghiệm về "${topic}" → comment đồng tình hoặc bổ sung
+- 5: Bài trong nhóm, liên quan gián tiếp → comment ngắn chia sẻ trải nghiệm cá nhân OK
+- 3-4: Bài không rõ liên quan, chỉ có thể comment quá chung chung → BỎ QUA
+- 1-2: Off-topic, spam, quảng cáo → BỎ QUA
 
-=== QUY TẮC SỐNG CÒN (Phase 8 Fix 2) ===
-1. CHỈ chọn bài nếu bạn có thể trả lời CỤ THỂ, NÊU RÕ CHI TIẾT KỸ THUẬT.
-2. Nếu bài hỏi về thứ bạn KHÔNG BIẾT (tool lạ, domain lạ) → score ≤ 3, KHÔNG chọn.
-3. TUYỆT ĐỐI CẤM các kiểu comment sau (nếu comment_angle có bất kỳ dấu hiệu này → score ≤ 3):
-   - "Bác nói rõ hơn đi" / "Bạn có thể chia sẻ thêm không"
-   - "Em có thể giúp gì cho bác" / "Anh cần hỗ trợ gì"
-   - "Mình cũng đang tìm hiểu" / "Mình cũng quan tâm"
-   - "Inbox em trao đổi thêm" / "Nhắn riêng nhé"
-   - Bất kỳ câu hỏi ngược lại người viết mà họ đã trả lời trong bài
-4. comment_angle PHẢI chứa 1 chi tiết cụ thể (tên tool/command/con số/config) từ kinh nghiệm thật.
-5. Nếu không có gì CỤ THỂ để nói → score 3, action: "skip". Thà không comment còn hơn comment rỗng.
+=== QUY TẮC ===
+1. Ưu tiên bài có câu hỏi cụ thể hoặc đang so sánh sản phẩm/dịch vụ.
+2. Bài chia sẻ kinh nghiệm thật → comment đồng cảm + bổ sung 1 chi tiết là ĐỦ (score 6).
+3. TUYỆT ĐỐI CẤM:
+   - "Bác nói rõ hơn đi" / "Em có thể giúp gì cho bác"
+   - "Mình cũng đang tìm hiểu" / "Inbox em trao đổi thêm"
+   - Câu hỏi ngược mà bài đã trả lời
+4. comment_angle nên chứa 1 chi tiết cụ thể NẾU CÓ THỂ. Nếu bài chỉ là chia sẻ → đồng cảm + 1 câu bổ sung cũng OK.
+5. Nếu THẬT SỰ không có gì để nói → score 3. Nhưng ĐỪNG quá khắt khe — bài trong nhóm "${topic}" thường ít nhất liên quan gián tiếp.
 
 === BẮT BUỘC BỎ QUA ===
 - Bài có [AD_POST=true] trong header → action: "skip", score ≤ 2 (đây là quảng cáo của người khác)
@@ -236,11 +235,12 @@ CHỈ trả về JSON, không giải thích.`
     const match = text.match(/\[[\s\S]*\]/)
     if (match) {
       const results = JSON.parse(match[0])
-      // Phase 8 Fix 1: hard-drop any index flagged as ad post — AI might try to
-      // rate them anyway. Phase 8 Fix 2: bump threshold to 6 so vague comments
-      // aren't greenlit — if AI can't find something concrete (score>=6), we skip.
+      // Phase 18: threshold lowered from 6→5. Score 5 = "related to topic,
+      // can share a personal take" which is natural group behavior. The prompt
+      // still bans generic/vague comments via the QUY TẮC section, so quality
+      // is guarded by AI judgment, not a hard numeric cutoff.
       const filtered = results
-        .filter(r => r.score >= 6 && r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
+        .filter(r => r.score >= 5 && r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
         .filter(r => r.action !== 'skip')
         .sort((a, b) => b.score - a.score)
         .slice(0, maxPicks || 2)
