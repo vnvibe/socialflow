@@ -173,7 +173,18 @@ async function getExcludedUserIds() {
   return preferenceCache.data
 }
 
+// Audit 2026-04-12: re-entrancy guard. Realtime can fire N events at once
+// (e.g. 5 new campaign_nurture rows), each triggering poll(). Without a
+// guard, all N polls read the same pending job, all N UPDATE with
+// WHERE status='pending', Supabase returns error:null for all (0-row
+// update is NOT an error), and the job executes N times in parallel.
+let _polling = false
 async function poll() {
+  if (_polling) return  // another poll() is already running
+  _polling = true
+  try { await _pollInner() } finally { _polling = false }
+}
+async function _pollInner() {
   if (pool.isBusy()) return  // all interaction slots taken
 
   try {
@@ -484,14 +495,19 @@ async function poll() {
         }
       }
 
-      // Claim job in DB (atomic via WHERE status='pending')
-      const { error } = await supabase.from('jobs')
+      // Claim job in DB (atomic via WHERE status='pending').
+      // Audit 2026-04-12: chain .select('id') so we can verify the UPDATE
+      // actually matched a row. Supabase returns error:null even when 0 rows
+      // are updated (another poll cycle already flipped it to 'claimed'), so
+      // checking `error` alone allowed duplicate execution.
+      const { data: claimed, error } = await supabase.from('jobs')
         .update({ status: 'claimed', agent_id: AGENT_ID, started_at: new Date() })
         .eq('id', job.id)
         .eq('status', 'pending')
+        .select('id')
 
-      if (error) {
-        // Another agent claimed it — release pool slot
+      if (error || !claimed?.length) {
+        // Another poll cycle (or agent) already claimed it — release pool slot
         if (accId) pool.release(accId, job.id)
         continue
       }
