@@ -197,8 +197,10 @@ ${langBlock}${adSection}
 - 8-10: Người viết ĐANG HỎI / TÌM KIẾM giải pháp liên quan "${topic}" → comment trả lời cụ thể
 - 6-7: Bài thảo luận / chia sẻ kinh nghiệm về "${topic}" → comment đồng tình hoặc bổ sung
 - 5: Bài trong nhóm, liên quan gián tiếp → comment ngắn chia sẻ trải nghiệm cá nhân OK
-- 3-4: Bài không rõ liên quan, chỉ có thể comment quá chung chung → BỎ QUA
-- 1-2: Off-topic, spam, quảng cáo → BỎ QUA
+- 3-4: Bài trong nhóm nhưng liên quan lỏng → react hoặc comment ngắn kiểu "hay quá" / emoji / đồng cảm ngắn OK
+- 1-2: Off-topic hoàn toàn, spam, quảng cáo → BỎ QUA
+
+LƯU Ý: Bạn đang ở trong nhóm "${topic}" — hầu hết bài viết ở đây ÍT NHẤT score 3-4. Chỉ score 1-2 cho bài THẬT SỰ off-topic hoặc spam.
 
 === QUY TẮC ===
 1. Ưu tiên bài có câu hỏi cụ thể hoặc đang so sánh sản phẩm/dịch vụ.
@@ -226,9 +228,9 @@ CHỈ trả về JSON, không giải thích.`
       function_name: 'relevance_review',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 400,
-      temperature: 0.1,
+      temperature: 0.3, // was 0.1 — too conservative, AI scored everything 2-3
     }, {
-      timeout: 15000,
+      timeout: 30000, // was 15s — timeout killed evaluations before AI could respond
       headers: headers(ownerId),
     })
 
@@ -236,23 +238,20 @@ CHỈ trả về JSON, không giải thích.`
     const match = text.match(/\[[\s\S]*\]/)
     if (match) {
       const results = JSON.parse(match[0])
-      // Phase 18: threshold lowered from 6→5. Score 5 = "related to topic,
-      // can share a personal take" which is natural group behavior. The prompt
-      // still bans generic/vague comments via the QUY TẮC section, so quality
-      // is guarded by AI judgment, not a hard numeric cutoff.
+      // Audit 2026-04-12: threshold 5→3. In 24h with threshold=5, AI scored
+      // every single post 2-3 → 0 comments all day across all nicks. Score 3
+      // means "loosely related, can react" which is still natural group behavior.
+      // The prompt's QUY TẮC section still bans generic/vague comments, so
+      // quality is guarded by AI judgment, not a hard numeric cutoff.
       const filtered = results
-        .filter(r => r.score >= 5 && r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
+        .filter(r => r.score >= 3 && r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
         .filter(r => r.action !== 'skip')
         .sort((a, b) => b.score - a.score)
         .slice(0, maxPicks || 2)
 
       if (filtered.length > 0) return filtered
 
-      // Phase 8 Fix 2: NO fallback to low-score picks. If nothing scored >=6,
-      // return empty → nurture will skip commenting in this group (and the
-      // group's consecutive_skips will increment, pushing it down the tier).
-      // Better to be silent than to post generic filler.
-      console.log(`[AI-BRAIN] No posts scored >= 6 and non-ad — skipping group (no comment)`)
+      console.log(`[AI-BRAIN] No posts scored >= 3 and non-ad — skipping group (no comment)`)
       return []
     }
   } catch (err) {
