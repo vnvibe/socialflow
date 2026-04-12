@@ -1,17 +1,7 @@
 const { extractCUserId, generateFingerprint } = require('../services/facebook/fb-auth')
 const { fetchPersonalInbox, replyPersonalMessage } = require('../services/facebook/fb-inbox')
 const { getAccessibleIds, canAccess } = require('../lib/access-check')
-
-// Default daily budget for new accounts — matches HARD_LIMITS in agent
-const DEFAULT_DAILY_BUDGET = {
-  like:                { used: 0, max: 80 },
-  comment:             { used: 0, max: 15 },
-  post:                { used: 0, max: 3 },
-  join_group:          { used: 0, max: 3 },
-  friend_request:      { used: 0, max: 10 },
-  opportunity_comment: { used: 0, max: 2 },
-  scan:                { used: 0, max: 15 },
-}
+const { buildInitialBudget } = require('../services/warmup-budget')
 
 module.exports = async (fastify) => {
   const { supabase } = fastify
@@ -141,8 +131,9 @@ module.exports = async (fastify) => {
     const fbUserId = extractCUserId(cookie_string)
     const fingerprint = generateFingerprint(fbUserId)
 
-    // Merge user override (if any) with defaults — never insert empty/null budget
-    const mergedBudget = { ...DEFAULT_DAILY_BUDGET, ...(daily_budget || {}) }
+    // Build warmup-aware budget from the nick's real FB age (fb_created_at).
+    // Falls back to age 0 (most conservative curve) if fb_created_at is missing.
+    const mergedBudget = buildInitialBudget({ fb_created_at }, daily_budget)
 
     const { data, error } = await supabase.from('accounts').insert({
       owner_id: req.user.id,
@@ -660,7 +651,8 @@ module.exports = async (fastify) => {
           viewport: fingerprint.viewport,
           timezone: fingerprint.timezone,
           status: 'unknown',
-          daily_budget: { ...DEFAULT_DAILY_BUDGET },
+          // bulk-import has no fb_created_at — age defaults to 0 → week1 curve (most conservative)
+          daily_budget: buildInitialBudget({}),
         }).select().single()
 
         results.push({ fbUserId, success: !error, id: data?.id })

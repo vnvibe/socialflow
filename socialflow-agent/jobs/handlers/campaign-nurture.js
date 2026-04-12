@@ -507,7 +507,7 @@ async function campaignNurture(payload, supabase) {
           result.aiDecision = { action: cachedDecision, score: cachedEval.score, tier: cachedEval.tier, reason: cachedEval.reason || 'cached' }
 
           if (cachedDecision === 'reject') {
-            console.log(`[NURTURE] Skip "${group.name}" — cached REJECT (score: ${cachedEval.score}, reason: ${cachedEval.reason || 'cached'})`)
+            console.log(`[NURTURE] Skip evaluate for ${account.username}: cached REJECT on "${group.name}" (score: ${cachedEval.score}, reason: ${cachedEval.reason || 'cached'})`)
             result.errors.push('skipped: cached reject')
             groupResults.push(result)
             continue
@@ -615,20 +615,21 @@ async function campaignNurture(payload, supabase) {
               result.aiDecision = aiDecision
 
               if (aiDecision.action === 'reject') {
+                console.log(`[NURTURE] Skip evaluate for ${account.username}: AI reject on "${group.name}" (score:${aiDecision.score}, reason:${aiDecision.reason})`)
                 result.errors.push(`skipped: AI decision=reject (score:${aiDecision.score}, reason:${aiDecision.reason})`)
                 groupResults.push(result)
                 continue
               }
             } else {
               // Page didn't load posts — skip this run, DON'T cache, retry next time
-              console.log(`[NURTURE] ⚠️ "${group.name}" — could not extract posts for AI eval, will retry`)
+              console.log(`[NURTURE] Skip evaluate for ${account.username}: could not extract posts on "${group.name}" (DOM empty, will retry)`)
               result.errors.push('skipped: no posts for AI eval')
               groupResults.push(result)
               continue
             }
           } catch (aiErr) {
             // AI failed — NOT a failure, just skip this group this run
-            console.log(`[NURTURE] ⚠️ AI eval failed for "${group.name}": ${aiErr.message} — will retry next run`)
+            console.log(`[NURTURE] Skip evaluate for ${account.username}: AI eval threw on "${group.name}": ${aiErr.message}`)
             // Continue to next group, don't block, don't cache
             result.errors.push('skipped: AI eval failed (will retry)')
             groupResults.push(result)
@@ -796,6 +797,13 @@ async function campaignNurture(payload, supabase) {
         // ===== COMMENT ON POSTS (desktop — click comment button in feed) =====
         // Gate: only comment if AI decision is 'engage' (not 'observe')
         const canComment = result.aiDecision?.action !== 'observe' // observe = like only
+        if (!canComment) {
+          console.log(`[NURTURE] Skip evaluate for ${account.username}: AI observe on "${group.name}" (like-only, no comment)`)
+        } else if (!commentCheck.allowed) {
+          console.log(`[NURTURE] Skip evaluate for ${account.username}: comment budget exhausted (used ${commentBudget.used}/${commentBudget.max}) on "${group.name}"`)
+        } else if (tracker.get('comment') >= maxCommentsSession) {
+          console.log(`[NURTURE] Skip evaluate for ${account.username}: session comment cap hit (${tracker.get('comment')}/${maxCommentsSession}) on "${group.name}"`)
+        }
         if (canComment && commentCheck.allowed && tracker.get('comment') < maxCommentsSession) {
           const maxComments = getActionParams(parsed_plan, 'comment', { countMin: 1, countMax: 2 }).count
 
@@ -963,7 +971,7 @@ async function campaignNurture(payload, supabase) {
           // === SMART SKIP: 0 eligible posts → record skip + move to next group ===
           if (eligible.length === 0) {
             await recordGroupSkip(supabase, account_id, group.fb_group_id)
-            console.log(`[NURTURE] Skip "${group.name}" — 0 eligible posts (consecutive skips will increment)`)
+            console.log(`[NURTURE] Skip evaluate for ${account.username}: 0 eligible posts on "${group.name}" (extracted ${commentableInfo.length}, filtered out all)`)
           } else {
             // Has eligible posts → record yield (resets consecutive_skips)
             await recordGroupYield(supabase, account_id, group.fb_group_id, eligible.length)

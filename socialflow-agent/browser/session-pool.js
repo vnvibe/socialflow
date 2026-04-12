@@ -64,28 +64,83 @@ async function getSession(account, opts = {}) {
 }
 
 /**
- * Tạo page mới với cookies từ account
+ * Check xem profile dir đã có FB cookies hợp lệ chưa.
+ * Hợp lệ = có c_user (uid) VÀ xs (session secret) và đều non-empty.
+ */
+async function hasValidFbCookies(context) {
+  try {
+    const cookies = await context.cookies('https://www.facebook.com')
+    const cUser = cookies.find(c => c.name === 'c_user' && c.value && c.value.length > 0)
+    const xs = cookies.find(c => c.name === 'xs' && c.value && c.value.length > 0)
+    return !!(cUser && xs)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Inject cookies từ account.cookie_string (DB) vào context.
+ * Chỉ gọi khi profile dir KHÔNG có cookies hợp lệ.
+ */
+async function injectDbCookies(context, account) {
+  if (!account.cookie_string) return false
+  const cookies = account.cookie_string.split(';').map(c => {
+    const [name, ...rest] = c.trim().split('=')
+    return name ? {
+      name: name.trim(),
+      value: rest.join('=').trim(),
+      domain: '.facebook.com',
+      path: '/',
+      secure: true,
+      sameSite: 'None'
+    } : null
+  }).filter(Boolean)
+  if (!cookies.length) return false
+  await context.addCookies(cookies)
+  return true
+}
+
+/**
+ * Tạo page mới với cookies từ account.
+ *
+ * Cookie priority (Fix checkpoint spam):
+ *   1. Profile dir cookies (persistent storage.json) — fresh, do playwright giữ live
+ *   2. DB cookies (account.cookie_string) — fallback khi profile trống/invalid
+ *
+ * DB cookies thường stale (user paste 1 lần rồi thôi) → nếu inject đè lên profile
+ * sẽ ghi đè session đang hoạt động → FB detect inconsistency → checkpoint.
+ *
  * @param {object} account - account record từ DB
  * @param {object} opts - { headless: boolean } - override headless mode
  */
 async function getPage(account, opts = {}) {
-  const session = await getSession(account, opts)
-  const page = await session.context.newPage()
+  const id = account.id || account.account_id
+  const username = account.username || id
 
-  // Set cookies nếu có cookie_string
-  if (account.cookie_string) {
-    const cookies = account.cookie_string.split(';').map(c => {
-      const [name, ...rest] = c.trim().split('=')
-      return name ? {
-        name: name.trim(),
-        value: rest.join('=').trim(),
-        domain: '.facebook.com',
-        path: '/',
-        secure: true,
-        sameSite: 'None'
-      } : null
-    }).filter(Boolean)
-    await session.context.addCookies(cookies)
+  let session = await getSession(account, opts)
+  let page
+
+  // Thử newPage — nếu fail, recreate session rồi thử lại
+  try {
+    page = await session.context.newPage()
+  } catch (err) {
+    console.warn(`[SESSION-POOL] newPage failed for ${username}: ${err.message} — recreating session`)
+    try { await closeSession(id) } catch {}
+    session = await getSession(account, opts)
+    page = await session.context.newPage()
+  }
+
+  // Decide cookie source: profile > DB
+  const profileHasCookies = await hasValidFbCookies(session.context)
+  if (profileHasCookies) {
+    console.log(`[SESSION-POOL] 🍪 Using profile cookies for ${username} (profile dir has valid c_user+xs)`)
+  } else {
+    const injected = await injectDbCookies(session.context, account)
+    if (injected) {
+      console.log(`[SESSION-POOL] 💉 Injecting DB cookies for ${username} (profile dir empty/invalid)`)
+    } else {
+      console.warn(`[SESSION-POOL] ⚠️  No cookies available for ${username} — neither profile nor DB has FB cookies`)
+    }
   }
 
   return { page, session }

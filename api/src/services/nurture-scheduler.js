@@ -337,6 +337,20 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
+  // Audit 2026-04-12: Daily warmup budget rebalance at 00:30 VN.
+  // Fixes the issue where nick age 3-4 days still had like.max=80 (same as
+  // 100-day nicks). Each active account's daily_budget is recomputed from its
+  // real age via the warmup curve — max is bumped up only (never lowered), and
+  // `used` counters are reset to 0 so the new day starts clean.
+  cron.schedule('30 0 * * *', async () => {
+    try {
+      const { rebalanceWarmupBudgets } = require('./warmup-budget')
+      await rebalanceWarmupBudgets(supabase)
+    } catch (err) {
+      console.error('[WARMUP-REBALANCE] Daily error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // Phase 17: AI Operations Manager — 3 levels
   // Level 1: Hourly monitor (every hour at :05 VN)
   cron.schedule('5 * * * *', async () => {
