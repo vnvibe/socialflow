@@ -238,7 +238,23 @@ async function createScoutJob(campaign, role, busyNickSet = new Set()) {
 }
 
 // ─── Phase 7: Membership re-check cron ───────────────────────────────────
+const MEMBERSHIP_PENDING_CAP = 5
 async function processMembershipChecks() {
+  // Audit 2026-04-12: cap total pending+running membership checks at 5.
+  // Without this cap, every 2h cron invocation piled more work onto a queue
+  // that never drains (each check opens a browser and competes with nurture),
+  // turning into an effective DoS on the agent's 2-slot concurrency.
+  const { count: backlogCount } = await supabase
+    .from('jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('type', 'check_group_membership')
+    .in('status', ['pending', 'running', 'claimed'])
+  if ((backlogCount || 0) >= MEMBERSHIP_PENDING_CAP) {
+    console.log(`[MEMBERSHIP-CHECK] Queue full (${backlogCount}/${MEMBERSHIP_PENDING_CAP}), skipping this cycle`)
+    return
+  }
+  const slotsLeft = MEMBERSHIP_PENDING_CAP - (backlogCount || 0)
+
   // Only verify groups that belong to an ACTIVE campaign via campaign_groups
   // junction. Orphaned fb_groups (no junction row) are ignored — they'll get
   // picked up when scout reuse logic attaches them to a campaign.
@@ -248,7 +264,7 @@ async function processMembershipChecks() {
     .eq('status', 'active')
     .eq('fb_groups.pending_approval', true)
     .eq('fb_groups.is_member', false)
-    .limit(20)
+    .limit(Math.max(slotsLeft, 1) * 4) // fetch a bit more so dedup still has room to pick
 
   if (!pendingRows?.length) return
 
@@ -263,12 +279,15 @@ async function processMembershipChecks() {
 
   let created = 0
   for (const r of pendingRows) {
+    if (created >= slotsLeft) break // respect MEMBERSHIP_PENDING_CAP
     const fg = r.fb_groups
     if (!fg || queued.has(fg.id)) continue
     const delayMs = 30 * 1000 + Math.random() * 150 * 1000
+    // Audit 2026-04-12: priority 7 (was 3) — membership is janitorial, must
+    // never beat user-facing campaign_nurture / friend_request work in poller.
     const { error } = await supabase.from('jobs').insert({
       type: 'check_group_membership',
-      priority: 3,
+      priority: 7,
       payload: {
         fb_group_id: fg.fb_group_id,
         group_row_id: fg.id,

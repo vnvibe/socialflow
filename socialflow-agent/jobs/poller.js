@@ -200,6 +200,26 @@ async function poll() {
     }
 
     const { data: jobs } = await query
+
+    // Audit 2026-04-12: never open a browser for check_group_membership while
+    // any campaign_nurture / campaign_send_friend_request is still pending.
+    // Nurture is user-facing; membership is janitorial. Priority ordering
+    // already picks nurture first, but this gate handles the case where the
+    // nurture job is gated (budget/warmup/hours) and membership is the only
+    // thing the poller can see. We check ALL pending nurture/FR across the
+    // queue (not just this batch) once per poll cycle.
+    let nurturePendingCount = null
+    const needsNurtureGate = (jobs || []).some(j => j.type === 'check_group_membership')
+    if (needsNurtureGate) {
+      const { count } = await supabase
+        .from('jobs')
+        .select('id', { count: 'exact', head: true })
+        .in('type', ['campaign_nurture', 'campaign_send_friend_request'])
+        .eq('status', 'pending')
+        .lte('scheduled_at', new Date().toISOString())
+      nurturePendingCount = count || 0
+    }
+
     if (!jobs?.length) {
       // No pending jobs — BUT check if any jobs are currently running before closing browsers
       const hasRunningJobs = pool.runningJobs && pool.runningJobs.size > 0
@@ -219,6 +239,15 @@ async function poll() {
     for (const job of jobs) {
       const accId = job.payload?.account_id
       const isPostJob = POST_TYPES.includes(job.type)
+
+      // Audit 2026-04-12: defer check_group_membership when nurture/FR is pending.
+      // Nurture wins the browser slot even if it's currently gated (budget, warmup,
+      // rest period) — the gate will clear within a few poll cycles and the nick
+      // gets to its user-facing work first.
+      if (job.type === 'check_group_membership' && nurturePendingCount > 0) {
+        console.log(`[POLLER] Defer check_group_membership: ${nurturePendingCount} nurture/FR pending first`)
+        continue
+      }
 
       // 1 nick = 1 browser = 1 job tại 1 thời điểm
       // Job sau ĐỢI job trước xong — không skip, không cancel, chỉ defer

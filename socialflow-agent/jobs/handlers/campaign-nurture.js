@@ -363,7 +363,11 @@ async function campaignNurture(payload, supabase) {
       console.log(`[NURTURE] Warming up nick: browsing feed...`)
       logger.log('visit_group', { target_type: 'feed', target_name: 'Warm-up browse', details: { phase: 'warmup' } })
       try {
-        await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 })
+        // Audit 2026-04-12: 15s timeout (was 30s) — a slow warmup nav was
+        // burning half the session before real work. Warmup failure must not
+        // crash the job; the inner try/catch swallows it and the handler
+        // continues straight to the main loop.
+        await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 15000 })
         await R.sleepRange(3000, 6000)
         // Scroll feed naturally
         for (let s = 0; s < R.randInt(2, 4); s++) {
@@ -373,7 +377,7 @@ async function campaignNurture(payload, supabase) {
         await humanMouseMove(page)
         console.log(`[NURTURE] Warm-up done, starting campaign work`)
       } catch (err) {
-        console.warn(`[NURTURE] Warm-up failed: ${err.message}`)
+        console.warn(`[NURTURE] Warm-up failed for ${account.username}: ${err.message} — continuing anyway`)
       }
     }
 

@@ -198,7 +198,14 @@ async function campaignDiscoverGroups(payload, supabase) {
     const currentUrl = page.url()
     if (!currentUrl.includes('facebook.com') || currentUrl.includes('/login') || currentUrl === 'about:blank') {
       console.log(`[CAMPAIGN-SCOUT] Warming up: navigating to FB feed...`)
-      await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 })
+      // Audit 2026-04-12: 15s timeout (was 30s) + local try/catch so a slow
+      // warmup nav doesn't crash the whole scout job. Login/checkpoint detection
+      // is kept OUTSIDE the catch — those are real failures that must throw.
+      try {
+        await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 15000 })
+      } catch (warmErr) {
+        console.warn(`[CAMPAIGN-SCOUT] Warm-up goto failed: ${warmErr.message} — continuing anyway`)
+      }
       await R.sleepRange(3000, 5000)
       const fbUrl = page.url()
       if (fbUrl.includes('/login') || fbUrl.includes('checkpoint')) {

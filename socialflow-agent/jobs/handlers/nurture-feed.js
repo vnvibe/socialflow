@@ -168,8 +168,15 @@ async function nurtureFeed(payload, supabase) {
     log('session_start', 'feed', null, 'success', { persona, age_days })
 
     // ── Phase 1: Navigate to News Feed ──
+    // Audit 2026-04-12: 15s timeout (was 30s) + local try/catch — a slow nav
+    // shouldn't crash the whole nurture_feed job. Checkpoint detection below
+    // stays outside the catch and still throws on real auth failures.
     console.log(`[NURTURE] ${account.username}: Opening news feed...`)
-    await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 })
+    try {
+      await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 15000 })
+    } catch (navErr) {
+      console.warn(`[NURTURE] ${account.username}: feed nav failed: ${navErr.message} — continuing anyway`)
+    }
     await R.sleepRange(2000, 4000)
 
     // Check for checkpoint
