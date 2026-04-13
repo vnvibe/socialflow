@@ -61,8 +61,12 @@ app.get('/extension/config', async () => ({
 const start = async () => {
   try {
     console.log('[BOOT] Checking env...')
-    if (!process.env.SUPABASE_URL) console.error('[BOOT] MISSING: SUPABASE_URL')
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) console.error('[BOOT] MISSING: SUPABASE_SERVICE_ROLE_KEY')
+    if (process.env.DATABASE_URL) {
+      console.log('[BOOT] Using self-hosted PostgreSQL:', process.env.DATABASE_URL.replace(/:([^@]+)@/, ':***@'))
+    } else {
+      if (!process.env.SUPABASE_URL) console.error('[BOOT] MISSING: SUPABASE_URL')
+      if (!process.env.SUPABASE_SERVICE_ROLE_KEY) console.error('[BOOT] MISSING: SUPABASE_SERVICE_ROLE_KEY')
+    }
 
     console.log('[BOOT] Registering routes...')
     await app.ready()

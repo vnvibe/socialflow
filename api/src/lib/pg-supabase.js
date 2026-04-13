@@ -145,11 +145,15 @@ class QueryBuilder {
   or(orString) {
     // Parse PostgREST OR format: 'col1.eq.val1,col2.eq.val2'
     // Also handles: 'status.eq.running,status.eq.active,status.is.null'
+    // And JSONB: 'payload->>account_id.eq.uuid1,payload->>account_id.eq.uuid2'
     const conditions = []
     const parts = orString.split(',')
     for (const part of parts) {
-      const [col, op, ...rest] = part.trim().split('.')
-      const val = rest.join('.')
+      // Split on LAST occurrence pattern: col.op.val — but col may contain ">>" or "->"
+      // Use regex: everything up to .(eq|neq|gt|gte|lt|lte|is|like|ilike). then value
+      const m = part.trim().match(/^(.+?)\.(eq|neq|gt|gte|lt|lte|is|like|ilike)\.?(.*)$/)
+      if (!m) continue
+      const [, col, op, val] = m
       if (op === 'eq') conditions.push({ col, op: '=', val })
       else if (op === 'neq') conditions.push({ col, op: '!=', val })
       else if (op === 'is' && val === 'null') conditions.push({ col, op: 'IS NULL', val: null, raw: true })
@@ -157,6 +161,8 @@ class QueryBuilder {
       else if (op === 'gte') conditions.push({ col, op: '>=', val })
       else if (op === 'lt') conditions.push({ col, op: '<', val })
       else if (op === 'lte') conditions.push({ col, op: '<=', val })
+      else if (op === 'like') conditions.push({ col, op: 'LIKE', val })
+      else if (op === 'ilike') conditions.push({ col, op: 'ILIKE', val })
     }
     this._wheres.push({ or: conditions })
     return this
@@ -200,26 +206,39 @@ class QueryBuilder {
       return `$${paramIdx++}`
     }
 
+    // Fix JSONB column refs: payload->>account_id → payload->>'account_id'
+    const fixCol = (col) => {
+      if (col.includes('->>')) {
+        const [table, key] = col.split('->>')
+        return `${table}->>'${key}'`
+      }
+      if (col.includes('->')) {
+        const [table, key] = col.split('->')
+        return `${table}->'${key}'`
+      }
+      return col
+    }
+
     const buildWhere = () => {
       if (this._wheres.length === 0) return ''
       const conditions = this._wheres.map(w => {
         if (w.or) {
           const orConds = w.or.map(c => {
-            if (c.raw) return `${c.col} ${c.op}`
-            return `${c.col} ${c.op} ${addParam(c.val)}`
+            if (c.raw) return `${fixCol(c.col)} ${c.op}`
+            return `${fixCol(c.col)} ${c.op} ${addParam(c.val)}`
           })
           return `(${orConds.join(' OR ')})`
         }
-        if (w.raw) return `${w.col} ${w.op}`
+        if (w.raw) return `${fixCol(w.col)} ${w.op}`
         if (w.op === 'IN' || w.op === 'NOT IN') {
           if (!Array.isArray(w.val) || w.val.length === 0) {
             return w.op === 'IN' ? 'FALSE' : 'TRUE'
           }
           const placeholders = w.val.map(v => addParam(v))
-          return `${w.col} ${w.op} (${placeholders.join(', ')})`
+          return `${fixCol(w.col)} ${w.op} (${placeholders.join(', ')})`
         }
-        if (w.jsonb) return `${w.col} ${w.op} ${addParam(w.val)}`
-        return `${w.col} ${w.op} ${addParam(typeof w.val === 'object' && w.val !== null ? JSON.stringify(w.val) : w.val)}`
+        if (w.jsonb) return `${fixCol(w.col)} ${w.op} ${addParam(w.val)}`
+        return `${fixCol(w.col)} ${w.op} ${addParam(typeof w.val === 'object' && w.val !== null ? JSON.stringify(w.val) : w.val)}`
       })
       return ' WHERE ' + conditions.join(' AND ')
     }
@@ -354,57 +373,109 @@ class QueryBuilder {
 }
 
 /**
- * Parse select columns with nested relations
+ * Parse select columns with nested relations (supports nested parentheses)
  * e.g., '*, campaign_roles(*)' → LEFT JOIN
+ * e.g., 'id, fanpages!inner(*, accounts!inner(owner_id))' → multi-level JOIN
  */
 function parseSelect(cols, mainTable) {
   if (!cols || cols === '*') return { selectSql: `${mainTable}.*`, joins: '' }
 
-  // Check for relation patterns: relation_name(col1, col2) or relation_name(*)
-  const relationPattern = /(\w+)\(([^)]*)\)/g
-  let match
+  // Tokenize: split top-level items by commas, respecting parenthesis depth
+  const tokens = tokenizeSelect(cols)
   const relations = []
-  let simpleCols = cols
+  const simpleCols = []
 
-  while ((match = relationPattern.exec(cols)) !== null) {
-    const [full, relTable, relCols] = match
-    relations.push({ table: relTable, cols: relCols || '*', full })
-    simpleCols = simpleCols.replace(full, '').replace(/,\s*,/, ',').replace(/^,\s*|,\s*$/g, '')
+  for (const token of tokens) {
+    // Check if token is a relation: word(something) or word!inner(something)
+    const relMatch = token.match(/^([\w!]+)\((.+)\)$/)
+    if (relMatch) {
+      relations.push({ table: relMatch[1], cols: relMatch[2] })
+    } else {
+      simpleCols.push(token)
+    }
   }
 
   if (relations.length === 0) {
-    // No relations, just plain columns
-    const colList = cols.split(',').map(c => c.trim()).filter(Boolean)
-    return { selectSql: colList.map(c => c === '*' ? `${mainTable}.*` : `${mainTable}.${c}`).join(', '), joins: '' }
+    return { selectSql: simpleCols.map(c => c === '*' ? `${mainTable}.*` : `${mainTable}.${c}`).join(', '), joins: '' }
   }
 
   // Build joins
-  let selectParts = []
-  if (simpleCols.trim()) {
-    const mainCols = simpleCols.split(',').map(c => c.trim()).filter(Boolean)
-    selectParts = mainCols.map(c => c === '*' ? `${mainTable}.*` : `${mainTable}.${c}`)
-  }
-
+  let selectParts = simpleCols.map(c => c === '*' ? `${mainTable}.*` : `${mainTable}.${c}`)
   let joins = ''
-  for (const rel of relations) {
-    // Handle !inner syntax: 'table!inner(cols)'
-    const isInner = rel.table.includes('!')
-    const actualTable = rel.table.replace('!inner', '')
+
+  function addRelation(relTable, relCols, parentTable) {
+    const isInner = relTable.includes('!')
+    const actualTable = relTable.replace('!inner', '')
     const joinType = isInner ? 'INNER JOIN' : 'LEFT JOIN'
 
-    // Guess FK: mainTable.id = relTable.mainTable_id OR relTable.id = mainTable.relTable_id
-    const fk1 = `${actualTable}.${mainTable.replace(/s$/, '')}_id` // e.g., campaign_roles.campaign_id
-    const fk2 = `${mainTable}.${actualTable.replace(/s$/, '')}_id` // e.g., campaigns.role_id
-    // Use convention: child table has parent_id
-    joins += ` ${joinType} ${actualTable} ON ${fk1} = ${mainTable}.id`
+    // FK convention: try both directions
+    // 1. child.parent_id = parent.id (e.g., campaign_roles.campaign_id = campaigns.id)
+    // 2. parent.child_id = child.id (e.g., campaign_groups.group_id = fb_groups.id)
+    const parentSingular = parentTable.replace(/s$/, '').replace(/ie$/, 'y')
+    const childSingular = actualTable.replace(/s$/, '').replace(/ie$/, 'y')
 
-    const relCols = rel.cols === '*'
-      ? `${actualTable}.*`
-      : rel.cols.split(',').map(c => `${actualTable}.${c.trim()}`).join(', ')
-    selectParts.push(relCols)
+    // FK lookup: check known overrides first, then heuristic
+    const fkOverrides = {
+      // parent_table:child_table → 'child.fk_col = parent.id'
+      'campaign_groups:fb_groups': `${actualTable}.id = ${parentTable}.group_id`,
+      'fb_groups:campaign_groups': `${parentTable}.group_id = ${actualTable}.id`,
+      'campaigns:campaign_roles': `${actualTable}.campaign_id = ${parentTable}.id`,
+      'inbox_messages:fanpages': `${parentTable}.fanpage_id = ${actualTable}.id`,
+      'fanpages:accounts': `${parentTable}.account_id = ${actualTable}.id`,
+      'accounts:fanpages': `${actualTable}.account_id = ${parentTable}.id`,
+    }
+    const overrideKey1 = `${parentTable}:${actualTable}`
+    const overrideKey2 = `${actualTable}:${parentTable}`
+
+    if (fkOverrides[overrideKey1]) {
+      joins += ` ${joinType} ${actualTable} ON ${fkOverrides[overrideKey1]}`
+    } else if (fkOverrides[overrideKey2]) {
+      joins += ` ${joinType} ${actualTable} ON ${fkOverrides[overrideKey2]}`
+    } else {
+      // Heuristic: child.parent_singular_id = parent.id
+      joins += ` ${joinType} ${actualTable} ON ${actualTable}.${parentSingular}_id = ${parentTable}.id`
+    }
+
+    // Parse relCols for nested relations
+    const subTokens = tokenizeSelect(relCols)
+    for (const sub of subTokens) {
+      const subMatch = sub.match(/^([\w!]+)\((.+)\)$/)
+      if (subMatch) {
+        // Nested relation — recurse
+        addRelation(subMatch[1], subMatch[2], actualTable)
+      } else {
+        selectParts.push(sub === '*' ? `${actualTable}.*` : `${actualTable}.${sub}`)
+      }
+    }
+  }
+
+  for (const rel of relations) {
+    addRelation(rel.table, rel.cols, mainTable)
   }
 
   return { selectSql: selectParts.join(', '), joins }
+}
+
+/**
+ * Split select string by top-level commas (respecting parentheses)
+ */
+function tokenizeSelect(str) {
+  const tokens = []
+  let depth = 0
+  let current = ''
+
+  for (const ch of str) {
+    if (ch === '(') { depth++; current += ch }
+    else if (ch === ')') { depth--; current += ch }
+    else if (ch === ',' && depth === 0) {
+      if (current.trim()) tokens.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  if (current.trim()) tokens.push(current.trim())
+  return tokens
 }
 
 /**
