@@ -32,6 +32,7 @@ const HARD_LIMITS = {
  */
 export function buildPlanRows(aiPlan, runsPerDay = 2) {
   if (!aiPlan?.roles) return []
+  const savedBudget = aiPlan.daily_budget || {} // User's saved daily values
   const seen = new Map()
   for (const role of aiPlan.roles) {
     for (const step of (role.steps || [])) {
@@ -41,12 +42,15 @@ export function buildPlanRows(aiPlan, runsPerDay = 2) {
       if (!display) continue
       const max = step.count_max || step.count_min || 1
       const aiSuggestedDaily = max * runsPerDay
+      // Use saved daily_budget if available (preserves user edits),
+      // otherwise fall back to computed from count_max * runsPerDay
+      const savedDaily = savedBudget[key]
       seen.set(key, {
         key,
         action: step.action,
         ...display,
-        ai_suggested: aiSuggestedDaily, // what AI originally proposed
-        count: aiSuggestedDaily,        // current value (user can edit)
+        ai_suggested: aiSuggestedDaily,
+        count: savedDaily != null ? savedDaily : aiSuggestedDaily,
       })
     }
   }
