@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new root@103.142.24.60 \"echo connected && pm2 list && pwd && ls /root/socialflow 2>/dev/null || ls /opt/socialflow 2>/dev/null || ls /home/*/socialflow 2>/dev/null\")",
+      "Bash(ssh -o ConnectTimeout=10 socialflow-vps \"echo '=== CONNECTED ===' && pm2 list && echo '---' && ls ~/socialflow/ 2>/dev/null || ls /opt/socialflow/ 2>/dev/null\")",
+      "Bash(ssh socialflow-vps:*)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|jsx\\)$\")"
+    ]
+  }
+}

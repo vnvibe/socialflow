@@ -1,16 +1,10 @@
 require('dotenv').config({ override: true })
 const Fastify = require('fastify')
-const { createClient } = require('@supabase/supabase-js')
+const { supabase } = require('./lib/supabase')
 const { initScheduler } = require('./services/campaign-scheduler')
 const { initNurtureScheduler } = require('./services/nurture-scheduler')
 
 const app = Fastify({ logger: true })
-
-// Supabase admin client (service role)
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-)
 
 // Decorate supabase on fastify instance
 app.decorate('supabase', supabase)

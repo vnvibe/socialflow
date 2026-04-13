@@ -1,11 +1,6 @@
 const cron = require('node-cron')
-const { createClient } = require('@supabase/supabase-js')
+const { supabase } = require('../lib/supabase')
 const { getBusyNicks } = require('../lib/nick-lock')
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-)
 
 // Age-based max sessions per day
 function getMaxSessions(ageDays, profileTarget) {

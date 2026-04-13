@@ -1,6 +1,6 @@
 const cron = require('node-cron')
 const { CronExpressionParser } = require('cron-parser')
-const { createClient } = require('@supabase/supabase-js')
+const { supabase: _sbFromLib } = require('../lib/supabase')
 const { getBusyNicks } = require('../lib/nick-lock')
 const { collectPerformanceData, evaluatePostStrategy, getOptimalScheduleTime, MIN_POSTS_FOR_AI } = require('./post-strategy')
 const { remember, recall, formatMemoriesForPrompt } = require('./ai-memory')
@@ -52,7 +52,7 @@ function getJobPriority(jobType) {
 let supabase = null
 
 function initScheduler() {
-  supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  supabase = _sbFromLib
 
   // Check campaigns every minute
   cron.schedule('* * * * *', async () => {

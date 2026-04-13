@@ -1,35 +1,67 @@
-// Fastify plugin for Supabase JWT authentication
-// - authenticate: verify Bearer token via supabase.auth.getUser(), get role from profiles table
+// Fastify plugin for JWT authentication
+// - authenticate: verify Bearer token, get role from profiles table
 // - requireAdmin: authenticate + check role === 'admin'
-// Uses fastify-plugin, @supabase/supabase-js
-// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+//
+// Supports both Supabase Auth (cloud) and self-hosted JWT mode.
+// When DATABASE_URL is set, verifies JWT locally using JWT_SECRET.
+// Otherwise, uses supabase.auth.getUser() for verification.
 
 const fp = require('fastify-plugin')
-const { createClient } = require('@supabase/supabase-js')
 
-// Simple delay helper
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 module.exports = fp(async (fastify) => {
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const { supabase } = require('../lib/supabase')
+  const useSelfHosted = !!process.env.DATABASE_URL
+
+  // For self-hosted: verify JWT using jsonwebtoken
+  let jwt = null
+  let JWT_SECRET = process.env.JWT_SECRET || null
+  if (useSelfHosted) {
+    jwt = require('jsonwebtoken')
+    if (!JWT_SECRET) {
+      // Derive from SUPABASE_SERVICE_ROLE_KEY if available (for backward compat)
+      // Or use a standalone secret
+      console.warn('[AUTH] No JWT_SECRET set — using fallback. Set JWT_SECRET in .env for production!')
+      JWT_SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || 'socialflow-default-secret-change-me'
+    }
+  }
 
   // Cache: token → { user, profile, expiresAt }
   const authCache = new Map()
   const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
-  // getUser with retry on DNS/network errors
-  async function getUserWithRetry(token, retries = 2) {
+  // Verify token — self-hosted uses jsonwebtoken, cloud uses supabase.auth.getUser
+  async function verifyToken(token) {
+    if (useSelfHosted && jwt) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET)
+        return { user: { id: decoded.sub || decoded.id, email: decoded.email }, error: null }
+      } catch (err) {
+        // Try Supabase JWT format (uses HMAC with supabase jwt secret)
+        // The JWT secret for Supabase is different from service role key
+        return { user: null, error: { message: 'Invalid token: ' + err.message } }
+      }
+    }
+
+    // Cloud: use Supabase auth
+    const { createClient } = require('@supabase/supabase-js')
+    const sbAuth = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+    return getUserWithRetry(sbAuth, token)
+  }
+
+  async function getUserWithRetry(sbAuth, token, retries = 2) {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const result = await supabase.auth.getUser(token)
-        return result
+        const { data: { user }, error } = await sbAuth.auth.getUser(token)
+        return { user, error }
       } catch (err) {
         const isNetworkError = err.message?.includes('fetch failed')
           || err.cause?.code === 'ENOTFOUND'
           || err.cause?.code === 'ECONNREFUSED'
           || err.cause?.code === 'ETIMEDOUT'
         if (isNetworkError && attempt < retries) {
-          fastify.log.warn(`[AUTH] Network error (attempt ${attempt + 1}/${retries + 1}), retrying in ${(attempt + 1) * 500}ms...`)
+          fastify.log.warn(`[AUTH] Network error (attempt ${attempt + 1}/${retries + 1}), retrying...`)
           await wait((attempt + 1) * 500)
           continue
         }
@@ -42,7 +74,7 @@ module.exports = fp(async (fastify) => {
     const token = request.headers.authorization?.replace('Bearer ', '')
     if (!token) return reply.code(401).send({ error: 'Unauthorized' })
 
-    // Check cache first
+    // Check cache
     const cached = authCache.get(token)
     if (cached && cached.expiresAt > Date.now()) {
       request.user = cached.user
@@ -50,7 +82,7 @@ module.exports = fp(async (fastify) => {
     }
 
     try {
-      const { data: { user }, error } = await getUserWithRetry(token)
+      const { user, error } = await verifyToken(token)
       if (error || !user) {
         authCache.delete(token)
         return reply.code(401).send({ error: 'Invalid token' })
@@ -65,24 +97,19 @@ module.exports = fp(async (fastify) => {
       if (!profile?.is_active) return reply.code(403).send({ error: 'Account disabled' })
 
       const fullUser = { ...user, role: profile.role }
-
-      // Cache successful auth
       authCache.set(token, { user: fullUser, expiresAt: Date.now() + CACHE_TTL })
-
       request.user = fullUser
     } catch (err) {
-      // Network-level failure → 503 instead of generic 500
       const isNetworkError = err.message?.includes('fetch failed')
         || err.cause?.code === 'ENOTFOUND'
         || err.cause?.code === 'ECONNREFUSED'
       if (isNetworkError) {
-        // Try to serve from cache even if expired (grace period)
         if (cached) {
           request.user = cached.user
           fastify.log.warn('[AUTH] Using expired cache due to network error')
           return
         }
-        return reply.code(503).send({ error: 'Database temporarily unavailable, please retry' })
+        return reply.code(503).send({ error: 'Database temporarily unavailable' })
       }
       throw err
     }
@@ -95,11 +122,11 @@ module.exports = fp(async (fastify) => {
     }
   })
 
-  // Clean expired cache entries every 10 minutes
+  // Clean expired cache
   setInterval(() => {
     const now = Date.now()
     for (const [key, val] of authCache) {
-      if (val.expiresAt + CACHE_TTL < now) authCache.delete(key) // Delete after 2x TTL
+      if (val.expiresAt + CACHE_TTL < now) authCache.delete(key)
     }
   }, 10 * 60 * 1000)
 })

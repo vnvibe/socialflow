@@ -5,14 +5,8 @@
  * A nick is "busy" if it has ANY pending/claimed/running job (regardless of system).
  */
 
-const { createClient } = require('@supabase/supabase-js')
-
-let supabase = null
 function getClient() {
-  if (!supabase) {
-    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
-  }
-  return supabase
+  return require('./supabase').supabase
 }
 
 /**
