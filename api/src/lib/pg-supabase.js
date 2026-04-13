@@ -11,6 +11,39 @@
 
 const { Pool } = require('pg')
 
+// FK cache: loaded once on first query
+let _fkMap = null
+async function loadFKMap(pool) {
+  if (_fkMap) return _fkMap
+  try {
+    const { rows } = await pool.query(`
+      SELECT tc.table_name, kcu.column_name, ccu.table_name as ref_table, ccu.column_name as ref_col
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+      JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+    `)
+    _fkMap = new Map()
+    for (const r of rows) {
+      // Key: "parent_table:child_table" → { fkCol, refCol, direction }
+      // Direction 1: table_name has FK column pointing to ref_table
+      // e.g., accounts.proxy_id → proxies.id
+      const key1 = `${r.table_name}:${r.ref_table}`
+      if (!_fkMap.has(key1)) _fkMap.set(key1, [])
+      _fkMap.get(key1).push({ from: `${r.table_name}.${r.column_name}`, to: `${r.ref_table}.${r.ref_col}` })
+
+      const key2 = `${r.ref_table}:${r.table_name}`
+      if (!_fkMap.has(key2)) _fkMap.set(key2, [])
+      _fkMap.get(key2).push({ from: `${r.table_name}.${r.column_name}`, to: `${r.ref_table}.${r.ref_col}` })
+    }
+    console.log(`[PG-SUPABASE] FK map loaded: ${rows.length} relationships`)
+  } catch (err) {
+    console.warn(`[PG-SUPABASE] FK map load failed: ${err.message} — using heuristic`)
+    _fkMap = new Map()
+  }
+  return _fkMap
+}
+
 function createClient(databaseUrl) {
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -22,6 +55,9 @@ function createClient(databaseUrl) {
   pool.on('error', (err) => {
     console.error('[PG-POOL] Unexpected error on idle client:', err.message)
   })
+
+  // Pre-load FK map
+  loadFKMap(pool).catch(() => {})
 
   return {
     from: (table) => new QueryBuilder(pool, table),
@@ -198,6 +234,9 @@ class QueryBuilder {
   }
 
   async _execute() {
+    // Ensure FK map loaded before first query with joins
+    if (!_fkMap) await loadFKMap(this._pool)
+
     const params = []
     let paramIdx = 1
 
@@ -248,19 +287,41 @@ class QueryBuilder {
 
       switch (this._operation) {
         case 'select': {
-          // Handle nested relations in select (e.g., '*, campaign_roles(*)')
-          const { selectSql, joins } = parseSelect(this._selectCols, this._table)
-          sql = `SELECT ${selectSql} FROM ${this._table}${joins}${buildWhere()}`
+          // Parse relations from select string
+          const { mainCols, relations } = parseSelectCols(this._selectCols)
+
+          // Auto-include FK columns needed for relation linking
+          const extraCols = new Set()
+          if (relations.length && !mainCols.includes('*')) {
+            for (const rel of relations) {
+              const actualTable = rel.table.replace('!inner', '')
+              const fkKey = `${this._table}:${actualTable}`
+              const fkEntries = _fkMap?.get(fkKey)
+              if (fkEntries?.length) {
+                const [fkTable, fkCol] = fkEntries[0].from.split('.')
+                if (fkTable === this._table && !mainCols.includes(fkCol)) extraCols.add(fkCol)
+                const [, refCol] = fkEntries[0].to.split('.')
+                if (fkEntries[0].to.split('.')[0] === this._table && !mainCols.includes(refCol)) extraCols.add(refCol)
+              }
+            }
+          }
+
+          // Main query (no JOINs — relations fetched separately)
+          const allCols = [...mainCols, ...extraCols]
+          const colList = allCols.length ? allCols.join(', ') : '*'
+          sql = `SELECT ${colList} FROM ${this._table}${buildWhere()}`
           if (this._orders.length) sql += ` ORDER BY ${this._orders.join(', ')}`
           if (this._limitVal != null) sql += ` LIMIT ${addParam(this._limitVal)}`
           if (this._offsetVal != null) sql += ` OFFSET ${addParam(this._offsetVal)}`
 
           result = await this._pool.query(sql, params)
-
-          // Post-process nested relations
           let data = result.rows
-          if (joins) {
-            data = deduplicateJoinRows(data, this._table, this._selectCols)
+
+          // Fetch relations as separate queries (like PostgREST)
+          if (relations.length > 0 && data.length > 0) {
+            for (const rel of relations) {
+              await fetchRelation(this._pool, data, this._table, rel)
+            }
           }
 
           if (this._returnSingle) {
@@ -373,87 +434,108 @@ class QueryBuilder {
 }
 
 /**
- * Parse select columns with nested relations (supports nested parentheses)
- * e.g., '*, campaign_roles(*)' → LEFT JOIN
- * e.g., 'id, fanpages!inner(*, accounts!inner(owner_id))' → multi-level JOIN
+ * Parse select columns — separate main columns from relation references.
+ * Relations are fetched as separate queries (not JOINs) to match PostgREST behavior.
  */
-function parseSelect(cols, mainTable) {
-  if (!cols || cols === '*') return { selectSql: `${mainTable}.*`, joins: '' }
+function parseSelectCols(cols) {
+  if (!cols || cols === '*') return { mainCols: ['*'], relations: [] }
 
-  // Tokenize: split top-level items by commas, respecting parenthesis depth
   const tokens = tokenizeSelect(cols)
+  const mainCols = []
   const relations = []
-  const simpleCols = []
 
   for (const token of tokens) {
-    // Check if token is a relation: word(something) or word!inner(something)
     const relMatch = token.match(/^([\w!]+)\((.+)\)$/)
     if (relMatch) {
       relations.push({ table: relMatch[1], cols: relMatch[2] })
     } else {
-      simpleCols.push(token)
+      mainCols.push(token)
     }
   }
 
-  if (relations.length === 0) {
-    return { selectSql: simpleCols.map(c => c === '*' ? `${mainTable}.*` : `${mainTable}.${c}`).join(', '), joins: '' }
-  }
+  return { mainCols: mainCols.length ? mainCols : ['*'], relations }
+}
 
-  // Build joins
-  let selectParts = simpleCols.map(c => c === '*' ? `${mainTable}.*` : `${mainTable}.${c}`)
-  let joins = ''
+/**
+ * Fetch a relation as a separate query and attach to parent rows as nested objects.
+ * Produces results like PostgREST: { id, name, proxies: {...}, campaign_roles: [{...}] }
+ */
+async function fetchRelation(pool, parentRows, parentTable, rel) {
+  const isInner = rel.table.includes('!')
+  const actualTable = rel.table.replace('!inner', '')
 
-  function addRelation(relTable, relCols, parentTable) {
-    const isInner = relTable.includes('!')
-    const actualTable = relTable.replace('!inner', '')
-    const joinType = isInner ? 'INNER JOIN' : 'LEFT JOIN'
+  // Find FK from cached map
+  const fkKey = `${parentTable}:${actualTable}`
+  const fkEntries = _fkMap?.get(fkKey)
 
-    // FK convention: try both directions
-    // 1. child.parent_id = parent.id (e.g., campaign_roles.campaign_id = campaigns.id)
-    // 2. parent.child_id = child.id (e.g., campaign_groups.group_id = fb_groups.id)
+  let fkTable, fkCol, refTable, refCol
+
+  if (fkEntries?.length) {
+    const fk = fkEntries[0]
+    ;[fkTable, fkCol] = fk.from.split('.')
+    ;[refTable, refCol] = fk.to.split('.')
+  } else {
+    // Heuristic: child.parent_singular_id → parent.id
     const parentSingular = parentTable.replace(/s$/, '').replace(/ie$/, 'y')
-    const childSingular = actualTable.replace(/s$/, '').replace(/ie$/, 'y')
-
-    // FK lookup: check known overrides first, then heuristic
-    const fkOverrides = {
-      // parent_table:child_table → 'child.fk_col = parent.id'
-      'campaign_groups:fb_groups': `${actualTable}.id = ${parentTable}.group_id`,
-      'fb_groups:campaign_groups': `${parentTable}.group_id = ${actualTable}.id`,
-      'campaigns:campaign_roles': `${actualTable}.campaign_id = ${parentTable}.id`,
-      'inbox_messages:fanpages': `${parentTable}.fanpage_id = ${actualTable}.id`,
-      'fanpages:accounts': `${parentTable}.account_id = ${actualTable}.id`,
-      'accounts:fanpages': `${actualTable}.account_id = ${parentTable}.id`,
-    }
-    const overrideKey1 = `${parentTable}:${actualTable}`
-    const overrideKey2 = `${actualTable}:${parentTable}`
-
-    if (fkOverrides[overrideKey1]) {
-      joins += ` ${joinType} ${actualTable} ON ${fkOverrides[overrideKey1]}`
-    } else if (fkOverrides[overrideKey2]) {
-      joins += ` ${joinType} ${actualTable} ON ${fkOverrides[overrideKey2]}`
-    } else {
-      // Heuristic: child.parent_singular_id = parent.id
-      joins += ` ${joinType} ${actualTable} ON ${actualTable}.${parentSingular}_id = ${parentTable}.id`
-    }
-
-    // Parse relCols for nested relations
-    const subTokens = tokenizeSelect(relCols)
-    for (const sub of subTokens) {
-      const subMatch = sub.match(/^([\w!]+)\((.+)\)$/)
-      if (subMatch) {
-        // Nested relation — recurse
-        addRelation(subMatch[1], subMatch[2], actualTable)
-      } else {
-        selectParts.push(sub === '*' ? `${actualTable}.*` : `${actualTable}.${sub}`)
-      }
-    }
+    fkTable = actualTable
+    fkCol = `${parentSingular}_id`
+    refTable = parentTable
+    refCol = 'id'
   }
 
-  for (const rel of relations) {
-    addRelation(rel.table, rel.cols, mainTable)
-  }
+  // Direction: does parent have FK (one-to-one) or child has FK (one-to-many)?
+  const parentHasFK = (fkTable === parentTable)
 
-  return { selectSql: selectParts.join(', '), joins }
+  // Parse sub-relations from relCols
+  const { mainCols: subMainCols, relations: subRelations } = parseSelectCols(rel.cols)
+  const selectCols = subMainCols.includes('*') ? '*' : [...new Set([...subMainCols, 'id'])].join(', ')
+
+  if (parentHasFK) {
+    // Parent has FK → one-to-one (e.g., accounts.proxy_id → proxies.id)
+    const fkValues = [...new Set(parentRows.map(r => r[fkCol]).filter(v => v != null))]
+    if (!fkValues.length) {
+      parentRows.forEach(r => { r[actualTable] = null })
+      return
+    }
+    const ph = fkValues.map((_, i) => `$${i + 1}`)
+    const { rows: relRows } = await pool.query(
+      `SELECT ${selectCols} FROM ${actualTable} WHERE ${refCol} IN (${ph.join(',')})`, fkValues
+    )
+    if (subRelations.length && relRows.length) {
+      for (const sub of subRelations) await fetchRelation(pool, relRows, actualTable, sub)
+    }
+    const relMap = new Map(relRows.map(r => [String(r[refCol]), r]))
+    for (let i = parentRows.length - 1; i >= 0; i--) {
+      parentRows[i][actualTable] = relMap.get(String(parentRows[i][fkCol])) || null
+      if (isInner && !parentRows[i][actualTable]) parentRows.splice(i, 1)
+    }
+  } else {
+    // Child has FK → one-to-many (e.g., campaign_roles.campaign_id → campaigns.id)
+    const parentIds = [...new Set(parentRows.map(r => r[refCol]).filter(v => v != null))]
+    if (!parentIds.length) {
+      parentRows.forEach(r => { r[actualTable] = [] })
+      return
+    }
+    // Ensure FK col is in SELECT for grouping
+    const selWithFK = selectCols === '*' ? '*' : [...new Set([...selectCols.split(',').map(s=>s.trim()), fkCol])].join(', ')
+    const ph = parentIds.map((_, i) => `$${i + 1}`)
+    const { rows: relRows } = await pool.query(
+      `SELECT ${selWithFK} FROM ${actualTable} WHERE ${fkCol} IN (${ph.join(',')})`, parentIds
+    )
+    if (subRelations.length && relRows.length) {
+      for (const sub of subRelations) await fetchRelation(pool, relRows, actualTable, sub)
+    }
+    const relMap = new Map()
+    for (const r of relRows) {
+      const key = String(r[fkCol])
+      if (!relMap.has(key)) relMap.set(key, [])
+      relMap.get(key).push(r)
+    }
+    for (let i = parentRows.length - 1; i >= 0; i--) {
+      parentRows[i][actualTable] = relMap.get(String(parentRows[i][refCol])) || []
+      if (isInner && !parentRows[i][actualTable].length) parentRows.splice(i, 1)
+    }
+  }
 }
 
 /**
@@ -463,29 +545,16 @@ function tokenizeSelect(str) {
   const tokens = []
   let depth = 0
   let current = ''
-
   for (const ch of str) {
     if (ch === '(') { depth++; current += ch }
     else if (ch === ')') { depth--; current += ch }
     else if (ch === ',' && depth === 0) {
       if (current.trim()) tokens.push(current.trim())
       current = ''
-    } else {
-      current += ch
-    }
+    } else { current += ch }
   }
   if (current.trim()) tokens.push(current.trim())
   return tokens
-}
-
-/**
- * Deduplicate rows from LEFT JOIN back into nested objects
- * This is a simplified version — groups child rows under parent
- */
-function deduplicateJoinRows(rows, mainTable, selectCols) {
-  // For now, return rows as-is. Nested relation dedup is complex and
-  // most code handles flat results anyway. If needed, implement later.
-  return rows
 }
 
 /**
