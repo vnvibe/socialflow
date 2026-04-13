@@ -80,14 +80,11 @@ export function applyRowsToPlan(aiPlan, rows, runsPerDay = 2) {
     }),
   }))
 
-  // Recompute daily_budget
+  // Store daily_budget directly from user's input (NOT from count_max * runsPerDay)
+  // This preserves exact values like "4 comments/day" even with 8 runs
   const dailyBudget = {}
-  for (const role of newRoles) {
-    for (const step of (role.steps || [])) {
-      const k = step.quota_key || step.action
-      const max = step.count_max || step.count_min || 1
-      dailyBudget[k] = Math.max(dailyBudget[k] || 0, max * runsPerDay)
-    }
+  for (const row of rows) {
+    dailyBudget[row.key] = row.count
   }
 
   return { ...aiPlan, roles: newRoles, daily_budget: dailyBudget }
