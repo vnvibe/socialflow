@@ -50,9 +50,14 @@ module.exports = fp(async (fastify) => {
       try {
         const result = await getUserWithRetry(sbAuth, token)
         if (result.user) return result
+        if (result.error) {
+          console.warn(`[AUTH] Supabase verify failed: ${result.error.message || JSON.stringify(result.error)}`)
+        }
       } catch (err) {
-        // Supabase Auth unavailable — fall through to local JWT
+        console.warn(`[AUTH] Supabase Auth unavailable: ${err.message}`)
       }
+    } else {
+      console.warn('[AUTH] No Supabase Auth client (missing SUPABASE_URL or SERVICE_ROLE_KEY)')
     }
 
     // Fallback: local JWT verification (for self-issued tokens)
@@ -60,7 +65,9 @@ module.exports = fp(async (fastify) => {
       try {
         const decoded = jwt.verify(token, JWT_SECRET)
         return { user: { id: decoded.sub || decoded.id, email: decoded.email }, error: null }
-      } catch {}
+      } catch (err) {
+        console.warn(`[AUTH] Local JWT verify failed: ${err.message}`)
+      }
     }
 
     return { user: null, error: { message: 'Invalid token' } }
