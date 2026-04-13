@@ -502,6 +502,11 @@ async function executeRoleCampaign(campaign) {
 
   if (roles.length === 0) {
     console.log(`[SCHEDULER] Campaign ${campaign.id} has no active roles, skipping`)
+    const nextRun = calculateNextRun(campaign)
+    await supabase.from('campaigns').update({
+      next_run_at: nextRun,
+      last_run_at: new Date().toISOString()
+    }).eq('id', campaign.id)
     return
   }
 
