@@ -245,6 +245,14 @@ class QueryBuilder {
       return `$${paramIdx++}`
     }
 
+    // Prepare value for pg: arrays pass as-is (pg handles natively), objects stringify for jsonb
+    const pgVal = (val) => {
+      if (val === null || val === undefined) return val
+      if (Array.isArray(val)) return val // pg driver handles JS arrays → PostgreSQL arrays
+      if (typeof val === 'object') return JSON.stringify(val) // plain objects → jsonb string
+      return val
+    }
+
     // Fix JSONB column refs: payload->>account_id → payload->>'account_id'
     const fixCol = (col) => {
       if (col.includes('->>')) {
@@ -277,7 +285,7 @@ class QueryBuilder {
           return `${fixCol(w.col)} ${w.op} (${placeholders.join(', ')})`
         }
         if (w.jsonb) return `${fixCol(w.col)} ${w.op} ${addParam(w.val)}`
-        return `${fixCol(w.col)} ${w.op} ${addParam(typeof w.val === 'object' && w.val !== null ? JSON.stringify(w.val) : w.val)}`
+        return `${fixCol(w.col)} ${w.op} ${addParam(pgVal(w.val))}`
       })
       return ' WHERE ' + conditions.join(' AND ')
     }
@@ -343,7 +351,7 @@ class QueryBuilder {
             return `(${allCols.map(col => {
               const val = row[col]
               if (val === undefined || val === null) return 'DEFAULT'
-              return addParam(typeof val === 'object' ? JSON.stringify(val) : val)
+              return addParam(pgVal(val))
             }).join(', ')})`
           })
 
@@ -362,7 +370,7 @@ class QueryBuilder {
             .map(([col, val]) => {
               if (val === undefined) return null
               if (val === null) return `${col} = NULL`
-              return `${col} = ${addParam(typeof val === 'object' ? JSON.stringify(val) : val)}`
+              return `${col} = ${addParam(pgVal(val))}`
             })
             .filter(Boolean)
 
@@ -387,7 +395,7 @@ class QueryBuilder {
             return `(${allCols.map(col => {
               const val = row[col]
               if (val === undefined || val === null) return 'NULL'
-              return addParam(typeof val === 'object' ? JSON.stringify(val) : val)
+              return addParam(pgVal(val))
             }).join(', ')})`
           })
 
