@@ -1,6 +1,21 @@
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
+  // GET /users/:id/profile — Get user profile (for auth store, replaces direct Supabase query)
+  fastify.get('/:id/profile', { preHandler: fastify.authenticate }, async (req, reply) => {
+    // Users can only fetch their own profile (unless admin)
+    if (req.params.id !== req.user.id && req.user.role !== 'admin') {
+      return reply.code(403).send({ error: 'Forbidden' })
+    }
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', req.params.id)
+      .single()
+    if (error || !profile) return reply.code(404).send({ error: 'Profile not found' })
+    return profile
+  })
+
   // GET /users - List all users (admin only)
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', req.user.id).single()

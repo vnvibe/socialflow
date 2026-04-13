@@ -1,8 +1,23 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
+import api from '../lib/api'
 
 let authInitialized = false
 let authSubscription = null
+
+// Fetch profile from VPS API instead of Supabase REST (Supabase DB throttled)
+async function fetchProfile(userId) {
+  try {
+    const { data } = await api.get(`/users/${userId}/profile`)
+    return data
+  } catch {
+    // Fallback: try Supabase direct (in case API is down)
+    try {
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single()
+      return profile
+    } catch { return null }
+  }
+}
 
 const useAuthStore = create((set) => ({
   user: null,
@@ -16,12 +31,7 @@ const useAuthStore = create((set) => ({
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single()
-
+        const profile = await fetchProfile(session.user.id)
         set({ user: session.user, profile, loading: false })
       } else {
         set({ loading: false })
@@ -33,11 +43,7 @@ const useAuthStore = create((set) => ({
 
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single()
+          const profile = await fetchProfile(session.user.id)
           set({ user: session.user, profile })
         } else {
           set({ user: null, profile: null })
@@ -54,16 +60,10 @@ const useAuthStore = create((set) => ({
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
 
-    // Check if account is approved
+    // Check if account is approved via API
     if (data.user) {
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('is_active')
-        .eq('id', data.user.id)
-        .single()
-
-      // No profile found or profile inactive = not approved
-      if (profileError || !profile || !profile.is_active) {
+      const profile = await fetchProfile(data.user.id)
+      if (!profile || !profile.is_active) {
         await supabase.auth.signOut()
         throw new Error('Tài khoản chưa được phê duyệt. Vui lòng chờ admin duyệt.')
       }
