@@ -32,22 +32,38 @@ module.exports = fp(async (fastify) => {
   const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
   // Verify token — self-hosted uses jsonwebtoken, cloud uses supabase.auth.getUser
+  // Supabase Auth client — used for JWT verification (frontend tokens come from Supabase Auth)
+  let _sbAuth = null
+  function getSupabaseAuth() {
+    if (_sbAuth) return _sbAuth
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      const { createClient } = require('@supabase/supabase-js')
+      _sbAuth = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+    }
+    return _sbAuth
+  }
+
   async function verifyToken(token) {
-    if (useSelfHosted && jwt) {
+    // Always try Supabase Auth first (frontend tokens are Supabase JWTs)
+    const sbAuth = getSupabaseAuth()
+    if (sbAuth) {
       try {
-        const decoded = jwt.verify(token, JWT_SECRET)
-        return { user: { id: decoded.sub || decoded.id, email: decoded.email }, error: null }
+        const result = await getUserWithRetry(sbAuth, token)
+        if (result.user) return result
       } catch (err) {
-        // Try Supabase JWT format (uses HMAC with supabase jwt secret)
-        // The JWT secret for Supabase is different from service role key
-        return { user: null, error: { message: 'Invalid token: ' + err.message } }
+        // Supabase Auth unavailable — fall through to local JWT
       }
     }
 
-    // Cloud: use Supabase auth
-    const { createClient } = require('@supabase/supabase-js')
-    const sbAuth = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
-    return getUserWithRetry(sbAuth, token)
+    // Fallback: local JWT verification (for self-issued tokens)
+    if (jwt && JWT_SECRET) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET)
+        return { user: { id: decoded.sub || decoded.id, email: decoded.email }, error: null }
+      } catch {}
+    }
+
+    return { user: null, error: { message: 'Invalid token' } }
   }
 
   async function getUserWithRetry(sbAuth, token, retries = 2) {
