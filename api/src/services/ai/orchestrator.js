@@ -2,13 +2,20 @@ const { createOpenAICompatible } = require('./providers/openai-compatible')
 const { createAnthropic } = require('./providers/anthropic')
 const { createGemini } = require('./providers/gemini')
 const { createFal } = require('./providers/fal')
+const { createHermes } = require('./providers/hermes')
 
 class AIOrchestrator {
   constructor(userSettings) {
     this.providers = userSettings.providers || {}
     this.defaults = userSettings.defaults || {}
     this.budgets = userSettings.token_budgets || {}
-    this.fallbackChain = userSettings.fallback_chain || ['deepseek', 'openai', 'gemini']
+    this.fallbackChain = userSettings.fallback_chain || ['hermes', 'deepseek', 'openai', 'gemini']
+
+    // Auto-inject Hermes as an available provider if not already configured
+    // (Hermes is a local service, no API key needed — uses AGENT_SECRET from env)
+    if (!this.providers.hermes && process.env.AGENT_SECRET) {
+      this.providers.hermes = { enabled: true, api_key: 'local' }
+    }
   }
 
   async call(functionName, messages, overrideConfig = {}) {
@@ -36,6 +43,11 @@ class AIOrchestrator {
       deepseek: 'https://api.deepseek.com/v1',
       groq: 'https://api.groq.com/openai/v1',
       kimi: 'https://api.moonshot.cn/v1'
+    }
+
+    if (providerName === 'hermes') {
+      const client = createHermes()
+      return client.chat(model, messages, maxTokens)
     }
 
     if (OPENAI_COMPATIBLE.includes(providerName)) {
@@ -89,17 +101,26 @@ class AIOrchestrator {
   }
 
   getFunctionConfig(functionName) {
+    // Hermes handles SocialFlow-specific operations (self-learning skills);
+    // DeepSeek/Gemini handle general-purpose tasks
     const DEFAULTS = {
+      // Content generation — DeepSeek for general captions, Hermes for social comments
       caption_gen:    { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 800 },
       hashtag_gen:    { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 300 },
       translate_sub:  { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 4000 },
+      // SocialFlow operations routed to Hermes (skill-based + learning)
+      comment_gen:    { provider: 'hermes', model: 'deepseek-chat', max_tokens: 150 },
+      quality_gate:   { provider: 'hermes', model: 'deepseek-chat', max_tokens: 200 },
+      relevance_review: { provider: 'hermes', model: 'deepseek-chat', max_tokens: 1500 },
+      profile_eval:   { provider: 'hermes', model: 'deepseek-chat', max_tokens: 150 },
+      group_eval:     { provider: 'hermes', model: 'deepseek-chat', max_tokens: 300 },
+      post_strategy:  { provider: 'hermes', model: 'deepseek-chat', max_tokens: 300 },
+      // Campaign planning stays on DeepSeek (long structured output)
+      ai_pilot:       { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 1000 },
+      // Research via Gemini (web context)
       trend_analysis: { provider: 'gemini',   model: 'gemini-1.5-flash', max_tokens: 1000 },
       content_ideas:  { provider: 'gemini',   model: 'gemini-1.5-flash', max_tokens: 1500 },
-      relevance_review: { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 1500 },
-      ai_pilot:       { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 1000 },
-      profile_eval:   { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 150 },
-      group_eval:     { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 300 },
-      post_strategy:  { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 300 },
+      // Images via fal.ai
       image_gen:      { provider: 'fal', model: 'fal-ai/flux/schnell' },
     }
     return this.defaults[functionName] || DEFAULTS[functionName] || DEFAULTS.caption_gen
