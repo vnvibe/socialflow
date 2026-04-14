@@ -96,16 +96,20 @@ class QueryBuilder {
     this._data = null
     this._upsertOptions = null
     this._returnSelect = null // .select() after insert/update
+    this._countMode = null // 'exact' for count queries
+    this._headOnly = false // true = return count only, no rows
   }
 
   // ── Operations ──
-  select(cols) {
+  select(cols, options) {
     if (this._operation !== 'select' || this._data) {
       // .select() after .insert()/.update()/.upsert() = RETURNING clause
       this._returnSelect = cols || '*'
       return this
     }
     this._selectCols = cols || '*'
+    if (options?.count === 'exact') this._countMode = 'exact'
+    if (options?.head) this._headOnly = true
     return this
   }
 
@@ -295,6 +299,14 @@ class QueryBuilder {
 
       switch (this._operation) {
         case 'select': {
+          // Handle count-only queries: .select('id', { count: 'exact', head: true })
+          if (this._countMode === 'exact' && this._headOnly) {
+            sql = `SELECT COUNT(*) as count FROM ${this._table}${buildWhere()}`
+            result = await this._pool.query(sql, params)
+            const count = parseInt(result.rows[0]?.count || 0)
+            return { data: null, error: null, count }
+          }
+
           // Parse relations from select string
           const { mainCols, relations } = parseSelectCols(this._selectCols)
 

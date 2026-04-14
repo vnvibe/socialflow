@@ -1,5 +1,5 @@
 // Fastify CORS plugin
-// Allow all origins in dev, configure for production
+// Allow all origins + Private Network Access (Chrome 104+)
 const fp = require('fastify-plugin')
 
 module.exports = fp(async (fastify) => {
@@ -10,5 +10,12 @@ module.exports = fp(async (fastify) => {
     allowedHeaders: ['Content-Type', 'Authorization'],
     preflightContinue: false,
     optionsSuccessStatus: 204,
+  })
+
+  // Chrome Private Network Access: required when public website calls private/local IP
+  // https://developer.chrome.com/blog/private-network-access-preflight/
+  fastify.addHook('onSend', (request, reply, payload, done) => {
+    reply.header('Access-Control-Allow-Private-Network', 'true')
+    done()
   })
 })
