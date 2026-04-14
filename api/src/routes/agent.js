@@ -10,9 +10,9 @@ module.exports = async (fastify) => {
       supabase_url: process.env.SUPABASE_URL,
       supabase_anon_key: process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
       database_url: process.env.DATABASE_URL_EXTERNAL || process.env.DATABASE_URL?.replace('localhost', process.env.VPS_HOST || '103.142.24.60') || null,
-      api_url: process.env.RAILWAY_PUBLIC_DOMAIN
+      api_url: process.env.API_PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN
         ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-        : `http://localhost:${process.env.PORT || 3005}`,
+        : `https://103-142-24-60.sslip.io`),
       agent_secret_key: process.env.AGENT_SECRET_KEY || '',
       user_id: req.user.id,
       agent_settings: {
