@@ -1,41 +1,91 @@
+const bcrypt = require('bcrypt')
+const jwt = require('jsonwebtoken')
+
+const JWT_SECRET = process.env.JWT_SECRET
+const JWT_EXPIRES = '7d'
+
 module.exports = async (fastify) => {
   const { supabase } = fastify
 
-  // POST /auth/register - Public registration (pending admin approval)
+  // POST /auth/login — email + password → JWT token
+  fastify.post('/login', async (req, reply) => {
+    const { email, password } = req.body
+    if (!email || !password) return reply.code(400).send({ error: 'Email và mật khẩu là bắt buộc' })
+
+    const { data: user, error } = await supabase
+      .from('profiles')
+      .select('id, email, password_hash, role, is_active, username, display_name')
+      .eq('email', email)
+      .single()
+
+    if (error || !user) return reply.code(401).send({ error: 'Email hoặc mật khẩu sai' })
+    if (!user.password_hash) return reply.code(401).send({ error: 'Tài khoản chưa thiết lập mật khẩu' })
+    if (!user.is_active) return reply.code(403).send({ error: 'Tài khoản chưa được phê duyệt' })
+
+    const valid = await bcrypt.compare(password, user.password_hash)
+    if (!valid) return reply.code(401).send({ error: 'Email hoặc mật khẩu sai' })
+
+    const token = jwt.sign(
+      { sub: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES }
+    )
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        username: user.username,
+        display_name: user.display_name,
+      },
+    }
+  })
+
+  // POST /auth/logout — stateless JWT, just ack
+  fastify.post('/logout', async () => ({ success: true }))
+
+  // GET /auth/me — verify token, return user + profile
+  fastify.get('/me', { preHandler: fastify.authenticate }, async (req) => {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id, email, role, is_active, username, display_name')
+      .eq('id', req.user.id)
+      .single()
+
+    return { user: { ...req.user, ...profile } }
+  })
+
+  // POST /auth/register — public registration (pending admin approval)
   fastify.post('/register', async (req, reply) => {
     const { email, password, display_name } = req.body
-    if (!email || !password) {
-      return reply.code(400).send({ error: 'Email và mật khẩu là bắt buộc' })
-    }
-    if (password.length < 6) {
-      return reply.code(400).send({ error: 'Mật khẩu tối thiểu 6 ký tự' })
-    }
+    if (!email || !password) return reply.code(400).send({ error: 'Email và mật khẩu là bắt buộc' })
+    if (password.length < 6) return reply.code(400).send({ error: 'Mật khẩu tối thiểu 6 ký tự' })
 
-    // Check if email already exists
-    const { data: existing } = await supabase.auth.admin.listUsers()
-    const exists = existing?.users?.find(u => u.email === email)
-    if (exists) {
-      return reply.code(400).send({ error: 'Email đã được sử dụng' })
-    }
+    // Check existing
+    const { data: existing } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .single()
 
-    // Create auth user (email confirmed so they can login)
-    const { data: { user }, error } = await supabase.auth.admin.createUser({
+    if (existing) return reply.code(400).send({ error: 'Email đã được sử dụng' })
+
+    const password_hash = await bcrypt.hash(password, 12)
+    const id = require('crypto').randomUUID()
+
+    const { error } = await supabase.from('profiles').insert({
+      id,
       email,
-      password,
-      email_confirm: true,
-    })
-    if (error) {
-      return reply.code(400).send({ error: error.message })
-    }
-
-    // Create profile with is_active: false (pending approval)
-    await supabase.from('profiles').upsert({
-      id: user.id,
+      password_hash,
       username: email.split('@')[0],
       display_name: display_name || email.split('@')[0],
       role: 'user',
       is_active: false,
-    }, { onConflict: 'id' })
+    })
+
+    if (error) return reply.code(500).send({ error: error.message })
 
     return reply.code(201).send({
       message: 'Đăng ký thành công! Vui lòng chờ admin duyệt tài khoản.',

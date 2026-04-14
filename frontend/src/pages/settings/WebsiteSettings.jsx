@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { Globe, Plus, Trash2, CheckCircle, ChevronDown, ChevronUp, Loader, ExternalLink, BarChart3, Search, FileBarChart } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api, { API_BASE } from '../../lib/api'
-import { supabase } from '../../lib/supabase'
+// import { supabase } from '../../lib/supabase' // Removed: auth now via localStorage
 
 // Modal: chọn GSC sites (multi) + GA property sau khi OAuth thành công
 function SitePickerModal({ websiteId, email, onDone, onCancel }) {
@@ -254,8 +254,7 @@ export default function WebsiteSettings() {
 
   const handleConnectGoogle = async () => {
     setConnecting(true)
-    const { data: { session } } = await supabase.auth.getSession()
-    const token = session?.access_token
+    const token = localStorage.getItem('sf_token')
     if (!token) { toast.error('Chưa đăng nhập'); setConnecting(false); return }
 
     const url = `${API_BASE}/websites/google/auth?token=${token}`

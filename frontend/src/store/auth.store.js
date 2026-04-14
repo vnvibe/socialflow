@@ -1,23 +1,7 @@
 import { create } from 'zustand'
-import { supabase } from '../lib/supabase'
 import api from '../lib/api'
 
 let authInitialized = false
-let authSubscription = null
-
-// Fetch profile from VPS API instead of Supabase REST (Supabase DB throttled)
-async function fetchProfile(userId) {
-  try {
-    const { data } = await api.get(`/users/${userId}/profile`)
-    return data
-  } catch {
-    // Fallback: try Supabase direct (in case API is down)
-    try {
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single()
-      return profile
-    } catch { return null }
-  }
-}
 
 const useAuthStore = create((set) => ({
   user: null,
@@ -29,51 +13,43 @@ const useAuthStore = create((set) => ({
     authInitialized = true
 
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.user) {
-        const profile = await fetchProfile(session.user.id)
-        set({ user: session.user, profile, loading: false })
+      const token = localStorage.getItem('sf_token')
+      if (!token) {
+        set({ loading: false })
+        return
+      }
+
+      // Verify token + fetch profile from API
+      const { data } = await api.get('/auth/me')
+      if (data?.user) {
+        set({ user: data.user, profile: data.user, loading: false })
       } else {
+        localStorage.removeItem('sf_token')
         set({ loading: false })
       }
-
-      if (authSubscription) {
-        authSubscription.unsubscribe()
-      }
-
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user) {
-          const profile = await fetchProfile(session.user.id)
-          set({ user: session.user, profile })
-        } else {
-          set({ user: null, profile: null })
-        }
-      })
-      authSubscription = subscription
     } catch (err) {
       console.error('Auth init failed:', err)
+      localStorage.removeItem('sf_token')
       set({ loading: false })
     }
   },
 
   login: async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
+    const { data } = await api.post('/auth/login', { email, password })
+    if (!data?.token) throw new Error('Login failed')
 
-    // Check if account is approved via API
-    if (data.user) {
-      const profile = await fetchProfile(data.user.id)
-      if (!profile || !profile.is_active) {
-        await supabase.auth.signOut()
-        throw new Error('Tài khoản chưa được phê duyệt. Vui lòng chờ admin duyệt.')
-      }
-    }
+    localStorage.setItem('sf_token', data.token)
+
+    // Fetch full profile
+    const { data: me } = await api.get('/auth/me')
+    set({ user: me.user, profile: me.user })
 
     return data
   },
 
   logout: async () => {
-    await supabase.auth.signOut()
+    try { await api.post('/auth/logout') } catch {}
+    localStorage.removeItem('sf_token')
     set({ user: null, profile: null })
   },
 
