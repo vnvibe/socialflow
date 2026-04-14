@@ -355,11 +355,23 @@ class QueryBuilder {
             }).join(', ')})`
           })
 
+          let insertReturnCols = '*'
+          let insertRelations = []
+          if (this._returnSelect) {
+            const parsed = parseSelectCols(this._returnSelect)
+            insertReturnCols = parsed.mainCols.join(', ')
+            insertRelations = parsed.relations
+          }
+
           sql = `INSERT INTO ${this._table} (${allCols.join(', ')}) VALUES ${valueRows.join(', ')}`
-          if (this._returnSelect) sql += ` RETURNING ${this._returnSelect === '*' ? '*' : this._returnSelect}`
+          if (this._returnSelect) sql += ` RETURNING ${insertReturnCols}`
 
           result = await this._pool.query(sql, params)
-          const data = this._returnSelect ? result.rows : null
+          let data = this._returnSelect ? result.rows : null
+
+          if (insertRelations.length && data?.length) {
+            for (const rel of insertRelations) await fetchRelation(this._pool, data, this._table, rel)
+          }
 
           if (this._returnSingle) return { data: data?.[0] || null, error: null }
           return { data, error: null }
@@ -376,11 +388,27 @@ class QueryBuilder {
 
           if (!setClauses.length) return { data: null, error: null }
 
+          // Parse returnSelect for relations (e.g., '*, campaign_roles(*)')
+          let returnCols = '*'
+          let returnRelations = []
+          if (this._returnSelect) {
+            const parsed = parseSelectCols(this._returnSelect)
+            returnCols = parsed.mainCols.join(', ')
+            returnRelations = parsed.relations
+          }
+
           sql = `UPDATE ${this._table} SET ${setClauses.join(', ')}${buildWhere()}`
-          if (this._returnSelect) sql += ` RETURNING ${this._returnSelect === '*' ? '*' : this._returnSelect}`
+          if (this._returnSelect) sql += ` RETURNING ${returnCols}`
 
           result = await this._pool.query(sql, params)
-          const data = this._returnSelect ? result.rows : null
+          let data = this._returnSelect ? result.rows : null
+
+          // Fetch relations for returned rows (like SELECT)
+          if (returnRelations.length && data?.length) {
+            for (const rel of returnRelations) {
+              await fetchRelation(this._pool, data, this._table, rel)
+            }
+          }
 
           if (this._returnSingle) return { data: data?.[0] || null, error: null }
           return { data, error: null }
@@ -416,10 +444,21 @@ class QueryBuilder {
             }
           }
 
-          if (this._returnSelect) sql += ` RETURNING ${this._returnSelect === '*' ? '*' : this._returnSelect}`
+          let upsertReturnCols = '*'
+          let upsertRelations = []
+          if (this._returnSelect) {
+            const parsed = parseSelectCols(this._returnSelect)
+            upsertReturnCols = parsed.mainCols.join(', ')
+            upsertRelations = parsed.relations
+          }
+          if (this._returnSelect) sql += ` RETURNING ${upsertReturnCols}`
 
           result = await this._pool.query(sql, params)
-          const data = this._returnSelect ? result.rows : null
+          let data = this._returnSelect ? result.rows : null
+
+          if (upsertRelations.length && data?.length) {
+            for (const rel of upsertRelations) await fetchRelation(this._pool, data, this._table, rel)
+          }
 
           if (this._returnSingle) return { data: data?.[0] || null, error: null }
           return { data, error: null }
