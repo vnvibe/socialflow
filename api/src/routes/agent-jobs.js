@@ -276,7 +276,6 @@ module.exports = async (fastify) => {
       platform: platform || 'unknown',
       user_id: user_id || null,
       last_seen: new Date().toISOString(),
-      stats: stats || null,
     }, { onConflict: 'agent_id' })
 
     if (error) {
