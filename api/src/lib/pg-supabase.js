@@ -619,7 +619,8 @@ async function rpcCall(pool, fnName, params) {
     const sql = `SELECT * FROM ${fnName}(${namedParams.join(', ')})`
 
     const result = await pool.query(sql, paramValues)
-    return { data: result.rows[0] || null, error: null }
+    // Return all rows (Supabase rpc returns array by default)
+    return { data: result.rows, error: null }
   } catch (err) {
     return { data: null, error: { message: err.message, code: err.code } }
   }
