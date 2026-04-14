@@ -14,7 +14,7 @@ module.exports = async (fastify) => {
 
     const { data: user, error } = await supabase
       .from('profiles')
-      .select('id, email, password_hash, role, is_active, username, display_name')
+      .select('id, email, password_hash, role, is_active, username, username')
       .eq('email', email)
       .single()
 
@@ -38,7 +38,7 @@ module.exports = async (fastify) => {
         email: user.email,
         role: user.role,
         username: user.username,
-        display_name: user.display_name,
+        username: user.username,
       },
     }
   })
@@ -50,7 +50,7 @@ module.exports = async (fastify) => {
   fastify.get('/me', { preHandler: fastify.authenticate }, async (req) => {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, email, role, is_active, username, display_name')
+      .select('id, email, role, is_active, username, username')
       .eq('id', req.user.id)
       .single()
 
@@ -59,7 +59,7 @@ module.exports = async (fastify) => {
 
   // POST /auth/register — public registration (pending admin approval)
   fastify.post('/register', async (req, reply) => {
-    const { email, password, display_name } = req.body
+    const { email, password, username } = req.body
     if (!email || !password) return reply.code(400).send({ error: 'Email và mật khẩu là bắt buộc' })
     if (password.length < 6) return reply.code(400).send({ error: 'Mật khẩu tối thiểu 6 ký tự' })
 
@@ -80,7 +80,7 @@ module.exports = async (fastify) => {
       email,
       password_hash,
       username: email.split('@')[0],
-      display_name: display_name || email.split('@')[0],
+      username: username || email.split('@')[0],
       role: 'user',
       is_active: false,
     })
