@@ -2201,19 +2201,20 @@ module.exports = async (fastify) => {
       // ─── Action handlers ─────────────────────────────
       if (action === 'fix_checkpoint') {
         if (!account_id) return reply.code(400).send({ error: 'account_id required for fix_checkpoint' })
-        // Reset status so agent retries; queue a check-health job
+        // Reset status so agent retries; queue a check_health job
         await supabase.from('accounts')
           .update({ status: 'unknown' })
           .eq('id', account_id)
-        await supabase.from('jobs').insert({
-          type: 'check-health',
+        const { error: jobErr } = await supabase.from('jobs').insert({
+          type: 'check_health',  // underscore — matches CHECK constraint
           priority: 1,
           status: 'pending',
-          payload: { account_id, action: 'check-health', auto_refresh: true, triggered_by: 'hermes_review' },
+          payload: { account_id, action: 'check_health', auto_refresh: true, triggered_by: 'hermes_review' },
           scheduled_at: new Date(Date.now() + 30000).toISOString(),
           created_by: req.user.id,
         })
-        applied_change = { type: 'status_reset', status: 'unknown', health_check_queued: true }
+        if (jobErr) fastify.log.warn({ jobErr }, '[APPLY-REC] check_health insert failed')
+        applied_change = { type: 'status_reset', status: 'unknown', health_check_queued: !jobErr }
 
       } else if (action === 'pause') {
         if (!account_id) return reply.code(400).send({ error: 'account_id required for pause' })
