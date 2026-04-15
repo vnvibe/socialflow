@@ -153,9 +153,10 @@ module.exports = async (fastify) => {
 
   // GET /campaigns
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
+    // Include campaign_roles so FE can show role assignments without N+1 queries
     const { data, error } = await supabase
       .from('campaigns')
-      .select('*')
+      .select('*, campaign_roles(*)')
       .eq('owner_id', req.user.id)
       .order('created_at', { ascending: false })
 
