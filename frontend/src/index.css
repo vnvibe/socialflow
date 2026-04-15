@@ -1,11 +1,145 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
-/* Fade-in highlight for newly polled log entries */
+/* ============================================================
+   Hermes UI — Design tokens (terminal / command-center aesthetic)
+   Dark-only. Dense. Mono for numbers.
+   ============================================================ */
+:root {
+  --bg-base:        #080808;
+  --bg-surface:     #101010;
+  --bg-elevated:    #181818;
+  --bg-hover:       #202020;
+  --border:         #242424;
+  --border-bright:  #333333;
+  --text-primary:   #e2e2e2;
+  --text-muted:     #606060;
+  --text-dim:       #303030;
+  --hermes:         #00e87a;
+  --hermes-dim:     #00e87a22;
+  --hermes-fade:    #00e87a44;
+  --warn:           #f97316;
+  --danger:         #ef4444;
+  --info:           #3b82f6;
+  --font-mono:      'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --font-ui:        'IBM Plex Sans', 'Inter', system-ui, sans-serif;
+}
+
+html, body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* Override Tailwind default bg for consistency */
+.bg-app-base     { background-color: var(--bg-base); }
+.bg-app-surface  { background-color: var(--bg-surface); }
+.bg-app-elevated { background-color: var(--bg-elevated); }
+.bg-app-hover    { background-color: var(--bg-hover); }
+
+.border-app        { border-color: var(--border); }
+.border-app-bright { border-color: var(--border-bright); }
+
+.text-app-primary { color: var(--text-primary); }
+.text-app-muted   { color: var(--text-muted); }
+.text-app-dim     { color: var(--text-dim); }
+.text-hermes      { color: var(--hermes); }
+.text-warn        { color: var(--warn); }
+.text-danger      { color: var(--danger); }
+.text-info        { color: var(--info); }
+
+.bg-hermes     { background-color: var(--hermes); }
+.bg-hermes-dim { background-color: var(--hermes-dim); }
+
+.font-mono-ui { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.font-ui      { font-family: var(--font-ui); }
+
+/* ─── Pulse dot (Hermes ONLINE indicator) ─── */
+@keyframes hermes-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--hermes-fade); }
+  50%      { opacity: 0.6; box-shadow: 0 0 0 6px transparent; }
+}
+.hermes-pulse {
+  animation: hermes-pulse 2s ease-in-out infinite;
+}
+
+@keyframes danger-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+.danger-pulse {
+  animation: danger-pulse 1s ease-in-out infinite;
+}
+
+/* ─── Scrollbar (dark terminal) ─── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ─── Selection ─── */
+::selection { background: var(--hermes-fade); color: var(--hermes); }
+
+/* ─── Utility: dense info rows ─── */
+.row-divider > * + * {
+  border-top: 1px solid var(--border);
+}
+
+/* ─── Utility: hover highlight (no transition, snappy) ─── */
+.hover-row:hover {
+  background-color: var(--bg-hover);
+}
+
+/* Fade-in highlight for newly polled log entries (dark variant) */
 @keyframes fadeInLog {
-  0%   { background-color: rgb(219 234 254); transform: translateY(-4px); opacity: 0.6; }
-  60%  { background-color: rgb(239 246 255); }
+  0%   { background-color: var(--hermes-dim); transform: translateY(-2px); opacity: 0.6; }
+  60%  { background-color: var(--bg-hover); }
   100% { background-color: transparent; transform: translateY(0); opacity: 1; }
 }
 .animate-fadeInLog {
   animation: fadeInLog 1.2s ease-out;
+}
+
+/* ─── Button base ─── */
+.btn-hermes {
+  background: var(--hermes-dim);
+  color: var(--hermes);
+  border: 1px solid var(--hermes-fade);
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-hermes:hover {
+  background: var(--hermes-fade);
+}
+.btn-hermes:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-ghost:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-bright);
 }

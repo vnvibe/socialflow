@@ -3,6 +3,12 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import useAuthStore from './store/auth.store'
 import Sidebar from './components/layout/Sidebar'
 import TopBar from './components/layout/TopBar'
+import HermesLayout from './components/hermes/HermesLayout'
+import HermesBrain from './pages/hermes/HermesBrain'
+import CommandCenter from './pages/dashboard/CommandCenter'
+import AgentsRoster from './pages/agents/AgentsRoster'
+import MissionBoard from './pages/campaigns/MissionBoard'
+import SignalWall from './pages/monitor/SignalWall'
 import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import Dashboard from './pages/dashboard/Dashboard'
@@ -61,25 +67,11 @@ function ProtectedRoute({ children }) {
 }
 
 function AppLayout({ children }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-
+  // New Hermes-centric layout (dark terminal aesthetic)
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
-      )}
-      {/* Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 md:relative md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <Sidebar onClose={() => setSidebarOpen(false)} />
-      </div>
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <TopBar onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 overflow-auto p-3 sm:p-6">
-          <ErrorBoundary>{children}</ErrorBoundary>
-        </main>
-      </div>
-    </div>
+    <HermesLayout>
+      <ErrorBoundary>{children}</ErrorBoundary>
+    </HermesLayout>
   )
 }
 
@@ -100,7 +92,19 @@ export default function App() {
             <AppLayout>
               <Routes>
                 <Route path="/" element={<Navigate to="/dashboard" />} />
-                <Route path="/dashboard" element={<Dashboard />} />
+                {/* ── Hermes UI pages (new) ── */}
+                <Route path="/dashboard" element={<CommandCenter />} />
+                <Route path="/agents" element={<AgentsRoster />} />
+                <Route path="/campaigns" element={<MissionBoard />} />
+                <Route path="/monitor" element={<SignalWall />} />
+                <Route path="/hermes" element={<HermesBrain />} />
+
+                {/* ── Legacy dashboard fallback ── */}
+                <Route path="/dashboard-legacy" element={<Dashboard />} />
+                <Route path="/campaigns-legacy" element={<CampaignList />} />
+                <Route path="/monitor-legacy" element={<Monitor />} />
+
+                {/* ── Unchanged existing pages ── */}
                 <Route path="/accounts" element={<AccountList />} />
                 <Route path="/accounts/:id" element={<AccountDetail />} />
                 <Route path="/pages" element={<PageList />} />
@@ -112,8 +116,6 @@ export default function App() {
                 <Route path="/content/new" element={<ContentComposer />} />
                 <Route path="/publish" element={<UnifiedPublish />} />
                 <Route path="/inbox" element={<InboxPage />} />
-                <Route path="/monitor" element={<Monitor />} />
-                <Route path="/campaigns" element={<CampaignList />} />
                 <Route path="/campaigns/new" element={<CampaignForm />} />
                 <Route path="/campaigns/:id" element={<CampaignDetail />} />
                 <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
