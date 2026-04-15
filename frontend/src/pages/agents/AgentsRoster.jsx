@@ -192,8 +192,10 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
             </div>
           ) : nick.status === 'at_risk' ? (
             <span className="text-warn">at risk</span>
+          ) : nick.status === 'expired' ? (
+            <span className="text-danger">⚠ session expired</span>
           ) : !nick.is_active ? (
-            <span className="text-app-dim">disabled</span>
+            <span className="text-danger">disabled · check status</span>
           ) : (
             <span className="text-app-dim">idle</span>
           )}
@@ -246,9 +248,9 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
           </span>
         </div>
 
-        {/* Task breakdown */}
+        {/* Task breakdown (all job types, not only Hermes) */}
         <div className="col-span-3 truncate">
-          <span className="text-app-muted text-[10px] uppercase">Hermes: </span>
+          <span className="text-app-muted text-[10px] uppercase">Tasks: </span>
           {taskBreakdown.length === 0 ? (
             <span className="text-app-dim">—</span>
           ) : (
@@ -688,6 +690,34 @@ export default function AgentsRoster() {
     refetchInterval: 5000,
   })
 
+  // Memory counts per account (real from ai_pilot_memory, not from job.result)
+  const { data: memCounts = {} } = useQuery({
+    queryKey: ['hermes', 'memory-stats'],
+    queryFn: async () => {
+      try { return (await api.get('/ai-hermes/memory-stats')).data || {} }
+      catch { return {} }
+    },
+    refetchInterval: 60000,
+  })
+
+  // Per-account fewshot counts from hermes_feedback aggregated by account
+  const { data: fewshotCounts = {} } = useQuery({
+    queryKey: ['hermes', 'feedback-counts'],
+    queryFn: async () => {
+      try {
+        const fb = (await api.get('/ai-hermes/feedback/recent?limit=500')).data?.feedback || []
+        const counts = {}
+        for (const f of fb) {
+          if (f.account_id && (f.score || 0) >= 4) {
+            counts[f.account_id] = (counts[f.account_id] || 0) + 1
+          }
+        }
+        return counts
+      } catch { return {} }
+    },
+    refetchInterval: 60000,
+  })
+
   const runningJobs = jobs.filter(j => ['claimed', 'running'].includes(j.status))
 
   // Compute today stats per account (client-side aggregation)
@@ -709,7 +739,6 @@ export default function AgentsRoster() {
     const stats = {}
     for (const [accId, accJobs] of Object.entries(todayJobsByAcc)) {
       let scoresSum = 0, scoresCount = 0
-      let memSum = 0, fsSum = 0, hermesCalls = 0
       let done = 0, failed = 0
       for (const j of accJobs) {
         if (j.status === 'done') done++
@@ -719,25 +748,18 @@ export default function AgentsRoster() {
           scoresSum += score
           scoresCount++
         }
-        // Hermes meta from job result (set by handlers when they call Hermes)
-        const mc = j.result?.memory_count
-        const fc = j.result?.fewshot_count
-        if (typeof mc === 'number' || typeof fc === 'number') {
-          hermesCalls++
-          memSum += mc || 0
-          fsSum += fc || 0
-        }
       }
       stats[accId] = {
         total: accJobs.length,
         done, failed,
         avg_score: scoresCount > 0 ? scoresSum / scoresCount : 0,
-        memory_count: hermesCalls > 0 ? Math.round(memSum / hermesCalls) : 0,
-        fewshot_count: hermesCalls > 0 ? Math.round(fsSum / hermesCalls) : 0,
+        // Real counts from DB (ai_pilot_memory + hermes_feedback)
+        memory_count: memCounts[accId] || 0,
+        fewshot_count: fewshotCounts[accId] || 0,
       }
     }
     return stats
-  }, [todayJobsByAcc])
+  }, [todayJobsByAcc, memCounts, fewshotCounts])
 
   // Assigned account ids across all campaigns
   const assignedIds = useMemo(() => {

@@ -95,6 +95,27 @@ module.exports = async (fastify) => {
     return data
   })
 
+  // PATCH /groups/:id/status — manual update join_status
+  fastify.patch('/:id/status', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await verifyGroupAccess(req.params.id, req.user.id)) {
+      return reply.code(403).send({ error: 'Not your group' })
+    }
+    const { status } = req.body || {}
+    if (!['pending', 'member', 'rejected', 'banned', 'unknown'].includes(status)) {
+      return reply.code(400).send({ error: 'status: pending|member|rejected|banned|unknown' })
+    }
+    const updates = { join_status: status }
+    // Sync booleans for backward compat with agent code
+    if (status === 'member') { updates.is_member = true; updates.pending_approval = false; updates.is_blocked = false; updates.joined_at = new Date().toISOString() }
+    else if (status === 'pending') { updates.is_member = false; updates.pending_approval = true; updates.pending_since = new Date().toISOString() }
+    else if (status === 'rejected') { updates.is_member = false; updates.pending_approval = false }
+    else if (status === 'banned') { updates.is_blocked = true; updates.is_member = false; updates.blocked_reason = req.body.reason || 'manual' }
+
+    const { data, error } = await supabase.from('fb_groups').update(updates).eq('id', req.params.id).select().single()
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
+  })
+
   // DELETE /groups/:id
   fastify.delete('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     if (!await verifyGroupAccess(req.params.id, req.user.id)) {

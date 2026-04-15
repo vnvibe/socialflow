@@ -2228,6 +2228,72 @@ module.exports = async (fastify) => {
     return { ok: true, ...data }
   })
 
+  // ─── GET /campaigns/:id/content ─────────────────────────
+  // List all posts published for this campaign (from publish_history joined with jobs)
+  fastify.get('/:id/content', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase
+      .from('campaigns').select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    // Get job IDs for this campaign
+    const { data: campaignJobs } = await supabase.from('jobs')
+      .select('id').filter('payload->>campaign_id', 'eq', req.params.id).limit(500)
+    const jobIds = (campaignJobs || []).map(j => j.id)
+    if (jobIds.length === 0) return []
+
+    const { data: posts } = await supabase.from('publish_history')
+      .select('*').in('job_id', jobIds)
+      .order('published_at', { ascending: false }).limit(100)
+    if (!posts || posts.length === 0) return []
+
+    // Enrich with account names
+    const accountIds = [...new Set(posts.map(p => p.account_id).filter(Boolean))]
+    const { data: accounts } = accountIds.length > 0
+      ? await supabase.from('accounts').select('id, username, avatar_url, fb_user_id').in('id', accountIds)
+      : { data: [] }
+    const accMap = {}
+    for (const a of (accounts || [])) accMap[a.id] = a
+
+    return posts.map(p => ({
+      ...p,
+      account: accMap[p.account_id] || null,
+    }))
+  })
+
+  // ─── GET /campaigns/:id/groups ──────────────────────────
+  // List all groups for this campaign with status filter
+  fastify.get('/:id/groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase
+      .from('campaigns').select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const status = req.query.status || 'all'
+    let query = supabase.from('fb_groups')
+      .select('*')
+      .or(`joined_via_campaign_id.eq.${req.params.id},campaign_ids.cs.{${req.params.id}}`)
+      .order('last_posted_at', { ascending: false, nullsFirst: false })
+      .limit(500)
+
+    if (status !== 'all') query = query.eq('join_status', status)
+    const { data, error } = await query
+    if (error) return reply.code(500).send({ error: error.message })
+
+    // Compute stats
+    const now = Date.now()
+    const items = (data || []).map(g => {
+      const pendingDays = g.pending_since
+        ? Math.floor((now - new Date(g.pending_since).getTime()) / 86400000)
+        : null
+      return {
+        ...g,
+        pending_days: pendingDays,
+        overdue: pendingDays !== null && pendingDays > 7,
+      }
+    })
+
+    return items
+  })
+
   // ─── GET /campaigns/:id/hermes-reviews ──────────────────
   // List past reviews with applied recommendations for this campaign
   fastify.get('/:id/hermes-reviews', { preHandler: fastify.authenticate }, async (req, reply) => {

@@ -271,52 +271,273 @@ function AgentsTab({ campaign }) {
   )
 }
 
-// ─── Tab: Content (campaign posts + content queue) ─────────
+// ─── Tab: Content (posts published by this campaign) ───────
 function ContentTab({ campaignId }) {
-  const { data: content = [] } = useQuery({
+  const { data: posts = [], isLoading } = useQuery({
     queryKey: ['campaigns', campaignId, 'content'],
     queryFn: async () => {
       try {
-        const res = await api.get(`/content?campaign_id=${campaignId}&limit=30`)
+        const res = await api.get(`/campaigns/${campaignId}/content`)
         return asArray(res.data)
       } catch {
         return []
       }
     },
+    refetchInterval: 30000,
   })
+
+  const formatTime = (ts) => {
+    if (!ts) return '—'
+    const d = new Date(ts)
+    return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+      + ' · ' + d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+  }
 
   return (
     <div className="overflow-auto p-6 font-mono-ui">
       <div className="text-[10px] uppercase tracking-wider text-app-muted mb-3">
-        Content items ({content.length})
+        Content đã đăng ({posts.length})
       </div>
-      {content.length === 0 ? (
+      {isLoading ? (
+        <div className="p-4 text-app-muted">Đang tải...</div>
+      ) : posts.length === 0 ? (
         <div
           className="p-6 text-sm text-app-muted text-center"
           style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
         >
-          No content drafts or posts for this mission.
+          Chưa có nội dung nào được đăng cho chiến dịch này.
         </div>
       ) : (
         <div className="space-y-2">
-          {content.map((c) => (
-            <div
-              key={c.id}
-              className="p-3"
-              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-            >
-              <div className="flex items-center gap-3 mb-1 text-[10px] uppercase text-app-muted">
-                <span>{c.type || 'post'}</span>
-                <span>·</span>
-                <span className={c.status === 'published' ? 'text-hermes' : 'text-app-muted'}>
-                  {c.status || '—'}
-                </span>
+          {posts.map((p) => {
+            const statusColor = p.status === 'success' ? 'text-hermes'
+              : p.status === 'failed' ? 'text-danger' : 'text-app-muted'
+            const targetIcon = p.target_type === 'group' ? '👥'
+              : p.target_type === 'page' ? '📄' : '👤'
+            return (
+              <div
+                key={p.id}
+                className="p-3"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+              >
+                {/* Header row */}
+                <div className="flex items-center gap-2 mb-2 text-xs">
+                  <AgentStatusDot status={p.status === 'success' ? 'online' : 'error'} />
+                  <span className="text-app-primary">{p.account?.username || p.account_id?.slice(0, 8) || '?'}</span>
+                  <span className="text-app-muted">→</span>
+                  <span className="text-app-primary">{targetIcon} {p.target_name || p.target_fb_id || 'unknown'}</span>
+                  <div className="flex-1" />
+                  <span className="text-app-muted text-[10px]">{formatTime(p.published_at)}</span>
+                  <span className={`text-[10px] uppercase ${statusColor}`}>· {p.status}</span>
+                  {p.post_url && (
+                    <a
+                      href={p.post_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-info hover:text-hermes"
+                    >
+                      [Xem bài ↗]
+                    </a>
+                  )}
+                </div>
+                {/* Caption */}
+                {p.final_caption && (
+                  <div
+                    className="text-xs text-app-primary pl-4"
+                    style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}
+                  >
+                    {p.final_caption.substring(0, 300)}
+                    {p.final_caption.length > 300 && '...'}
+                  </div>
+                )}
+                {/* Metrics if available */}
+                {(p.reactions > 0 || p.comments > 0 || p.shares > 0) && (
+                  <div className="mt-2 flex gap-3 text-[10px] text-app-muted font-mono-ui">
+                    {p.reactions > 0 && <span>❤ {p.reactions}</span>}
+                    {p.comments > 0 && <span>💬 {p.comments}</span>}
+                    {p.shares > 0 && <span>↪ {p.shares}</span>}
+                  </div>
+                )}
+                {p.error_message && (
+                  <div className="mt-2 text-[10px] text-danger">⚠ {p.error_message}</div>
+                )}
               </div>
-              <div className="text-xs text-app-primary line-clamp-2">
-                {c.caption || c.body || c.title || '(no text)'}
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Tab: Nhóm (campaign groups with join_status) ──────────
+function GroupsTab({ campaignId }) {
+  const qc = useQueryClient()
+  const [filter, setFilter] = useState('all')
+
+  const { data: groups = [], isLoading } = useQuery({
+    queryKey: ['campaigns', campaignId, 'groups', filter],
+    queryFn: async () => {
+      try {
+        const res = await api.get(`/campaigns/${campaignId}/groups?status=${filter}`)
+        return asArray(res.data)
+      } catch {
+        return []
+      }
+    },
+    refetchInterval: 30000,
+  })
+
+  const updateStatus = useMutation({
+    mutationFn: async ({ id, status, reason }) => {
+      await api.patch(`/groups/${id}/status`, { status, reason })
+    },
+    onSuccess: () => {
+      toast.success('Đã cập nhật status')
+      qc.invalidateQueries({ queryKey: ['campaigns', campaignId, 'groups'] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
+  // Counts
+  const counts = useMemo(() => {
+    const c = { all: groups.length, member: 0, pending: 0, rejected: 0, banned: 0, unknown: 0 }
+    for (const g of groups) c[g.join_status || 'unknown'] = (c[g.join_status || 'unknown'] || 0) + 1
+    return c
+  }, [groups])
+
+  const filteredGroups = filter === 'all' ? groups : groups.filter(g => g.join_status === filter)
+
+  const STATUS_BADGE = {
+    member: { text: '● member', color: 'text-hermes' },
+    pending: { text: '⏳ pending', color: 'text-warn' },
+    rejected: { text: '❌ rejected', color: 'text-danger' },
+    banned: { text: '🚫 banned', color: 'text-danger' },
+    unknown: { text: '? unknown', color: 'text-app-muted' },
+  }
+
+  return (
+    <div className="overflow-auto p-6 font-mono-ui">
+      <div className="flex items-center gap-3 mb-4">
+        <span className="text-[10px] uppercase tracking-wider text-app-muted">
+          Nhóm tham gia ({counts.all})
+        </span>
+        <div className="flex-1" />
+        {['all', 'member', 'pending', 'rejected', 'banned', 'unknown'].map(s => (
+          <button
+            key={s}
+            onClick={() => setFilter(s)}
+            className={`text-[11px] uppercase px-2 py-1 ${
+              filter === s ? 'text-hermes' : 'text-app-muted hover:text-app-primary'
+            }`}
+            style={{
+              background: filter === s ? 'var(--hermes-dim)' : 'transparent',
+              border: '1px solid ' + (filter === s ? 'var(--hermes-fade)' : 'var(--border)'),
+            }}
+          >
+            {s === 'all' ? 'tất cả' : s} ({counts[s] || 0})
+          </button>
+        ))}
+      </div>
+
+      {isLoading ? (
+        <div className="text-app-muted">Đang tải...</div>
+      ) : filteredGroups.length === 0 ? (
+        <div
+          className="p-6 text-sm text-app-muted text-center"
+          style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+        >
+          {filter === 'all' ? 'Chưa có nhóm nào cho chiến dịch này.' : `Không có nhóm status "${filter}".`}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filteredGroups.map((g) => {
+            const badge = STATUS_BADGE[g.join_status || 'unknown']
+            return (
+              <div
+                key={g.id}
+                className="p-3"
+                style={{
+                  background: 'var(--bg-elevated)',
+                  border: g.overdue
+                    ? '1px solid rgba(249,115,22,0.4)'
+                    : '1px solid var(--border)',
+                }}
+              >
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="flex-1 text-app-primary truncate">{g.name || g.fb_group_id}</span>
+                  <span className="text-app-muted">👥 {g.member_count ? (g.member_count >= 1000 ? `${Math.round(g.member_count / 1000)}k` : g.member_count) : '?'}</span>
+                  <span className={badge.color}>{badge.text}</span>
+                  {g.overdue && (
+                    <span className="text-[10px] text-warn uppercase px-1.5 py-0.5" style={{ border: '1px solid rgba(249,115,22,0.4)' }}>
+                      Quá hạn
+                    </span>
+                  )}
+                  {g.url && (
+                    <a href={g.url} target="_blank" rel="noopener noreferrer" className="text-info hover:text-hermes text-[10px]">
+                      [Xem ↗]
+                    </a>
+                  )}
+                </div>
+
+                {/* Status detail */}
+                {g.join_status === 'pending' && g.pending_days !== null && (
+                  <div className="mt-1 text-[10px] text-app-muted">
+                    Đã xin vào {g.pending_days} ngày trước, chưa được duyệt
+                  </div>
+                )}
+                {g.join_status === 'member' && (g.total_interactions > 0 || g.last_posted_at) && (
+                  <div className="mt-1 text-[10px] text-app-muted">
+                    {g.total_interactions > 0 && `Đã tương tác ${g.total_interactions} lần · `}
+                    {g.last_posted_at && `Post gần nhất ${new Date(g.last_posted_at).toLocaleDateString('vi-VN')}`}
+                  </div>
+                )}
+                {g.join_status === 'banned' && g.blocked_reason && (
+                  <div className="mt-1 text-[10px] text-danger">Lý do: {g.blocked_reason}</div>
+                )}
+
+                {/* Actions */}
+                <div className="mt-2 flex gap-1">
+                  {g.join_status === 'pending' && (
+                    <>
+                      <button
+                        onClick={() => updateStatus.mutate({ id: g.id, status: 'member' })}
+                        className="text-[10px] uppercase px-2 py-0.5 text-hermes"
+                        style={{ background: 'var(--hermes-dim)', border: '1px solid var(--hermes-fade)' }}
+                      >
+                        Đã vào
+                      </button>
+                      <button
+                        onClick={() => updateStatus.mutate({ id: g.id, status: 'rejected' })}
+                        className="text-[10px] uppercase px-2 py-0.5 text-app-muted"
+                        style={{ border: '1px solid var(--border)' }}
+                      >
+                        Bỏ qua
+                      </button>
+                    </>
+                  )}
+                  {g.join_status === 'rejected' && (
+                    <button
+                      onClick={() => updateStatus.mutate({ id: g.id, status: 'pending' })}
+                      className="text-[10px] uppercase px-2 py-0.5 text-app-muted"
+                      style={{ border: '1px solid var(--border)' }}
+                    >
+                      Thử lại
+                    </button>
+                  )}
+                  {g.join_status === 'unknown' && (
+                    <button
+                      onClick={() => updateStatus.mutate({ id: g.id, status: 'member' })}
+                      className="text-[10px] uppercase px-2 py-0.5 text-hermes"
+                      style={{ background: 'var(--hermes-dim)', border: '1px solid var(--hermes-fade)' }}
+                    >
+                      Mark member
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -425,6 +646,7 @@ const TABS = [
   { key: 'agents',    label: 'Agents' },
   { key: 'execution', label: 'Execution' },
   { key: 'content',   label: 'Content' },
+  { key: 'groups',    label: 'Nhóm' },
   { key: 'data',      label: 'Data' },
 ]
 
@@ -895,6 +1117,7 @@ export default function CampaignHub() {
         {tab === 'agents'    && <AgentsTab campaign={campaign} />}
         {tab === 'execution' && <ExecutionTab campaignId={id} />}
         {tab === 'content'   && <ContentTab campaignId={id} />}
+        {tab === 'groups'    && <GroupsTab campaignId={id} />}
         {tab === 'data'      && <DataTab campaignId={id} />}
       </div>
 

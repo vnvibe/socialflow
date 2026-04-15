@@ -268,6 +268,26 @@ module.exports = async (fastify) => {
     }
   })
 
+  // ─── Memory stats per account (for /agents dashboard) ───
+  fastify.get('/memory-stats', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const { data, error } = await fastify.supabase
+        .from('ai_pilot_memory')
+        .select('account_id', { count: 'exact' })
+      if (error) return reply.code(500).send({ error: error.message })
+      // Group by account_id
+      const counts = {}
+      for (const row of (data || [])) {
+        const a = row.account_id
+        if (!a) continue
+        counts[a] = (counts[a] || 0) + 1
+      }
+      return counts
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // ─── Campaign Review ─────────────────────────────────────
   fastify.post('/campaign-review', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { status, json } = await proxyToHermes('/campaign-review', req.body, 60000)
