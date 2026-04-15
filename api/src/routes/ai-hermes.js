@@ -159,4 +159,59 @@ module.exports = async (fastify) => {
       return reply.code(503).send({ error: err.message })
     }
   })
+
+  // ─── Skills CRUD proxies (admin only) ───────────────────
+  fastify.get('/skills', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const res = await fetch(`${HERMES_URL}/skills`, {
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(5000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  fastify.get('/skills/:task_type', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const res = await fetch(`${HERMES_URL}/skills/${encodeURIComponent(req.params.task_type)}`, {
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(5000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  fastify.put('/skills/:task_type', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    try {
+      const res = await fetch(`${HERMES_URL}/skills/${encodeURIComponent(req.params.task_type)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Agent-Key': AGENT_SECRET,
+        },
+        body: JSON.stringify(req.body),
+        signal: AbortSignal.timeout(10000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  fastify.post('/skills/reload', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    try {
+      const res = await fetch(`${HERMES_URL}/skills/reload`, {
+        method: 'POST',
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(5000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
 }

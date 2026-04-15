@@ -10,6 +10,7 @@ import api from '../../lib/api'
 import SkillCard from '../../components/hermes/SkillCard'
 import HermesScoreBadge from '../../components/hermes/HermesScoreBadge'
 import DenseStat from '../../components/hermes/DenseStat'
+import SkillsEditor from './SkillsEditor'
 
 function formatAgo(ts) {
   if (!ts) return '—'
@@ -21,6 +22,7 @@ function formatAgo(ts) {
 
 export default function HermesBrain() {
   const [selected, setSelected] = useState(null)
+  const [tab, setTab] = useState('overview') // 'overview' | 'skills'
 
   const { data: perf } = useQuery({
     queryKey: ['hermes', 'performance'],
@@ -65,7 +67,31 @@ export default function HermesBrain() {
         <DenseStat value={status?.total_errors || 0} label="Errors" color={status?.total_errors > 0 ? 'danger' : 'primary'} />
       </div>
 
-      {/* Body: 2 columns */}
+      {/* Tab bar */}
+      <div
+        className="flex items-center px-6 font-mono-ui text-[11px] uppercase tracking-wider"
+        style={{ borderBottom: '1px solid var(--border)' }}
+      >
+        {['overview', 'skills'].map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2.5 ${tab === t ? 'text-hermes' : 'text-app-muted hover:text-app-primary'}`}
+            style={{
+              borderBottom: tab === t ? '2px solid var(--hermes)' : '2px solid transparent',
+              marginBottom: '-1px',
+            }}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab: Skills editor */}
+      {tab === 'skills' && <SkillsEditor />}
+
+      {/* Tab: Overview — Body: 2 columns */}
+      {tab === 'overview' && <>
       <div className="flex-1 flex min-h-0">
         {/* Left: skills list */}
         <div
@@ -209,6 +235,7 @@ export default function HermesBrain() {
           )}
         </div>
       </div>
+      </>}
     </div>
   )
 }
