@@ -19,6 +19,7 @@ import AgentStatusDot from '../../components/hermes/AgentStatusDot'
 import HermesScoreBadge from '../../components/hermes/HermesScoreBadge'
 import SlidePanel from '../../components/hermes/SlidePanel'
 import JobRow from '../../components/hermes/JobRow'
+import CookieRepairModal from '../../components/hermes/CookieRepairModal'
 
 const asArray = (d) => Array.isArray(d) ? d
   : Array.isArray(d?.items) ? d.items
@@ -92,7 +93,7 @@ function RoleSelect({ currentRole, onChange, disabled }) {
 }
 
 // ─── Single nick row inside campaign accordion ────────────
-function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, onSelect, onRemove, onRoleChange, campaigns }) {
+function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, onSelect, onRemove, onRoleChange, onRepair, campaigns }) {
   const [transferOpen, setTransferOpen] = useState(false)
 
   const status = runningJob ? 'busy'
@@ -176,13 +177,13 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
               <div className="text-info truncate">→ {runningJob.payload?.action || runningJob.type}</div>
               <div className="text-app-dim text-[10px]">started {formatAgo(runningJob.started_at)}</div>
             </>
-          ) : nick.status === 'checkpoint' ? (
+          ) : nick.status === 'checkpoint' || nick.status === 'expired' ? (
             <div className="flex items-center gap-2">
-              <span className="text-danger">⚠ checkpoint</span>
+              <span className="text-danger">⚠ {nick.status}</span>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  toast.info('TODO: open health check + cookie refresh modal')
+                  onRepair?.(nick)
                 }}
                 className="text-[10px] uppercase px-2 py-0.5"
                 style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.4)' }}
@@ -314,7 +315,7 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
 }
 
 // ─── Single campaign accordion section ─────────────────────
-function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, todayJobsByAcc, campaigns, onRoleChange, onRemoveFromRole, onSelect }) {
+function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, todayJobsByAcc, campaigns, onRoleChange, onRemoveFromRole, onSelect, onRepair }) {
   const [expanded, setExpanded] = useState(true)
   const nav = useNavigate()
 
@@ -413,6 +414,7 @@ function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, tod
                 onSelect={onSelect}
                 onRemove={(accId) => onRemoveFromRole(campaign.id, accId)}
                 onRoleChange={(accId, newRole) => onRoleChange(campaign.id, accId, newRole)}
+                onRepair={onRepair}
               />
             ))
           )}
@@ -437,7 +439,7 @@ function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, tod
 }
 
 // ─── Unassigned nicks section ──────────────────────────────
-function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect }) {
+function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect, onRepair }) {
   const [expanded, setExpanded] = useState(false)
 
   if (nicks.length === 0) return null
@@ -471,6 +473,7 @@ function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc
           onSelect={onSelect}
           onRemove={() => {}}
           onRoleChange={() => {}}
+          onRepair={onRepair}
         />
       ))}
     </div>
@@ -670,6 +673,7 @@ function NickDetailPanel({ nick, onClose }) {
 export default function AgentsRoster() {
   const qc = useQueryClient()
   const [selected, setSelected] = useState(null)
+  const [repairNick, setRepairNick] = useState(null)
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -864,6 +868,7 @@ export default function AgentsRoster() {
               onSelect={setSelected}
               onRoleChange={(campaignId, accountId, newRole) => changeRole.mutate({ campaignId, accountId, newRole })}
               onRemoveFromRole={(campaignId, accountId) => removeFromCampaign.mutate({ campaignId, accountId })}
+              onRepair={setRepairNick}
             />
           ))}
 
@@ -873,6 +878,7 @@ export default function AgentsRoster() {
             todayStatsByAcc={todayStatsByAcc}
             todayJobsByAcc={todayJobsByAcc}
             onSelect={setSelected}
+            onRepair={setRepairNick}
           />
 
           {campaigns.length === 0 && accounts.length > 0 && (
@@ -884,6 +890,17 @@ export default function AgentsRoster() {
       </div>
 
       <NickDetailPanel nick={selected} onClose={() => setSelected(null)} />
+
+      {repairNick && (
+        <CookieRepairModal
+          account={repairNick}
+          onClose={() => setRepairNick(null)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: ['accounts'] })
+            qc.invalidateQueries({ queryKey: ['jobs', 'live'] })
+          }}
+        />
+      )}
     </>
   )
 }

@@ -613,7 +613,7 @@ module.exports = async (fastify) => {
     return { message: 'Check queued', job_id: job.id }
   })
 
-  // POST /accounts/:id/update-cookie - Update cookie (save only, agent validates later)
+  // POST /accounts/:id/update-cookie - Update cookie + trigger health check + auto-assign
   fastify.post('/:id/update-cookie', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { cookie_string } = req.body
     if (!cookie_string) return reply.code(400).send({ error: 'cookie_string required' })
@@ -624,10 +624,274 @@ module.exports = async (fastify) => {
       cookie_string,
       fb_user_id: fbUserId || undefined,
       status: 'unknown',
+      is_active: true, // re-enable on cookie refresh
     }).eq('id', req.params.id).eq('owner_id', req.user.id).select().single()
 
     if (error) return reply.code(500).send({ error: error.message })
-    return data
+
+    // Queue check_health job with high priority — agent will pick up + verify
+    const { data: job } = await supabase.from('jobs').insert({
+      type: 'check_health',
+      priority: 1,
+      payload: { account_id: req.params.id, auto_refresh: true, triggered_by: 'cookie_update' },
+      status: 'pending',
+      scheduled_at: new Date().toISOString(),
+      created_by: req.user.id,
+    }).select().single()
+
+    return { ...data, health_check_job_id: job?.id, message: 'Cookie updated — health check queued' }
+  })
+
+  // ─── PATCH /accounts/:id/status ──────────────────────────
+  // Update account status (agent-side via X-Agent-Key OR user via JWT)
+  // When status becomes checkpoint/expired/disabled → auto-cancel pending jobs
+  fastify.patch('/:id/status', async (req, reply) => {
+    // Dual auth: agent-key OR JWT
+    const AGENT_SECRET = process.env.AGENT_SECRET
+    const isAgent = AGENT_SECRET && req.headers['x-agent-key'] === AGENT_SECRET
+    let ownerId = null
+    if (!isAgent) {
+      try {
+        await fastify.authenticate(req, reply)
+        if (reply.sent) return
+        ownerId = req.user.id
+      } catch {
+        return reply.code(401).send({ error: 'Auth required' })
+      }
+    }
+
+    const { status, reason, detected_at } = req.body || {}
+    const allowedStatus = ['healthy', 'checkpoint', 'expired', 'disabled', 'unknown', 'at_risk', 'banned']
+    if (!allowedStatus.includes(status)) {
+      return reply.code(400).send({ error: `status must be one of: ${allowedStatus.join('|')}` })
+    }
+
+    // Verify account (if JWT, enforce ownership)
+    let query = supabase.from('accounts').select('id, owner_id, username').eq('id', req.params.id)
+    if (!isAgent) query = query.eq('owner_id', ownerId)
+    const { data: account } = await query.single()
+    if (!account) return reply.code(404).send({ error: 'Account not found' })
+
+    const updates = { status, last_error: reason || null }
+    if (status !== 'healthy') updates.is_active = false
+    if (status === 'healthy') {
+      updates.is_active = true
+      updates.last_checked_at = new Date().toISOString()
+    }
+
+    await supabase.from('accounts').update(updates).eq('id', req.params.id)
+
+    // If status is bad → cancel pending/claimed jobs
+    let cancelledCount = 0
+    if (['checkpoint', 'expired', 'disabled', 'banned'].includes(status)) {
+      const { data: cancelled } = await supabase.from('jobs')
+        .update({
+          status: 'cancelled',
+          error_message: `account_${status}: ${(reason || '').substring(0, 200)}`,
+          finished_at: new Date().toISOString(),
+        })
+        .filter('payload->>account_id', 'eq', req.params.id)
+        .in('status', ['pending', 'claimed'])
+        .select('id')
+      cancelledCount = cancelled?.length || 0
+
+      // Create notification
+      try {
+        await supabase.from('notifications').insert({
+          user_id: account.owner_id,
+          type: 'account_dead',
+          title: `Nick ${account.username} cần sửa cookie`,
+          body: `Phát hiện: ${status}. ${reason || ''}. ${cancelledCount} job đã bị cancel.`,
+          level: 'urgent',
+          data: { account_id: req.params.id, status, reason, detected_at },
+        })
+      } catch {}
+    }
+
+    return {
+      ok: true,
+      status,
+      cancelled_jobs: cancelledCount,
+      detected_at: detected_at || new Date().toISOString(),
+    }
+  })
+
+  // ─── POST /accounts/:id/cancel-jobs ──────────────────────
+  fastify.post('/:id/cancel-jobs', async (req, reply) => {
+    const AGENT_SECRET = process.env.AGENT_SECRET
+    const isAgent = AGENT_SECRET && req.headers['x-agent-key'] === AGENT_SECRET
+    let ownerId = null
+    if (!isAgent) {
+      try {
+        await fastify.authenticate(req, reply)
+        if (reply.sent) return
+        ownerId = req.user.id
+      } catch {
+        return reply.code(401).send({ error: 'Auth required' })
+      }
+    }
+
+    const { reason = 'manual_cancel' } = req.body || {}
+    let aq = supabase.from('accounts').select('id, owner_id').eq('id', req.params.id)
+    if (!isAgent) aq = aq.eq('owner_id', ownerId)
+    const { data: account } = await aq.single()
+    if (!account) return reply.code(404).send({ error: 'Account not found' })
+
+    const { data: cancelled } = await supabase.from('jobs')
+      .update({
+        status: 'cancelled',
+        error_message: `cancelled: ${reason}`,
+        finished_at: new Date().toISOString(),
+      })
+      .filter('payload->>account_id', 'eq', req.params.id)
+      .in('status', ['pending', 'claimed', 'running'])
+      .select('id')
+
+    return { ok: true, cancelled: cancelled?.length || 0 }
+  })
+
+  // ─── POST /accounts/:id/activate ─────────────────────────
+  // Mark account healthy + auto-assign a job based on campaign_roles
+  fastify.post('/:id/activate', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: account } = await supabase.from('accounts')
+      .select('id, owner_id, username, status, is_active')
+      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!account) return reply.code(404).send({ error: 'Account not found' })
+
+    // Mark healthy
+    await supabase.from('accounts').update({
+      status: 'healthy',
+      is_active: true,
+      last_checked_at: new Date().toISOString(),
+    }).eq('id', req.params.id)
+
+    // Find active campaign_role for this account
+    const { data: campaigns } = await supabase.from('campaigns')
+      .select('id, name, status, campaign_roles(id, role_type, account_ids, is_active)')
+      .eq('owner_id', req.user.id)
+      .in('status', ['running', 'active'])
+
+    let assignedJob = null
+    const ROLE_TO_JOB_TYPE = {
+      nurture:  'campaign_nurture',
+      scout:    'campaign_discover_groups',
+      connect:  'campaign_send_friend_request',
+      interact: 'campaign_interact_profile',
+      monitor:  'campaign_group_monitor',
+      post:     'campaign_post',
+    }
+    for (const c of (campaigns || [])) {
+      for (const role of (c.campaign_roles || [])) {
+        if (!role.is_active) continue
+        if (!(role.account_ids || []).includes(req.params.id)) continue
+        const jobType = ROLE_TO_JOB_TYPE[role.role_type]
+        if (!jobType) continue
+
+        // Check if there's already a pending/running job for this nick + campaign
+        const { data: existing } = await supabase.from('jobs')
+          .select('id')
+          .filter('payload->>account_id', 'eq', req.params.id)
+          .filter('payload->>campaign_id', 'eq', c.id)
+          .in('status', ['pending', 'claimed', 'running'])
+          .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+          .limit(1)
+        if (existing?.length) continue
+
+        const { data: job } = await supabase.from('jobs').insert({
+          type: jobType,
+          priority: 3,
+          status: 'pending',
+          payload: {
+            account_id: req.params.id,
+            campaign_id: c.id,
+            role_id: role.id,
+            role_type: role.role_type,
+            owner_id: req.user.id,
+            triggered_by: 'activate',
+          },
+          scheduled_at: new Date(Date.now() + 30000).toISOString(), // 30s delay
+          created_by: req.user.id,
+        }).select('id, type').single()
+        if (job) {
+          assignedJob = job
+          break
+        }
+      }
+      if (assignedJob) break
+    }
+
+    return {
+      activated: true,
+      account_id: req.params.id,
+      status: 'healthy',
+      assigned_job: assignedJob,
+    }
+  })
+
+  // ─── GET /accounts/idle-assignable ───────────────────────
+  // Healthy nicks with active campaign_role but no recent jobs
+  fastify.get('/idle-assignable', async (req, reply) => {
+    // Dual auth
+    const AGENT_SECRET = process.env.AGENT_SECRET
+    const isAgent = AGENT_SECRET && req.headers['x-agent-key'] === AGENT_SECRET
+    let ownerId = null
+    if (!isAgent) {
+      try {
+        await fastify.authenticate(req, reply)
+        if (reply.sent) return
+        ownerId = req.user.id
+      } catch {
+        return reply.code(401).send({ error: 'Auth required' })
+      }
+    }
+
+    // Get all healthy active nicks
+    let q = supabase.from('accounts').select('id, username, owner_id').eq('status', 'healthy').eq('is_active', true)
+    if (!isAgent) q = q.eq('owner_id', ownerId)
+    const { data: accounts } = await q
+    if (!accounts?.length) return []
+
+    const accIds = accounts.map(a => a.id)
+    const ownerIds = [...new Set(accounts.map(a => a.owner_id))]
+
+    // Find which have active campaign_role in running campaigns
+    const { data: campaigns } = await supabase.from('campaigns')
+      .select('id, name, owner_id, campaign_roles(id, role_type, account_ids, is_active)')
+      .in('owner_id', ownerIds)
+      .in('status', ['running', 'active'])
+
+    const idleList = []
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+    for (const acc of accounts) {
+      for (const c of (campaigns || [])) {
+        if (c.owner_id !== acc.owner_id) continue
+        for (const role of (c.campaign_roles || [])) {
+          if (!role.is_active) continue
+          if (!(role.account_ids || []).includes(acc.id)) continue
+
+          // Check recent jobs
+          const { data: recent } = await supabase.from('jobs')
+            .select('id')
+            .filter('payload->>account_id', 'eq', acc.id)
+            .in('status', ['pending', 'claimed', 'running'])
+            .gte('created_at', thirtyMinAgo)
+            .limit(1)
+          if (recent?.length) continue
+
+          idleList.push({
+            id: acc.id,
+            username: acc.username,
+            role: role.role_type,
+            campaign_id: c.id,
+            campaign_name: c.name,
+            role_id: role.id,
+          })
+          break // one entry per account is enough
+        }
+      }
+    }
+
+    return idleList
   })
 
   // POST /accounts/bulk-import - Import multiple accounts (save only)
