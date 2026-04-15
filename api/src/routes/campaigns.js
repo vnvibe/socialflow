@@ -2161,6 +2161,206 @@ module.exports = async (fastify) => {
       recent,
     }
   })
+
+  // ─── POST /campaigns/:id/apply-recommendation ──────────
+  // Apply a single Hermes Review recommendation to adjust the system.
+  // Body: { account_id, action, task_type, priority, review_id?, rec_index? }
+  fastify.post('/:id/apply-recommendation', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { account_id, action, task_type, priority, review_id, rec_index } = req.body || {}
+    if (!action) return reply.code(400).send({ error: 'action required' })
+
+    const campaignId = req.params.id
+
+    // Verify campaign ownership
+    const { data: campaign } = await supabase
+      .from('campaigns').select('id, name, owner_id')
+      .eq('id', campaignId).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    // Determine which daily_budget key to adjust based on task_type
+    const TASK_TO_BUDGET = {
+      comment_post: 'comment',
+      campaign_nurture: 'comment',
+      comment_gen: 'comment',
+      nurture_feed: 'comment',
+      campaign_opportunity_react: 'opportunity_comment',
+      campaign_post: 'post',
+      post_page: 'post',
+      post_group: 'post',
+      post_profile: 'post',
+      campaign_send_friend_request: 'friend_request',
+      campaign_scan_members: 'scan',
+      discover_groups_keyword: 'scan',
+      campaign_discover_groups: 'scan',
+      campaign_interact_profile: 'like',
+    }
+
+    let applied_change = null
+
+    try {
+      // ─── Action handlers ─────────────────────────────
+      if (action === 'fix_checkpoint') {
+        if (!account_id) return reply.code(400).send({ error: 'account_id required for fix_checkpoint' })
+        // Reset status so agent retries; queue a check-health job
+        await supabase.from('accounts')
+          .update({ status: 'unknown' })
+          .eq('id', account_id)
+        await supabase.from('jobs').insert({
+          type: 'check-health',
+          priority: 1,
+          status: 'pending',
+          payload: { account_id, action: 'check-health', auto_refresh: true, triggered_by: 'hermes_review' },
+          scheduled_at: new Date(Date.now() + 30000).toISOString(),
+          created_by: req.user.id,
+        })
+        applied_change = { type: 'status_reset', status: 'unknown', health_check_queued: true }
+
+      } else if (action === 'pause') {
+        if (!account_id) return reply.code(400).send({ error: 'account_id required for pause' })
+        // Pause this account in all its roles within this campaign
+        const { data: roles } = await supabase.from('campaign_roles')
+          .select('id, account_ids, is_active')
+          .eq('campaign_id', campaignId)
+        const affected = []
+        for (const r of (roles || [])) {
+          if ((r.account_ids || []).includes(account_id)) {
+            const newIds = (r.account_ids || []).filter(id => id !== account_id)
+            await supabase.from('campaign_roles')
+              .update({ account_ids: newIds })
+              .eq('id', r.id)
+            affected.push(r.id)
+          }
+        }
+        applied_change = { type: 'removed_from_roles', role_ids: affected }
+
+      } else if (action === 'increase' || action === 'decrease') {
+        if (!account_id) return reply.code(400).send({ error: 'account_id required' })
+        const budgetKey = TASK_TO_BUDGET[task_type] || 'comment'
+        const multiplier = action === 'increase' ? 1.5 : 0.7
+
+        const { data: acc } = await supabase.from('accounts')
+          .select('daily_budget').eq('id', account_id).single()
+        if (!acc) return reply.code(404).send({ error: 'Account not found' })
+
+        const budget = acc.daily_budget || {}
+        const curr = budget[budgetKey] || { max: 10, used: 0 }
+        const oldMax = curr.max || 10
+        const newMax = Math.max(1, Math.min(500, Math.round(oldMax * multiplier)))
+
+        const updated = {
+          ...budget,
+          [budgetKey]: { ...curr, max: newMax },
+        }
+        await supabase.from('accounts')
+          .update({ daily_budget: updated })
+          .eq('id', account_id)
+
+        applied_change = {
+          type: 'budget_adjusted',
+          key: budgetKey,
+          old_max: oldMax,
+          new_max: newMax,
+          multiplier,
+        }
+
+      } else if (action === 'focus') {
+        if (!account_id) return reply.code(400).send({ error: 'account_id required for focus' })
+        // Queue a focused task for this account
+        if (task_type === 'discover_groups' || task_type === 'discover_groups_keyword' || task_type === 'campaign_discover_groups') {
+          const { data: camp } = await supabase.from('campaigns')
+            .select('topic').eq('id', campaignId).single()
+          await supabase.from('jobs').insert({
+            type: 'campaign_discover_groups',
+            priority: 3,
+            status: 'pending',
+            payload: {
+              account_id,
+              campaign_id: campaignId,
+              topic: camp?.topic || '',
+              triggered_by: 'hermes_review',
+            },
+            scheduled_at: new Date(Date.now() + 60000).toISOString(),
+            created_by: req.user.id,
+          })
+          applied_change = { type: 'job_queued', job_type: 'campaign_discover_groups' }
+        } else {
+          // Generic focus: queue one of that task_type
+          await supabase.from('jobs').insert({
+            type: task_type || 'campaign_nurture',
+            priority: 3,
+            status: 'pending',
+            payload: { account_id, campaign_id: campaignId, triggered_by: 'hermes_review' },
+            scheduled_at: new Date(Date.now() + 60000).toISOString(),
+            created_by: req.user.id,
+          })
+          applied_change = { type: 'job_queued', job_type: task_type }
+        }
+
+      } else {
+        return reply.code(400).send({ error: `Unknown action: ${action}` })
+      }
+
+      // ─── Record in campaign_hermes_reviews.applied_recommendations ──
+      // Find most-recent review for this campaign and append
+      const { data: latestReview } = await supabase
+        .from('campaign_hermes_reviews')
+        .select('id, applied_recommendations')
+        .eq('campaign_id', campaignId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (latestReview) {
+        const existing = Array.isArray(latestReview.applied_recommendations)
+          ? latestReview.applied_recommendations : []
+        const newEntry = {
+          applied_at: new Date().toISOString(),
+          applied_by: req.user.id,
+          account_id,
+          action,
+          task_type,
+          priority,
+          rec_index,
+          change: applied_change,
+        }
+        await supabase.from('campaign_hermes_reviews')
+          .update({
+            applied_recommendations: [...existing, newEntry],
+            applied_count: (existing.length || 0) + 1,
+            applied_at: new Date().toISOString(),
+          })
+          .eq('id', latestReview.id)
+      }
+
+      return {
+        ok: true,
+        action,
+        account_id,
+        change: applied_change,
+      }
+    } catch (err) {
+      fastify.log.error({ err }, '[APPLY-REC] Failed')
+      return reply.code(500).send({ error: err.message || 'Apply failed' })
+    }
+  })
+
+  // ─── GET /campaigns/:id/hermes-reviews ──────────────────
+  // List past reviews with applied recommendations for this campaign
+  fastify.get('/:id/hermes-reviews', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase
+      .from('campaigns').select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const { data: reviews, error } = await supabase
+      .from('campaign_hermes_reviews')
+      .select('*')
+      .eq('campaign_id', req.params.id)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (error) return reply.code(500).send({ error: error.message })
+    return reviews || []
+  })
 }
 
 function extractJobSummary(job) {

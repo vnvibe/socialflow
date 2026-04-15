@@ -433,6 +433,41 @@ function HermesReviewModal({ campaign, accounts, jobs, onClose }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  // Track per-recommendation state: 'idle' | 'applying' | 'applied' | 'error'
+  const [applyState, setApplyState] = useState({}) // { [recIndex]: { state, error? } }
+
+  // Resolve account_id — Hermes may return username instead of UUID
+  const resolveAccountId = (ref) => {
+    if (!ref) return null
+    // If it's a UUID, use as-is
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)) return ref
+    // Otherwise match by username
+    const acc = accounts.find(a => a.username === ref || a.id.startsWith(ref))
+    return acc?.id || null
+  }
+
+  const applyRec = async (rec, index) => {
+    setApplyState(s => ({ ...s, [index]: { state: 'applying' } }))
+    try {
+      const accId = resolveAccountId(rec.account_id)
+      if (!accId && rec.action !== 'summary') {
+        throw new Error(`Không tìm được nick với ID/tên "${rec.account_id}"`)
+      }
+      const res = await api.post(`/campaigns/${campaign.id}/apply-recommendation`, {
+        account_id: accId,
+        action: rec.action,
+        task_type: rec.task_type,
+        priority: rec.priority,
+        rec_index: index,
+      })
+      setApplyState(s => ({ ...s, [index]: { state: 'applied', change: res.data.change } }))
+      toast.success(`Đã áp dụng: ${rec.action} ${rec.task_type || ''}`)
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message
+      setApplyState(s => ({ ...s, [index]: { state: 'error', error: msg } }))
+      toast.error(`Lỗi: ${msg}`)
+    }
+  }
 
   const runReview = async () => {
     setLoading(true)
@@ -549,39 +584,86 @@ function HermesReviewModal({ campaign, accounts, jobs, onClose }) {
                 Đề xuất ({result.recommendations?.length || 0})
               </div>
 
-              {(result.recommendations || []).map((rec, i) => (
-                <div
-                  key={i}
-                  className="mb-2 p-3"
-                  style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-                >
-                  <div className="flex items-center gap-3 mb-1 text-xs">
-                    <span className={`uppercase ${PRIORITY_COLOR[rec.priority] || 'text-app-muted'}`}>
-                      ● {rec.priority || 'normal'}
-                    </span>
-                    <span className="text-app-primary">{rec.account_id}</span>
-                    <span className="text-app-muted">→</span>
-                    <span className={
-                      rec.action === 'increase' ? 'text-hermes' :
-                      rec.action === 'fix_checkpoint' ? 'text-danger' :
-                      rec.action === 'pause' ? 'text-warn' :
-                      'text-info'
-                    }>
-                      {rec.action} {rec.task_type}
-                    </span>
+              {(result.recommendations || []).map((rec, i) => {
+                const st = applyState[i] || { state: 'idle' }
+                const resolvedAccId = resolveAccountId(rec.account_id)
+                const nickLabel = (() => {
+                  if (!rec.account_id) return '(no nick)'
+                  if (resolvedAccId) {
+                    const acc = accounts.find(a => a.id === resolvedAccId)
+                    return acc?.username || rec.account_id
+                  }
+                  return `⚠ ${rec.account_id}` // not resolved
+                })()
+
+                return (
+                  <div
+                    key={i}
+                    className="mb-2 p-3"
+                    style={{
+                      background: 'var(--bg-elevated)',
+                      border: st.state === 'applied'
+                        ? '1px solid var(--hermes-fade)'
+                        : st.state === 'error'
+                        ? '1px solid rgba(239,68,68,0.4)'
+                        : '1px solid var(--border)',
+                    }}
+                  >
+                    <div className="flex items-center gap-3 mb-1 text-xs">
+                      <span className={`uppercase ${PRIORITY_COLOR[rec.priority] || 'text-app-muted'}`}>
+                        ● {rec.priority || 'normal'}
+                      </span>
+                      <span className="text-app-primary">{nickLabel}</span>
+                      <span className="text-app-muted">→</span>
+                      <span className={
+                        rec.action === 'increase' ? 'text-hermes' :
+                        rec.action === 'fix_checkpoint' ? 'text-danger' :
+                        rec.action === 'pause' ? 'text-warn' :
+                        'text-info'
+                      }>
+                        {rec.action} {rec.task_type}
+                      </span>
+                    </div>
+                    <div className="text-xs text-app-muted">{rec.reason}</div>
+
+                    {/* Applied change detail */}
+                    {st.state === 'applied' && st.change && (
+                      <div className="mt-2 text-[10px] text-hermes">
+                        ✓ Đã áp dụng:{' '}
+                        {st.change.type === 'budget_adjusted' &&
+                          `${st.change.key} budget ${st.change.old_max} → ${st.change.new_max} (×${st.change.multiplier})`}
+                        {st.change.type === 'status_reset' && `status reset + health check queued`}
+                        {st.change.type === 'job_queued' && `queued ${st.change.job_type}`}
+                        {st.change.type === 'removed_from_roles' && `removed from ${st.change.role_ids.length} role(s)`}
+                      </div>
+                    )}
+
+                    {st.state === 'error' && (
+                      <div className="mt-2 text-[10px] text-danger">✗ {st.error}</div>
+                    )}
+
+                    <div className="mt-2 flex gap-2">
+                      {st.state === 'applied' ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] uppercase"
+                          style={{ background: 'var(--hermes-dim)', color: 'var(--hermes)', border: '1px solid var(--hermes-fade)' }}
+                        >
+                          ✓ Đã áp dụng
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => applyRec(rec, i)}
+                          disabled={st.state === 'applying'}
+                          className={st.state === 'error' ? 'btn-ghost' : 'btn-hermes'}
+                          style={{ fontSize: 10 }}
+                        >
+                          {st.state === 'applying' ? 'Đang áp dụng...' : st.state === 'error' ? 'Thử lại' : 'Áp dụng'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-xs text-app-muted">{rec.reason}</div>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      onClick={() => toast.info(`TODO: apply "${rec.action}" — manual edit campaign for now`)}
-                      className="btn-ghost"
-                      style={{ fontSize: 10 }}
-                    >
-                      Áp dụng
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
 
               {result.recommendations?.length === 0 && (
                 <div className="text-app-muted text-sm">Không có đề xuất.</div>
