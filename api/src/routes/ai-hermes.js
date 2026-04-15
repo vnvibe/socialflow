@@ -88,4 +88,75 @@ module.exports = async (fastify) => {
     const { status, json } = await proxyToHermes('/generate', req.body, 30000)
     return reply.code(status).send(json)
   })
+
+  // ─── Feedback endpoint (agent-auth) ────────────────────
+  fastify.post('/agent/feedback', { preHandler: agentAuth }, async (req, reply) => {
+    const { status, json } = await proxyToHermes('/feedback', req.body, 5000)
+    return reply.code(status).send(json)
+  })
+
+  // ─── Status / performance / skills (both auth paths) ────
+  // For HermesBar component + /hermes Brain page.
+  async function getStatus() {
+    const res = await fetch(`${HERMES_URL}/status`, {
+      headers: { 'X-Agent-Key': AGENT_SECRET },
+      signal: AbortSignal.timeout(5000),
+    })
+    return { status: res.status, json: await res.json() }
+  }
+
+  fastify.get('/status', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const { status, json } = await getStatus()
+      return reply.code(status).send(json)
+    } catch (err) {
+      return reply.code(503).send({ status: 'OFFLINE', error: err.message })
+    }
+  })
+
+  fastify.get('/agent/status', { preHandler: agentAuth }, async (req, reply) => {
+    try {
+      const { status, json } = await getStatus()
+      return reply.code(status).send(json)
+    } catch (err) {
+      return reply.code(503).send({ status: 'OFFLINE', error: err.message })
+    }
+  })
+
+  fastify.get('/performance', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const res = await fetch(`${HERMES_URL}/performance`, {
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(10000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  fastify.get('/skills/status', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const res = await fetch(`${HERMES_URL}/skills/status`, {
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(10000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  fastify.get('/feedback/recent', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const limit = req.query.limit || 50
+      const res = await fetch(`${HERMES_URL}/feedback/recent?limit=${limit}`, {
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(10000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
 }
