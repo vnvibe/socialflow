@@ -272,9 +272,11 @@ module.exports = async (fastify) => {
   fastify.post('/campaign-review', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { status, json } = await proxyToHermes('/campaign-review', req.body, 60000)
     // If review succeeded AND campaign has auto_apply_enabled → run autoApply
-    if (status === 200 && json?.ok && req.body?.campaign_id && fastify.autoApplyRecommendations) {
+    if (status === 200 && json?.ok && req.body?.campaign_id) {
       try {
-        const auto = await fastify.autoApplyRecommendations({
+        // Use shared service directly (don't rely on fastify decorator scoping)
+        const { autoApplyRecommendations } = require('../services/auto-apply')
+        const auto = await autoApplyRecommendations(fastify.supabase, {
           campaignId: req.body.campaign_id,
           recommendations: json.recommendations || [],
           ownerId: req.user.id,
