@@ -167,6 +167,8 @@ module.exports = async (fastify) => {
 
   // ─── POST /agent-jobs/recover-stale ────────────────────
   // Reset jobs stuck in claimed/running for > 10 min (agent crash recovery)
+  // No body expected. Agent must NOT send Content-Type: application/json
+  // with empty body — Fastify rejects with FST_ERR_CTP_EMPTY_JSON_BODY.
   fastify.post('/recover-stale', { preHandler: agentAuth }, async (req, reply) => {
     const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString()
 
