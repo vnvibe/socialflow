@@ -52,14 +52,18 @@ function ModelSection() {
   }, [cfgData])
 
   const modelOptions = providers[form.provider]?.models || []
-  // Auto-set base_url when provider changes
+  // Auto-set base_url when provider changes. Model: keep user-typed value if it
+  // looks custom (contains /), otherwise default to first preset.
   useEffect(() => {
     if (providers[form.provider]) {
-      setForm(f => ({
-        ...f,
-        base_url: providers[f.provider].base_url,
-        model: modelOptions.includes(f.model) ? f.model : modelOptions[0] || '',
-      }))
+      setForm(f => {
+        const keepModel = f.model && (f.model.includes('/') || modelOptions.includes(f.model))
+        return {
+          ...f,
+          base_url: providers[f.provider].base_url,
+          model: keepModel ? f.model : modelOptions[0] || '',
+        }
+      })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.provider, providers])
@@ -126,24 +130,58 @@ function ModelSection() {
             style={{ border: '1px solid var(--border-bright)' }}
           >
             {Object.keys(providers).map(p => (
-              <option key={p} value={p}>{p}</option>
+              <option key={p} value={p}>{providers[p].label || p}</option>
             ))}
           </select>
+          <div className="text-[10px] text-app-muted mt-1 font-mono-ui">
+            {providers[form.provider]?.base_url}
+          </div>
         </div>
 
-        {/* Model */}
+        {/* Model — datalist cho gợi ý + type tuỳ ý */}
         <div>
-          <label className="block text-[10px] uppercase text-app-muted mb-1">Model</label>
-          <select
+          <label className="block text-[10px] uppercase text-app-muted mb-1">
+            Model <span className="text-app-dim">(chọn preset hoặc gõ model ID bất kỳ)</span>
+          </label>
+          <input
+            type="text"
+            list="model-options"
             value={form.model}
             onChange={(e) => setForm(f => ({ ...f, model: e.target.value }))}
-            className="w-full px-3 py-2 bg-app-elevated text-app-primary text-sm"
+            placeholder="vd: nousresearch/hermes-3-llama-3.1-70b"
+            className="w-full px-3 py-2 bg-app-elevated text-app-primary text-sm font-mono-ui"
             style={{ border: '1px solid var(--border-bright)' }}
-          >
+          />
+          <datalist id="model-options">
             {modelOptions.map(m => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m} />
             ))}
-          </select>
+          </datalist>
+          {modelOptions.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {modelOptions.slice(0, 6).map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, model: m }))}
+                  className={`text-[10px] px-2 py-0.5 font-mono-ui ${
+                    form.model === m ? 'text-hermes' : 'text-app-muted hover:text-app-primary'
+                  }`}
+                  style={{
+                    background: form.model === m ? 'var(--hermes-dim)' : 'var(--bg-elevated)',
+                    border: '1px solid ' + (form.model === m ? 'var(--hermes-fade)' : 'var(--border)'),
+                  }}
+                >
+                  {m}
+                </button>
+              ))}
+              {modelOptions.length > 6 && (
+                <span className="text-[10px] text-app-dim self-center ml-1">
+                  +{modelOptions.length - 6} khác (gõ tên)
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* API Key */}
