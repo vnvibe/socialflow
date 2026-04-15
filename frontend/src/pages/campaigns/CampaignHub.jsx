@@ -514,6 +514,16 @@ function HermesReviewModal({ campaign, accounts, jobs, onClose }) {
         nick_stats: nickStats,
       })
       setResult(res.data)
+
+      // If server auto-applied some recs, mark them in local state
+      if (Array.isArray(res.data?.auto_applied) && res.data.auto_applied.length > 0) {
+        const autoState = {}
+        for (const a of res.data.auto_applied) {
+          autoState[a.index] = { state: 'applied', change: a.change, autoApplied: true }
+        }
+        setApplyState(autoState)
+        toast.success(`${res.data.auto_applied.length} đề xuất được auto-apply`)
+      }
     } catch (err) {
       const msg = err.response?.data?.error || err.response?.data?.detail || err.message
       setError(msg)
@@ -580,6 +590,26 @@ function HermesReviewModal({ campaign, accounts, jobs, onClose }) {
                 <div className="text-app-dim text-[10px] mt-2">latency {result.latency_ms}ms</div>
               </div>
 
+              {Array.isArray(result.auto_applied) && result.auto_applied.length > 0 && (
+                <div
+                  className="mb-4 p-3 flex items-center gap-3"
+                  style={{ background: 'var(--hermes-dim)', border: '1px solid var(--hermes-fade)' }}
+                >
+                  <span className="text-hermes text-xl">⚡</span>
+                  <div className="flex-1 text-sm">
+                    <div className="text-hermes uppercase text-[10px] tracking-wider">Auto-apply</div>
+                    <div className="text-app-primary">
+                      {result.auto_applied.length}/{result.recommendations?.length || 0} đề xuất được Hermes tự áp dụng
+                    </div>
+                    {result.auto_apply_skipped?.length > 0 && (
+                      <div className="text-app-muted text-[10px] mt-1">
+                        Skip {result.auto_apply_skipped.length} — xem toggle trong cài đặt campaign
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="text-[10px] uppercase text-app-muted mb-2">
                 Đề xuất ({result.recommendations?.length || 0})
               </div>
@@ -629,6 +659,7 @@ function HermesReviewModal({ campaign, accounts, jobs, onClose }) {
                     {/* Applied change detail */}
                     {st.state === 'applied' && st.change && (
                       <div className="mt-2 text-[10px] text-hermes">
+                        {st.autoApplied && <span className="text-info mr-1">[AUTO]</span>}
                         ✓ Đã áp dụng:{' '}
                         {st.change.type === 'budget_adjusted' &&
                           `${st.change.key} budget ${st.change.old_max} → ${st.change.new_max} (×${st.change.multiplier})`}
@@ -648,7 +679,7 @@ function HermesReviewModal({ campaign, accounts, jobs, onClose }) {
                           className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] uppercase"
                           style={{ background: 'var(--hermes-dim)', color: 'var(--hermes)', border: '1px solid var(--hermes-fade)' }}
                         >
-                          ✓ Đã áp dụng
+                          ✓ {st.autoApplied ? 'Auto-applied' : 'Đã áp dụng'}
                         </span>
                       ) : (
                         <button

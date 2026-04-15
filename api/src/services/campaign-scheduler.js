@@ -95,7 +95,111 @@ function initScheduler() {
     catch (err) { console.error('[MEMBERSHIP-CHECK] error:', err.message) }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
-  console.log('[SCHEDULER] Campaign + Role + Engagement + Monitoring + Scout + Membership scheduler started')
+  // ── Auto-apply Hermes Review: every 6h for campaigns with auto_apply_enabled
+  // Offset to :07 to stagger from other cron jobs.
+  cron.schedule('7 */6 * * *', async () => {
+    try { await processAutoApplyReviews() }
+    catch (err) { console.error('[AUTO-APPLY-CRON] error:', err.message) }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
+  console.log('[SCHEDULER] Campaign + Role + Engagement + Monitoring + Scout + Membership + AutoApply scheduler started')
+}
+
+// ─── Auto-apply Hermes Review for enabled campaigns ──────────────────────
+async function processAutoApplyReviews() {
+  const { data: campaigns } = await supabase
+    .from('campaigns')
+    .select('id, name, owner_id, auto_apply_percent, auto_apply_last_run_at')
+    .eq('auto_apply_enabled', true)
+    .gt('auto_apply_percent', 0)
+    .limit(50)
+
+  if (!campaigns?.length) return
+
+  const HERMES_URL = process.env.HERMES_URL || 'http://127.0.0.1:8100'
+  const AGENT_SECRET = process.env.AGENT_SECRET
+
+  for (const camp of campaigns) {
+    // Skip if run in last 5h (prevent double-trigger if cron overlaps)
+    if (camp.auto_apply_last_run_at) {
+      const lastRun = new Date(camp.auto_apply_last_run_at).getTime()
+      if (Date.now() - lastRun < 5 * 60 * 60 * 1000) continue
+    }
+
+    try {
+      // Call Hermes /campaign-review directly (not via fastify proxy since we're in a cron)
+      const res = await fetch(`${HERMES_URL}/campaign-review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Agent-Key': AGENT_SECRET },
+        body: JSON.stringify({ campaign_id: camp.id }),
+        signal: AbortSignal.timeout(60000),
+      })
+      if (!res.ok) {
+        console.warn(`[AUTO-APPLY-CRON] Review failed for ${camp.name}: ${res.status}`)
+        continue
+      }
+      const review = await res.json()
+      const recs = review.recommendations || []
+      if (recs.length === 0) {
+        console.log(`[AUTO-APPLY-CRON] ${camp.name}: no recommendations`)
+        continue
+      }
+
+      // Apply via stored procedure-like logic directly here (simpler than exposing fastify decorate)
+      let appliedCount = 0
+      for (let i = 0; i < recs.length; i++) {
+        const rec = recs[i]
+        const recRank = { high: 3, medium: 2, low: 1 }[rec.priority || 'low'] || 1
+        // Default min_priority: high
+        if (recRank < 3) continue
+        // Dice roll per campaign auto_apply_percent
+        if (Math.random() * 100 > (camp.auto_apply_percent || 0)) continue
+
+        // Apply — simplified (only budget adjust + checkpoint + focus, not pause for cron safety)
+        if (rec.action === 'increase' || rec.action === 'decrease') {
+          // Resolve account UUID
+          let accId = rec.account_id
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accId)) {
+            // Lookup by username
+            const { data: roles } = await supabase.from('campaign_roles').select('account_ids').eq('campaign_id', camp.id)
+            const allIds = [...new Set((roles || []).flatMap(r => r.account_ids || []))]
+            const { data: accs } = await supabase.from('accounts').select('id, username').in('id', allIds)
+            const match = (accs || []).find(a => a.username === accId)
+            if (!match) continue
+            accId = match.id
+          }
+          const TASK_TO_BUDGET = {
+            comment_post: 'comment', campaign_nurture: 'comment', comment_gen: 'comment',
+            nurture_feed: 'comment', campaign_opportunity_react: 'opportunity_comment',
+            campaign_post: 'post', campaign_send_friend_request: 'friend_request',
+            campaign_discover_groups: 'scan',
+          }
+          const key = TASK_TO_BUDGET[rec.task_type] || 'comment'
+          const mult = rec.action === 'increase' ? 1.5 : 0.7
+          const { data: acc } = await supabase.from('accounts').select('daily_budget').eq('id', accId).single()
+          if (!acc) continue
+          const budget = acc.daily_budget || {}
+          const curr = budget[key] || { max: 10, used: 0 }
+          const newMax = Math.max(1, Math.min(500, Math.round((curr.max || 10) * mult)))
+          await supabase.from('accounts')
+            .update({ daily_budget: { ...budget, [key]: { ...curr, max: newMax } } })
+            .eq('id', accId)
+          appliedCount++
+        }
+        // Add other actions if needed — keeping cron minimal to avoid risky writes
+      }
+
+      await supabase.from('campaigns')
+        .update({ auto_apply_last_run_at: new Date().toISOString() })
+        .eq('id', camp.id)
+
+      if (appliedCount > 0) {
+        console.log(`[AUTO-APPLY-CRON] ${camp.name}: ${appliedCount}/${recs.length} recs auto-applied (${camp.auto_apply_percent}%)`)
+      }
+    } catch (err) {
+      console.warn(`[AUTO-APPLY-CRON] ${camp.name} error: ${err.message}`)
+    }
+  }
 }
 
 // ─── Phase 7: Scout cron (independent of campaign cron) ──────────────────

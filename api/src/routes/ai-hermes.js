@@ -271,6 +271,20 @@ module.exports = async (fastify) => {
   // ─── Campaign Review ─────────────────────────────────────
   fastify.post('/campaign-review', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { status, json } = await proxyToHermes('/campaign-review', req.body, 60000)
+    // If review succeeded AND campaign has auto_apply_enabled → run autoApply
+    if (status === 200 && json?.ok && req.body?.campaign_id && fastify.autoApplyRecommendations) {
+      try {
+        const auto = await fastify.autoApplyRecommendations({
+          campaignId: req.body.campaign_id,
+          recommendations: json.recommendations || [],
+          ownerId: req.user.id,
+        })
+        json.auto_applied = auto.auto_applied
+        json.auto_apply_skipped = auto.skipped
+      } catch (err) {
+        fastify.log.warn({ err }, '[AUTO-APPLY] Failed (review still saved)')
+      }
+    }
     return reply.code(status).send(json)
   })
 

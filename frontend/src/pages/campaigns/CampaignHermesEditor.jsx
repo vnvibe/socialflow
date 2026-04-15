@@ -314,7 +314,135 @@ Thành công = lead DM về sản phẩm.`}
         <button onClick={() => save.mutate()} disabled={save.isPending} className="btn-hermes">
           {save.isPending ? 'Đang lưu...' : 'Lưu cài đặt Hermes'}
         </button>
+
+        {/* ── SECTION 3: Auto-apply ── */}
+        <AutoApplySection campaignId={id} />
       </div>
     </div>
+  )
+}
+
+function AutoApplySection({ campaignId }) {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['campaigns', campaignId, 'auto-apply'],
+    queryFn: async () => (await api.get(`/campaigns/${campaignId}/auto-apply-settings`)).data,
+  })
+
+  const [form, setForm] = useState({ enabled: false, percent: 0, min_priority: 'high' })
+
+  useEffect(() => {
+    if (data) {
+      setForm({
+        enabled: !!data.auto_apply_enabled,
+        percent: data.auto_apply_percent ?? 0,
+        min_priority: data.auto_apply_min_priority || 'high',
+      })
+    }
+  }, [data])
+
+  const save = useMutation({
+    mutationFn: async () => {
+      await api.put(`/campaigns/${campaignId}/auto-apply-settings`, form)
+    },
+    onSuccess: () => {
+      toast.success('Đã lưu auto-apply')
+      qc.invalidateQueries({ queryKey: ['campaigns', campaignId, 'auto-apply'] })
+    },
+    onError: (err) => toast.error(`Lỗi: ${err.response?.data?.error || err.message}`),
+  })
+
+  if (isLoading) return null
+
+  const lastRun = data?.auto_apply_last_run_at
+    ? new Date(data.auto_apply_last_run_at).toLocaleString('vi-VN')
+    : 'chưa chạy lần nào'
+
+  return (
+    <section className="mt-10 pt-8" style={{ borderTop: '1px solid var(--border)' }}>
+      <h3 className="text-app-primary text-base mb-1">3. Auto-apply Hermes recommendations</h3>
+      <p className="text-app-muted text-xs mb-4">
+        Hermes tự apply đề xuất theo tỉ lệ % bạn set. Chạy khi có Review mới
+        + cron 6h cho campaigns có toggle bật. Last run: <span className="text-app-primary">{lastRun}</span>.
+      </p>
+
+      <div
+        className="p-4 space-y-4"
+        style={{
+          background: 'var(--bg-elevated)',
+          border: form.enabled ? '1px solid var(--hermes-fade)' : '1px solid var(--border)',
+        }}
+      >
+        {/* Enable toggle */}
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(e) => setForm(f => ({ ...f, enabled: e.target.checked }))}
+            className="w-4 h-4"
+          />
+          <span className={`text-sm ${form.enabled ? 'text-hermes' : 'text-app-primary'}`}>
+            {form.enabled ? '● ON — Hermes tự điều chỉnh' : 'OFF — mọi recommendation phải manual apply'}
+          </span>
+        </div>
+
+        {/* Percent slider */}
+        <div>
+          <label className="block text-[10px] uppercase text-app-muted mb-2">
+            Tỉ lệ tự động: <span className="text-hermes font-mono-ui">{form.percent}%</span>
+            <span className="ml-2 text-app-dim">
+              {form.percent === 0 && '(không auto-apply)'}
+              {form.percent > 0 && form.percent < 30 && '(thận trọng)'}
+              {form.percent >= 30 && form.percent < 70 && '(vừa phải)'}
+              {form.percent >= 70 && form.percent < 100 && '(chủ động)'}
+              {form.percent === 100 && '(full auto — rủi ro cao)'}
+            </span>
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={form.percent}
+            onChange={(e) => setForm(f => ({ ...f, percent: parseInt(e.target.value) }))}
+            disabled={!form.enabled}
+            className="w-full"
+            style={{ accentColor: 'var(--hermes)' }}
+          />
+          <div className="flex justify-between text-[10px] text-app-muted mt-1 font-mono-ui">
+            <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+          </div>
+        </div>
+
+        {/* Min priority */}
+        <div>
+          <label className="block text-[10px] uppercase text-app-muted mb-1">
+            Chỉ auto-apply priority từ mức
+          </label>
+          <select
+            value={form.min_priority}
+            onChange={(e) => setForm(f => ({ ...f, min_priority: e.target.value }))}
+            disabled={!form.enabled}
+            className="px-3 py-2 bg-app-base text-app-primary text-sm"
+            style={{ border: '1px solid var(--border-bright)' }}
+          >
+            <option value="high">HIGH (chỉ fix_checkpoint + critical)</option>
+            <option value="medium">MEDIUM (high + medium — mạnh tay)</option>
+            <option value="low">LOW (tất cả — không khuyến nghị)</option>
+          </select>
+        </div>
+
+        {/* Helper text */}
+        <div className="text-[10px] text-app-muted font-mono-ui leading-relaxed">
+          Ví dụ với 50% / priority HIGH: mỗi rec priority=high, Hermes roll dice,
+          trung bình 50% sẽ auto-apply. 50% còn lại hiện trong modal để bạn quyết định.<br/>
+          Medium / low recs luôn manual (trừ khi hạ ngưỡng).
+        </div>
+
+        <button onClick={() => save.mutate()} disabled={save.isPending} className="btn-hermes">
+          {save.isPending ? 'Đang lưu...' : 'Lưu auto-apply'}
+        </button>
+      </div>
+    </section>
   )
 }
