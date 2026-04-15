@@ -2260,9 +2260,10 @@ module.exports = async (fastify) => {
     }))
   })
 
-  // ─── GET /campaigns/:id/groups ──────────────────────────
-  // List all groups for this campaign with status filter
-  fastify.get('/:id/groups', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // ─── GET /campaigns/:id/fb-groups ───────────────────────
+  // List all FB groups for this campaign with join_status filter
+  // (Different from /:id/groups which returns campaign_groups junction)
+  fastify.get('/:id/fb-groups', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: campaign } = await supabase
       .from('campaigns').select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
     if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })

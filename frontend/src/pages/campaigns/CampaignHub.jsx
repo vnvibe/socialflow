@@ -379,7 +379,7 @@ function GroupsTab({ campaignId }) {
     queryKey: ['campaigns', campaignId, 'groups', filter],
     queryFn: async () => {
       try {
-        const res = await api.get(`/campaigns/${campaignId}/groups?status=${filter}`)
+        const res = await api.get(`/campaigns/${campaignId}/fb-groups?status=${filter}`)
         return asArray(res.data)
       } catch {
         return []
