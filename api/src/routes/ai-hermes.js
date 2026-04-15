@@ -268,6 +268,12 @@ module.exports = async (fastify) => {
     }
   })
 
+  // ─── Campaign Review ─────────────────────────────────────
+  fastify.post('/campaign-review', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { status, json } = await proxyToHermes('/campaign-review', req.body, 60000)
+    return reply.code(status).send(json)
+  })
+
   // ─── Memory + feedback delete ────────────────────────────
   fastify.delete('/memory', { preHandler: fastify.requireAdmin }, async (req, reply) => {
     const qs = new URLSearchParams()

@@ -92,7 +92,7 @@ function RoleSelect({ currentRole, onChange, disabled }) {
 }
 
 // ─── Single nick row inside campaign accordion ────────────
-function NickRow({ nick, role, campaignId, runningJob, todayStats, onSelect, onRemove, onRoleChange, campaigns }) {
+function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, onSelect, onRemove, onRoleChange, campaigns }) {
   const [transferOpen, setTransferOpen] = useState(false)
 
   const status = runningJob ? 'busy'
@@ -101,93 +101,193 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, onSelect, onR
     : nick.status === 'at_risk' ? 'idle'
     : 'error'
 
+  // Daily budget & breakdown
+  const dailyBudgetTotal = (() => {
+    const b = nick.daily_budget || {}
+    let max = 0
+    for (const k of Object.keys(b)) {
+      if (k === 'reset_at') continue
+      max += b[k]?.max || 0
+    }
+    return max || 100
+  })()
+  const progressPct = Math.min(100, Math.round(((todayStats?.total || 0) / dailyBudgetTotal) * 100))
+
+  // Task breakdown
+  const taskBreakdown = useMemo(() => {
+    const counts = {}
+    for (const j of (todayJobs || [])) {
+      const t = j.payload?.action || j.type
+      if (!t) continue
+      counts[t] = (counts[t] || 0) + 1
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 4)
+  }, [todayJobs])
+
+  // Last action
+  const lastAction = useMemo(() => {
+    const sorted = [...(todayJobs || [])].sort((a, b) =>
+      new Date(b.finished_at || b.started_at || b.created_at) - new Date(a.finished_at || a.started_at || a.created_at)
+    )
+    return sorted[0]
+  }, [todayJobs])
+
+  const lastActionLabel = (() => {
+    if (!lastAction) return null
+    const ts = lastAction.finished_at || lastAction.started_at || lastAction.created_at
+    const time = ts ? new Date(ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''
+    const action = lastAction.payload?.action || lastAction.type || ''
+    const result = lastAction.result?.comment_text
+      || lastAction.result?.post_url
+      || lastAction.result?.summary
+      || lastAction.error_message
+      || lastAction.status
+    return `${time} — ${action}${result ? ' "' + String(result).substring(0, 60) + (String(result).length > 60 ? '...' : '') + '"' : ''}`
+  })()
+
   return (
     <div
-      className="flex items-center gap-4 px-4 py-3 hover-row cursor-pointer"
+      className="px-4 py-3 hover-row cursor-pointer"
       style={{ borderBottom: '1px solid var(--border)' }}
       onClick={() => onSelect(nick)}
     >
-      {/* Status dot */}
-      <AgentStatusDot status={status} pulse={!!runningJob} size="lg" />
+      {/* TOP ROW: status, name, role, current job, stats, score, actions */}
+      <div className="flex items-center gap-4">
+        <AgentStatusDot status={status} pulse={!!runningJob} size="lg" />
 
-      {/* Name + username */}
-      <div className="min-w-0 flex-1">
-        <div className="text-app-primary text-sm truncate">{nick.username || nick.id.slice(0, 8)}</div>
-        <div className="text-app-muted text-[10px] font-mono-ui">
-          {nick.id.slice(0, 8)} · {formatAgo(nick.updated_at)}
+        <div className="min-w-0 flex-1">
+          <div className="text-app-primary text-sm truncate">{nick.username || nick.id.slice(0, 8)}</div>
+          <div className="text-app-muted text-[10px] font-mono-ui">
+            {nick.id.slice(0, 8)} · {formatAgo(nick.updated_at)}
+          </div>
+        </div>
+
+        <div className="w-20" onClick={(e) => e.stopPropagation()}>
+          {role ? (
+            <RoleSelect currentRole={role} onChange={(newRole) => onRoleChange(nick.id, newRole)} />
+          ) : (
+            <span className="text-app-dim font-mono-ui text-xs">—</span>
+          )}
+        </div>
+
+        <div className="w-48 font-mono-ui text-xs">
+          {runningJob ? (
+            <>
+              <div className="text-info truncate">→ {runningJob.payload?.action || runningJob.type}</div>
+              <div className="text-app-dim text-[10px]">started {formatAgo(runningJob.started_at)}</div>
+            </>
+          ) : nick.status === 'checkpoint' ? (
+            <div className="flex items-center gap-2">
+              <span className="text-danger">⚠ checkpoint</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toast.info('TODO: open health check + cookie refresh modal')
+                }}
+                className="text-[10px] uppercase px-2 py-0.5"
+                style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.4)' }}
+              >
+                Xử lý
+              </button>
+            </div>
+          ) : nick.status === 'at_risk' ? (
+            <span className="text-warn">at risk</span>
+          ) : !nick.is_active ? (
+            <span className="text-app-dim">disabled</span>
+          ) : (
+            <span className="text-app-dim">idle</span>
+          )}
+        </div>
+
+        <div className="w-24 text-right font-mono-ui text-xs">
+          <div className="text-app-primary">{todayStats?.total || 0} jobs</div>
+          {(todayStats?.failed || 0) > 0 ? (
+            <div className="text-danger text-[10px]">{todayStats.failed} fail</div>
+          ) : (
+            <div className="text-app-dim text-[10px]">0 fail</div>
+          )}
+        </div>
+
+        <div onClick={(e) => e.stopPropagation()}>
+          <HermesScoreBadge score={todayStats?.avg_score} />
+        </div>
+
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setTransferOpen(!transferOpen)}
+            title="Chuyển campaign"
+            className="text-app-muted hover:text-info p-1"
+          >
+            <ArrowRightLeft size={14} />
+          </button>
+          <button
+            onClick={() => onRemove(nick.id)}
+            title="Remove khỏi campaign"
+            className="text-app-muted hover:text-danger p-1"
+          >
+            <X size={14} />
+          </button>
         </div>
       </div>
 
-      {/* Role */}
-      <div className="w-20" onClick={(e) => e.stopPropagation()}>
-        {role ? (
-          <RoleSelect
-            currentRole={role}
-            onChange={(newRole) => onRoleChange(nick.id, newRole)}
-          />
-        ) : (
-          <span className="text-app-dim font-mono-ui text-xs">—</span>
-        )}
-      </div>
+      {/* INLINE DETAIL — always visible (no click required) */}
+      <div className="mt-2 pl-9 grid grid-cols-12 gap-3 font-mono-ui text-[11px]">
+        {/* Progress bar */}
+        <div className="col-span-3 flex items-center gap-2">
+          <span className="text-app-muted text-[10px] uppercase">Hôm nay</span>
+          <div className="flex-1 h-1.5" style={{ background: 'var(--bg-elevated)' }}>
+            <div
+              className={progressPct >= 90 ? 'bg-warn h-full' : 'bg-hermes h-full'}
+              style={{ width: progressPct + '%' }}
+            />
+          </div>
+          <span className="text-app-primary tabular-nums text-[10px]">
+            {todayStats?.total || 0}/{dailyBudgetTotal}
+          </span>
+        </div>
 
-      {/* Current job */}
-      <div className="w-48 font-mono-ui text-xs">
-        {runningJob ? (
-          <>
-            <div className="text-info truncate">→ {runningJob.payload?.action || runningJob.type}</div>
-            <div className="text-app-dim text-[10px]">
-              started {formatAgo(runningJob.started_at)}
-            </div>
-          </>
-        ) : nick.status === 'checkpoint' ? (
-          <span className="text-danger">⚠ checkpoint — cần xử lý</span>
-        ) : nick.status === 'at_risk' ? (
-          <span className="text-warn">at risk</span>
-        ) : !nick.is_active ? (
-          <span className="text-app-dim">disabled</span>
-        ) : (
-          <span className="text-app-dim">idle</span>
-        )}
-      </div>
+        {/* Task breakdown */}
+        <div className="col-span-3 truncate">
+          <span className="text-app-muted text-[10px] uppercase">Hermes: </span>
+          {taskBreakdown.length === 0 ? (
+            <span className="text-app-dim">—</span>
+          ) : (
+            taskBreakdown.map(([t, c], i) => (
+              <span key={t} className="text-app-primary">
+                {i > 0 && <span className="text-app-dim"> · </span>}
+                {t}<span className="text-app-muted"> ×{c}</span>
+              </span>
+            ))
+          )}
+        </div>
 
-      {/* Today stats */}
-      <div className="w-24 text-right font-mono-ui text-xs">
-        <div className="text-app-primary">{todayStats?.total || 0} jobs</div>
-        {(todayStats?.failed || 0) > 0 ? (
-          <div className="text-danger text-[10px]">{todayStats.failed} fail</div>
-        ) : (
-          <div className="text-app-dim text-[10px]">0 fail</div>
-        )}
-      </div>
+        {/* Last action */}
+        <div className="col-span-4 truncate">
+          <span className="text-app-muted text-[10px] uppercase">Gần nhất: </span>
+          {lastActionLabel ? (
+            <span className="text-app-primary">{lastActionLabel}</span>
+          ) : (
+            <span className="text-app-dim">chưa có</span>
+          )}
+        </div>
 
-      {/* Hermes score */}
-      <div onClick={(e) => e.stopPropagation()}>
-        <HermesScoreBadge score={todayStats?.avg_score} />
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        <button
-          onClick={() => setTransferOpen(!transferOpen)}
-          title="Chuyển campaign"
-          className="text-app-muted hover:text-info p-1"
-        >
-          <ArrowRightLeft size={14} />
-        </button>
-        <button
-          onClick={() => onRemove(nick.id)}
-          title="Remove khỏi campaign"
-          className="text-app-muted hover:text-danger p-1"
-        >
-          <X size={14} />
-        </button>
+        {/* Memory/fewshot indicator */}
+        <div className="col-span-2 text-right text-app-muted">
+          {todayStats?.total > 0 && (
+            <span>
+              <span className="text-hermes">mem={todayStats.memory_count || 0}</span>
+              <span className="mx-1">·</span>
+              <span className="text-info">fs={todayStats.fewshot_count || 0}</span>
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Transfer dropdown */}
       {transferOpen && (
         <div
-          className="absolute right-4 top-12 z-20 bg-app-elevated font-mono-ui text-xs"
-          style={{ border: '1px solid var(--border-bright)', minWidth: 200 }}
+          className="absolute right-4 z-20 bg-app-elevated font-mono-ui text-xs"
+          style={{ border: '1px solid var(--border-bright)', minWidth: 200, marginTop: 4 }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-2 text-[10px] uppercase text-app-muted" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -212,7 +312,7 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, onSelect, onR
 }
 
 // ─── Single campaign accordion section ─────────────────────
-function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, campaigns, onRoleChange, onRemoveFromRole, onSelect }) {
+function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, todayJobsByAcc, campaigns, onRoleChange, onRemoveFromRole, onSelect }) {
   const [expanded, setExpanded] = useState(true)
   const nav = useNavigate()
 
@@ -307,6 +407,7 @@ function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, cam
                 campaigns={campaigns}
                 runningJob={runningJobs.find(j => j.payload?.account_id === nick.id && j.payload?.campaign_id === campaign.id)}
                 todayStats={todayStatsByAcc[nick.id]}
+                todayJobs={todayJobsByAcc[nick.id]}
                 onSelect={onSelect}
                 onRemove={(accId) => onRemoveFromRole(campaign.id, accId)}
                 onRoleChange={(accId, newRole) => onRoleChange(campaign.id, accId, newRole)}
@@ -334,7 +435,7 @@ function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, cam
 }
 
 // ─── Unassigned nicks section ──────────────────────────────
-function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, onSelect }) {
+function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect }) {
   const [expanded, setExpanded] = useState(false)
 
   if (nicks.length === 0) return null
@@ -364,6 +465,7 @@ function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, onSelect }) {
           campaigns={[]}
           runningJob={runningJobs.find(j => j.payload?.account_id === nick.id)}
           todayStats={todayStatsByAcc[nick.id]}
+          todayJobs={todayJobsByAcc[nick.id]}
           onSelect={onSelect}
           onRemove={() => {}}
           onRoleChange={() => {}}
@@ -589,32 +691,53 @@ export default function AgentsRoster() {
   const runningJobs = jobs.filter(j => ['claimed', 'running'].includes(j.status))
 
   // Compute today stats per account (client-side aggregation)
-  const todayStatsByAcc = useMemo(() => {
+  const todayJobsByAcc = useMemo(() => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const stats = {}
+    const map = {}
     for (const j of jobs) {
       const accId = j.payload?.account_id
       if (!accId) continue
       if (new Date(j.created_at) < today) continue
-      if (!stats[accId]) stats[accId] = { total: 0, done: 0, failed: 0, avg_score: 0, scoresSum: 0, scoresCount: 0 }
-      stats[accId].total++
-      if (j.status === 'done') stats[accId].done++
-      if (j.status === 'failed') stats[accId].failed++
-      const score = j.result?.hermes_score
-      if (typeof score === 'number') {
-        stats[accId].scoresSum += score
-        stats[accId].scoresCount++
-      }
+      if (!map[accId]) map[accId] = []
+      map[accId].push(j)
     }
-    // Compute avg
-    for (const id in stats) {
-      if (stats[id].scoresCount > 0) {
-        stats[id].avg_score = stats[id].scoresSum / stats[id].scoresCount
+    return map
+  }, [jobs])
+
+  const todayStatsByAcc = useMemo(() => {
+    const stats = {}
+    for (const [accId, accJobs] of Object.entries(todayJobsByAcc)) {
+      let scoresSum = 0, scoresCount = 0
+      let memSum = 0, fsSum = 0, hermesCalls = 0
+      let done = 0, failed = 0
+      for (const j of accJobs) {
+        if (j.status === 'done') done++
+        if (j.status === 'failed') failed++
+        const score = j.result?.hermes_score
+        if (typeof score === 'number') {
+          scoresSum += score
+          scoresCount++
+        }
+        // Hermes meta from job result (set by handlers when they call Hermes)
+        const mc = j.result?.memory_count
+        const fc = j.result?.fewshot_count
+        if (typeof mc === 'number' || typeof fc === 'number') {
+          hermesCalls++
+          memSum += mc || 0
+          fsSum += fc || 0
+        }
+      }
+      stats[accId] = {
+        total: accJobs.length,
+        done, failed,
+        avg_score: scoresCount > 0 ? scoresSum / scoresCount : 0,
+        memory_count: hermesCalls > 0 ? Math.round(memSum / hermesCalls) : 0,
+        fewshot_count: hermesCalls > 0 ? Math.round(fsSum / hermesCalls) : 0,
       }
     }
     return stats
-  }, [jobs])
+  }, [todayJobsByAcc])
 
   // Assigned account ids across all campaigns
   const assignedIds = useMemo(() => {
@@ -714,6 +837,7 @@ export default function AgentsRoster() {
               accounts={accounts}
               runningJobs={runningJobs}
               todayStatsByAcc={todayStatsByAcc}
+              todayJobsByAcc={todayJobsByAcc}
               campaigns={campaigns}
               onSelect={setSelected}
               onRoleChange={(campaignId, accountId, newRole) => changeRole.mutate({ campaignId, accountId, newRole })}
@@ -725,6 +849,7 @@ export default function AgentsRoster() {
             nicks={unassignedNicks}
             runningJobs={runningJobs}
             todayStatsByAcc={todayStatsByAcc}
+            todayJobsByAcc={todayJobsByAcc}
             onSelect={setSelected}
           />
 

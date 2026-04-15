@@ -9,6 +9,7 @@ import CommandCenter from './pages/dashboard/CommandCenter'
 import AgentsRoster from './pages/agents/AgentsRoster'
 import MissionBoard from './pages/campaigns/MissionBoard'
 import CampaignHub from './pages/campaigns/CampaignHub'
+import CampaignHermesEditor from './pages/campaigns/CampaignHermesEditor'
 import SignalWall from './pages/monitor/SignalWall'
 import HermesSettings from './pages/hermes/HermesSettings'
 import Login from './pages/auth/Login'
@@ -123,6 +124,7 @@ export default function App() {
                 <Route path="/campaigns/:id" element={<CampaignHub />} />
                 <Route path="/campaigns/:id/legacy" element={<CampaignDetail />} />
                 <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
+                <Route path="/campaigns/:id/hermes" element={<CampaignHermesEditor />} />
                 <Route path="/campaigns/old" element={<CampaignManager />} />
                 <Route path="/health" element={<AccountHealth />} />
                 <Route path="/nick-nurture" element={<NickNurture />} />

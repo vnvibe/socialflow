@@ -8,12 +8,13 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Play, Pause, Edit, Loader } from 'lucide-react'
+import { ArrowLeft, Play, Pause, Edit, Loader, Brain, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 import DenseStat from '../../components/hermes/DenseStat'
 import HermesCaller from '../../components/hermes/HermesCaller'
 import JobRow from '../../components/hermes/JobRow'
+import HermesScoreBadge from '../../components/hermes/HermesScoreBadge'
 
 const asArray = (d) => Array.isArray(d) ? d
   : Array.isArray(d?.items) ? d.items
@@ -22,6 +23,7 @@ const asArray = (d) => Array.isArray(d) ? d
 
 // ─── Tab: Overview ─────────────────────────────────────────
 function OverviewTab({ campaign, campaignId }) {
+  const nav = useNavigate()
   const { data: kpi } = useQuery({
     queryKey: ['campaigns', campaignId, 'kpi'],
     queryFn: async () => {
@@ -33,8 +35,86 @@ function OverviewTab({ campaign, campaignId }) {
   const roles = campaign?.campaign_roles || []
   const totalNicks = roles.reduce((s, r) => s + (r.account_ids?.length || 0), 0)
 
+  const hctx = campaign?.hermes_context || {}
+
   return (
     <div className="overflow-auto p-6 font-mono-ui">
+      {/* Empty state — prompt to configure Hermes */}
+      {!campaign?.goal && !hctx.product_name && (
+        <div
+          className="mb-6 p-4 flex items-center gap-4"
+          style={{ background: 'var(--hermes-dim)', border: '1px solid var(--hermes-fade)' }}
+        >
+          <span className="text-2xl">🧠</span>
+          <div className="flex-1">
+            <div className="text-app-primary text-sm">Hermes chưa có context cho campaign này</div>
+            <div className="text-app-muted text-xs mt-0.5">
+              Set goal + product info để Hermes hiểu rõ chiến dịch + gen comment chất lượng cao hơn
+            </div>
+          </div>
+          <button
+            onClick={() => nav(`/campaigns/${campaignId}/hermes`)}
+            className="btn-hermes whitespace-nowrap"
+          >
+            Cài đặt Hermes
+          </button>
+        </div>
+      )}
+
+      {/* Goal (Hermes-readable) */}
+      {campaign?.goal && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-app-muted mb-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-hermes hermes-pulse" />
+            Mục tiêu cho Hermes
+          </div>
+          <div
+            className="p-4 text-sm text-app-primary leading-relaxed"
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--hermes-fade)' }}
+          >
+            {campaign.goal}
+          </div>
+        </div>
+      )}
+
+      {/* Product info (Hermes context) */}
+      {(hctx.product_name || hctx.key_features || hctx.tone) && (
+        <div className="mb-6">
+          <div className="text-[10px] uppercase tracking-wider text-app-muted mb-2">
+            Thông tin sản phẩm (Hermes context)
+          </div>
+          <div className="p-4" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+            {hctx.product_name && (
+              <div className="mb-2 text-app-primary text-sm">
+                <span className="text-app-muted">Sản phẩm: </span>
+                <span className="text-hermes">{hctx.product_name}</span>
+                {hctx.price && <span className="text-app-muted ml-2">· {hctx.price}</span>}
+              </div>
+            )}
+            {Array.isArray(hctx.key_features) && hctx.key_features.length > 0 && (
+              <div className="text-xs text-app-muted mb-1">
+                Điểm mạnh: <span className="text-app-primary">{hctx.key_features.join(' · ')}</span>
+              </div>
+            )}
+            {hctx.target_audience && (
+              <div className="text-xs text-app-muted mb-1">
+                Đối tượng: <span className="text-app-primary">{hctx.target_audience}</span>
+              </div>
+            )}
+            {hctx.tone && (
+              <div className="text-xs text-app-muted mb-1">
+                Tone: <span className="text-app-primary">{hctx.tone}</span>
+              </div>
+            )}
+            {Array.isArray(hctx.avoid) && hctx.avoid.length > 0 && (
+              <div className="text-xs text-app-muted mb-1">
+                Tránh: <span className="text-warn">{hctx.avoid.join(', ')}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Mission */}
       <div className="mb-6">
         <div className="text-[10px] uppercase tracking-wider text-app-muted mb-2">Mission</div>
@@ -348,6 +428,179 @@ const TABS = [
   { key: 'data',      label: 'Data' },
 ]
 
+// ─── Hermes Review modal ───────────────────────────────────
+function HermesReviewModal({ campaign, accounts, jobs, onClose }) {
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+
+  const runReview = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      // Aggregate stats client-side
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const todayJobs = jobs.filter(j => new Date(j.created_at) >= today)
+      const stats = {
+        total_jobs_today: todayJobs.length,
+        failed: todayJobs.filter(j => j.status === 'failed').length,
+        done: todayJobs.filter(j => j.status === 'done').length,
+        running: todayJobs.filter(j => ['claimed', 'running'].includes(j.status)).length,
+      }
+      // Per-nick stats
+      const roleMap = {}
+      for (const r of (campaign.campaign_roles || [])) {
+        for (const accId of (r.account_ids || [])) {
+          roleMap[accId] = r.role_type
+        }
+      }
+      const nickStats = []
+      const seenAccIds = new Set()
+      for (const accId of Object.keys(roleMap)) {
+        seenAccIds.add(accId)
+        const acc = accounts.find(a => a.id === accId)
+        if (!acc) continue
+        const accJobs = todayJobs.filter(j => j.payload?.account_id === accId)
+        const failed = accJobs.filter(j => j.status === 'failed').length
+        nickStats.push({
+          account_id: accId,
+          username: acc.username || accId.slice(0, 8),
+          role: roleMap[accId],
+          status: acc.status,
+          jobs_today: accJobs.length,
+          failed,
+        })
+      }
+
+      const res = await api.post('/ai-hermes/campaign-review', {
+        campaign_id: campaign.id,
+        current_stats: stats,
+        nick_stats: nickStats,
+      })
+      setResult(res.data)
+    } catch (err) {
+      const msg = err.response?.data?.error || err.response?.data?.detail || err.message
+      setError(msg)
+      toast.error(`Review thất bại: ${msg}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Auto-trigger on mount
+  useState(() => { runReview() })
+
+  const PRIORITY_COLOR = {
+    high: 'text-danger',
+    medium: 'text-warn',
+    low: 'text-app-muted',
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)' }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-app-surface w-full max-w-3xl max-h-[80vh] flex flex-col font-mono-ui"
+        style={{ border: '1px solid var(--border-bright)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="flex items-center gap-2">
+            <Brain size={16} className="text-hermes" />
+            <span className="text-app-primary text-sm uppercase tracking-wider">Hermes Review</span>
+          </div>
+          <button onClick={onClose} className="text-app-muted hover:text-app-primary p-1">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          {loading && (
+            <div className="flex items-center gap-3 text-app-muted">
+              <Loader size={16} className="animate-spin text-hermes" />
+              <span className="text-sm">Hermes đang phân tích chiến dịch...</span>
+            </div>
+          )}
+
+          {error && (
+            <div className="p-3 text-sm text-danger" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.4)' }}>
+              ⚠ {error}
+              {error.includes('no goal') && (
+                <div className="mt-2 text-xs text-app-muted">
+                  Vào Edit campaign → tab "Mục tiêu" để thiết lập trước.
+                </div>
+              )}
+            </div>
+          )}
+
+          {result && (
+            <>
+              <div className="mb-4 p-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                <div className="text-[10px] uppercase text-app-muted mb-1">Tóm tắt</div>
+                <div className="text-app-primary text-sm">{result.summary}</div>
+                <div className="text-app-dim text-[10px] mt-2">latency {result.latency_ms}ms</div>
+              </div>
+
+              <div className="text-[10px] uppercase text-app-muted mb-2">
+                Đề xuất ({result.recommendations?.length || 0})
+              </div>
+
+              {(result.recommendations || []).map((rec, i) => (
+                <div
+                  key={i}
+                  className="mb-2 p-3"
+                  style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+                >
+                  <div className="flex items-center gap-3 mb-1 text-xs">
+                    <span className={`uppercase ${PRIORITY_COLOR[rec.priority] || 'text-app-muted'}`}>
+                      ● {rec.priority || 'normal'}
+                    </span>
+                    <span className="text-app-primary">{rec.account_id}</span>
+                    <span className="text-app-muted">→</span>
+                    <span className={
+                      rec.action === 'increase' ? 'text-hermes' :
+                      rec.action === 'fix_checkpoint' ? 'text-danger' :
+                      rec.action === 'pause' ? 'text-warn' :
+                      'text-info'
+                    }>
+                      {rec.action} {rec.task_type}
+                    </span>
+                  </div>
+                  <div className="text-xs text-app-muted">{rec.reason}</div>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => toast.info(`TODO: apply "${rec.action}" — manual edit campaign for now`)}
+                      className="btn-ghost"
+                      style={{ fontSize: 10 }}
+                    >
+                      Áp dụng
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {result.recommendations?.length === 0 && (
+                <div className="text-app-muted text-sm">Không có đề xuất.</div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 px-4 py-3" style={{ borderTop: '1px solid var(--border)' }}>
+          <button onClick={runReview} disabled={loading} className="btn-ghost">
+            {loading ? 'Đang phân tích...' : 'Phân tích lại'}
+          </button>
+          <button onClick={onClose} className="btn-ghost">Đóng</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main ──────────────────────────────────────────────────
 export default function CampaignHub() {
   const { id } = useParams()
@@ -355,10 +608,27 @@ export default function CampaignHub() {
   const qc = useQueryClient()
   const [params, setParams] = useSearchParams()
   const tab = params.get('tab') || 'overview'
+  const [reviewOpen, setReviewOpen] = useState(false)
 
   const { data: campaign, isLoading } = useQuery({
     queryKey: ['campaigns', id],
     queryFn: async () => (await api.get(`/campaigns/${id}`)).data,
+    refetchInterval: 30000,
+  })
+
+  const { data: allAccounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: async () => asArray((await api.get('/accounts')).data),
+    refetchInterval: 60000,
+  })
+
+  const { data: allJobs = [] } = useQuery({
+    queryKey: ['jobs', 'campaign-review', id],
+    queryFn: async () => {
+      const res = await api.get('/jobs?limit=200')
+      return asArray(res.data).filter(j => j.payload?.campaign_id === id)
+    },
+    enabled: !!campaign,
     refetchInterval: 30000,
   })
 
@@ -451,6 +721,13 @@ export default function CampaignHub() {
             </button>
           )}
           <button
+            onClick={() => setReviewOpen(true)}
+            className="btn-hermes flex items-center gap-1"
+            title="Hermes phân tích chiến dịch"
+          >
+            <Brain size={14} /> HERMES REVIEW
+          </button>
+          <button
             onClick={() => nav(`/campaigns/${id}/edit`)}
             className="btn-ghost"
             title="Edit campaign"
@@ -507,6 +784,15 @@ export default function CampaignHub() {
         {tab === 'content'   && <ContentTab campaignId={id} />}
         {tab === 'data'      && <DataTab campaignId={id} />}
       </div>
+
+      {reviewOpen && (
+        <HermesReviewModal
+          campaign={campaign}
+          accounts={allAccounts}
+          jobs={allJobs}
+          onClose={() => setReviewOpen(false)}
+        />
+      )}
     </div>
   )
 }

@@ -512,10 +512,40 @@ module.exports = async (fastify) => {
       'nick_stagger_seconds', 'role_stagger_minutes', 'campaign_active_days',
       'kpi_config', // Phase 11
       'wave_config', // Phase 16
+      'goal', 'hermes_context', 'status', // Hermes upgrade
     ]
     const updates = {}
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key]
+    }
+
+    // Special handling: campaign_roles is a separate table — caller passes
+    // updated array of {id?, role_type, account_ids, is_active}.
+    // Strategy: replace all roles for this campaign (delete + insert).
+    const incomingRoles = req.body.campaign_roles
+    if (Array.isArray(incomingRoles)) {
+      try {
+        await supabase.from('campaign_roles').delete().eq('campaign_id', req.params.id)
+        if (incomingRoles.length > 0) {
+          const rows = incomingRoles.map(r => ({
+            campaign_id: req.params.id,
+            role_type: r.role_type,
+            account_ids: r.account_ids || [],
+            is_active: r.is_active !== undefined ? r.is_active : true,
+            sort_order: r.sort_order || 0,
+            name: r.name || null,
+            mission: r.mission || null,
+            config: r.config || {},
+            parsed_plan: r.parsed_plan || null,
+            quota_override: r.quota_override || null,
+            read_from: r.read_from || null,
+            feeds_into: r.feeds_into || null,
+          }))
+          await supabase.from('campaign_roles').insert(rows)
+        }
+      } catch (rolesErr) {
+        fastify.log.error({ rolesErr }, 'Failed to update campaign_roles')
+      }
     }
 
     const { data, error } = await supabase
