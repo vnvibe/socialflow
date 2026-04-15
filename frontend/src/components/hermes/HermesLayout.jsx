@@ -5,7 +5,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Target, Radio, Mail, FileText,
-  Brain, Settings, LogOut, Database, Activity,
+  Brain, Settings, LogOut, Database, Activity, SlidersHorizontal,
 } from 'lucide-react'
 import HermesBar from './HermesBar'
 import useAuthStore from '../../store/auth.store'
@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { to: '/content',       Icon: FileText,        label: 'Content' },
   { to: '/data-center',   Icon: Database,        label: 'Data' },
   { to: '/hermes',        Icon: Brain,           label: 'Hermes Brain' },
+  { to: '/hermes/settings', Icon: SlidersHorizontal, label: 'Hermes Settings' },
   { to: '/analytics',     Icon: Activity,        label: 'Analytics' },
 ]
 

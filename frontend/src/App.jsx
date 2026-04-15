@@ -10,6 +10,7 @@ import AgentsRoster from './pages/agents/AgentsRoster'
 import MissionBoard from './pages/campaigns/MissionBoard'
 import CampaignHub from './pages/campaigns/CampaignHub'
 import SignalWall from './pages/monitor/SignalWall'
+import HermesSettings from './pages/hermes/HermesSettings'
 import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import Dashboard from './pages/dashboard/Dashboard'
@@ -99,6 +100,7 @@ export default function App() {
                 <Route path="/campaigns" element={<MissionBoard />} />
                 <Route path="/monitor" element={<SignalWall />} />
                 <Route path="/hermes" element={<HermesBrain />} />
+                <Route path="/hermes/settings" element={<HermesSettings />} />
 
                 {/* ── Legacy dashboard fallback ── */}
                 <Route path="/dashboard-legacy" element={<Dashboard />} />

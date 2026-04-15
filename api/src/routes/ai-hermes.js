@@ -214,4 +214,89 @@ module.exports = async (fastify) => {
       return reply.code(503).send({ error: err.message })
     }
   })
+
+  // ─── Config CRUD + test ──────────────────────────────────
+  fastify.get('/config', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const res = await fetch(`${HERMES_URL}/config`, {
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(5000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  fastify.put('/config', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    const { status, json } = await proxyToHermes('/config', req.body, 10000)
+    // Use PUT method — proxyToHermes only does POST, so roll manual:
+    try {
+      const res = await fetch(`${HERMES_URL}/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Agent-Key': AGENT_SECRET },
+        body: JSON.stringify(req.body || {}),
+        signal: AbortSignal.timeout(10000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  fastify.post('/config/test', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    const { status, json } = await proxyToHermes('/config/test', req.body, 15000)
+    return reply.code(status).send(json)
+  })
+
+  // ─── Skill create + delete ───────────────────────────────
+  fastify.post('/skills', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    const { status, json } = await proxyToHermes('/skills', req.body, 10000)
+    return reply.code(status).send(json)
+  })
+
+  fastify.delete('/skills/:task_type', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    try {
+      const res = await fetch(`${HERMES_URL}/skills/${encodeURIComponent(req.params.task_type)}`, {
+        method: 'DELETE',
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(5000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  // ─── Memory + feedback delete ────────────────────────────
+  fastify.delete('/memory', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    const qs = new URLSearchParams()
+    if (req.query.account_id) qs.set('account_id', req.query.account_id)
+    if (req.query.all) qs.set('all', 'true')
+    try {
+      const res = await fetch(`${HERMES_URL}/memory?${qs}`, {
+        method: 'DELETE',
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(10000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
+
+  fastify.delete('/feedback', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    const qs = new URLSearchParams()
+    if (req.query.confirm) qs.set('confirm', req.query.confirm)
+    try {
+      const res = await fetch(`${HERMES_URL}/feedback?${qs}`, {
+        method: 'DELETE',
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(10000),
+      })
+      return reply.code(res.status).send(await res.json())
+    } catch (err) {
+      return reply.code(503).send({ error: err.message })
+    }
+  })
 }
