@@ -17,6 +17,8 @@
     "@upstash/redis": "^1.37.0",
     "archiver": "^7.0.1",
     "axios": "^1.13.6",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.3",
     "cron-parser": "^5.5.0",
     "crypto-js": "^4.2.0",
     "dotenv": "^16.4.7",
@@ -24,6 +26,7 @@
     "fastify-plugin": "^5.0.1",
     "googleapis": "^171.4.0",
     "https-proxy-agent": "^7.0.6",
+    "jsonwebtoken": "^9.0.3",
     "node-cron": "^3.0.3",
     "openai": "^4.77.0",
     "pg": "^8.20.0"

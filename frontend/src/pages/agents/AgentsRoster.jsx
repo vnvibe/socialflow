@@ -30,16 +30,22 @@ function formatLastSeen(ts) {
 export default function AgentsRoster() {
   const [selected, setSelected] = useState(null)
 
+  const asArray = (d) => Array.isArray(d) ? d
+    : Array.isArray(d?.items) ? d.items
+    : Array.isArray(d?.data) ? d.data
+    : Array.isArray(d?.results) ? d.results
+    : []
+
   const { data: accounts = [], refetch } = useQuery({
     queryKey: ['accounts'],
-    queryFn: async () => (await api.get('/accounts')).data || [],
+    queryFn: async () => asArray((await api.get('/accounts')).data),
     refetchInterval: 30000,
   })
 
   // Jobs to know who's busy
   const { data: jobs = [] } = useQuery({
     queryKey: ['jobs', 'running'],
-    queryFn: async () => (await api.get('/jobs?status=running&limit=50')).data || [],
+    queryFn: async () => asArray((await api.get('/jobs?status=running&limit=50')).data),
     refetchInterval: 5000,
   })
 

@@ -75,9 +75,16 @@ function CampaignCard({ campaign, onClick }) {
 export default function MissionBoard() {
   const nav = useNavigate()
 
+  const asArray = (d) => Array.isArray(d) ? d
+    : Array.isArray(d?.items) ? d.items
+    : Array.isArray(d?.data) ? d.data
+    : Array.isArray(d?.campaigns) ? d.campaigns
+    : Array.isArray(d?.results) ? d.results
+    : []
+
   const { data: campaigns = [] } = useQuery({
     queryKey: ['campaigns'],
-    queryFn: async () => (await api.get('/campaigns')).data || [],
+    queryFn: async () => asArray((await api.get('/campaigns')).data),
     refetchInterval: 30000,
   })
 

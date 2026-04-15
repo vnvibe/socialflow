@@ -21,13 +21,24 @@ function formatAgo(ts) {
 export default function SignalWall() {
   const [minScore, setMinScore] = useState(5)
 
+  // Defensive: API endpoints may return array OR object {items: [...]} OR {posts: [...]}
+  const asArray = (d) => {
+    if (Array.isArray(d)) return d
+    if (Array.isArray(d?.items)) return d.items
+    if (Array.isArray(d?.posts)) return d.posts
+    if (Array.isArray(d?.data)) return d.data
+    if (Array.isArray(d?.opportunities)) return d.opportunities
+    if (Array.isArray(d?.results)) return d.results
+    return []
+  }
+
   // Try monitor/posts first (keyword watchers) then fallback to opportunities
   const { data: posts = [] } = useQuery({
     queryKey: ['monitor', 'posts'],
     queryFn: async () => {
       try {
         const res = await api.get('/monitor/posts?limit=50')
-        return res.data || []
+        return asArray(res.data)
       } catch {
         return []
       }
@@ -35,24 +46,26 @@ export default function SignalWall() {
     refetchInterval: 10000,
   })
 
-  const { data: oppsData } = useQuery({
+  const { data: opportunities = [] } = useQuery({
     queryKey: ['monitor', 'opportunities'],
     queryFn: async () => {
       try {
         const res = await api.get('/monitor/engagement?limit=30')
-        return res.data || {}
+        return asArray(res.data)
       } catch {
-        return {}
+        return []
       }
     },
     refetchInterval: 10000,
   })
 
-  const opportunities = oppsData?.items || oppsData?.opportunities || []
+  // Extra safety even though useQuery default handles it
+  const postsArr = Array.isArray(posts) ? posts : []
+  const oppsArr = Array.isArray(opportunities) ? opportunities : []
 
   // Merge & normalize
   const items = [
-    ...posts.map(p => ({
+    ...postsArr.map(p => ({
       id: p.id || p.post_fb_id,
       type: 'post',
       platform: 'facebook',
@@ -64,7 +77,7 @@ export default function SignalWall() {
       url: p.post_url,
       action: p.action_taken || p.status || 'detected',
     })),
-    ...opportunities.map(o => ({
+    ...oppsArr.map(o => ({
       id: o.id,
       type: 'opportunity',
       platform: 'facebook',

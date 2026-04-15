@@ -40,9 +40,9 @@ export default function HermesBrain() {
     refetchInterval: 15000,
   })
 
-  const skills = perf?.skills || []
-  const recentCalls = perf?.recent_calls || []
-  const recentFeedback = feedback?.feedback || []
+  const skills = Array.isArray(perf?.skills) ? perf.skills : []
+  const recentCalls = Array.isArray(perf?.recent_calls) ? perf.recent_calls : []
+  const recentFeedback = Array.isArray(feedback?.feedback) ? feedback.feedback : []
 
   const activeSkill = selected || skills[0]
 

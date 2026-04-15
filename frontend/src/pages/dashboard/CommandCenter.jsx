@@ -25,17 +25,23 @@ function Col({ title, children, extra }) {
 }
 
 export default function CommandCenter() {
+  const asArray = (d) => Array.isArray(d) ? d
+    : Array.isArray(d?.items) ? d.items
+    : Array.isArray(d?.data) ? d.data
+    : Array.isArray(d?.results) ? d.results
+    : []
+
   // Accounts
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
-    queryFn: async () => (await api.get('/accounts')).data || [],
+    queryFn: async () => asArray((await api.get('/accounts')).data),
     refetchInterval: 30000,
   })
 
   // Live jobs (pending + claimed + running + recent done)
   const { data: jobs = [] } = useQuery({
     queryKey: ['jobs', 'recent'],
-    queryFn: async () => (await api.get('/jobs?limit=25')).data || [],
+    queryFn: async () => asArray((await api.get('/jobs?limit=25')).data),
     refetchInterval: 3000,
   })
 
