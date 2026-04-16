@@ -5,6 +5,12 @@ const { closeAll } = require('../browser/session-pool')
 const { classifyError, shouldDisableAccount, isRetryable, getRetryDelayMs } = require('../lib/error-classifier')
 const { postCooldown } = require('../lib/randomizer')
 const { getMinGapMs, checkWarmup } = require('../lib/hard-limits')
+// Audit 2026-04-14: job lifecycle (GET pending, claim, status updates, fail,
+// cancel-inactive, failures log) moved to REST API. Direct pg access from
+// local Windows across the internet was too slow + flaky. supabase client
+// is still used for secondary reads (accounts, campaigns, etc.) where a
+// single round-trip per cycle is acceptable.
+const apiClient = require('../lib/api-client')
 
 const AGENT_ID = process.env.AGENT_ID || `${os.hostname()}-${process.pid}`
 const AGENT_USER_ID = process.env.AGENT_USER_ID || null  // set when user logs in via Electron
@@ -162,14 +168,13 @@ async function getExcludedUserIds() {
   const now = Date.now()
   if (now - preferenceCache.fetchedAt < PREF_CACHE_TTL) return preferenceCache.data
 
-  // Users who have a preferred_executor_id that is NOT this agent → exclude them
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, preferred_executor_id')
-    .not('preferred_executor_id', 'is', null)
-    .neq('preferred_executor_id', AGENT_ID)
-
-  preferenceCache = { data: (profiles || []).map(p => p.id), fetchedAt: now }
+  try {
+    const ids = await apiClient.getExcludedUserIds(AGENT_ID)
+    preferenceCache = { data: ids || [], fetchedAt: now }
+  } catch (err) {
+    console.warn(`[POLLER] getExcludedUserIds failed: ${err.message}`)
+    // Return cached data on failure; empty array if no cache yet
+  }
   return preferenceCache.data
 }
 
@@ -189,28 +194,24 @@ async function _pollInner() {
 
   try {
     const slots = MAX_CONCURRENT - pool.interactionNicks.size
-    let query = supabase
-      .from('jobs')
-      .select('*')
-      .eq('status', 'pending')
-      .lte('scheduled_at', new Date().toISOString())
-      .order('priority', { ascending: true })   // lower number = higher priority
-      .order('scheduled_at', { ascending: true })
-      .limit(slots)
 
-    if (AGENT_USER_ID) {
-      // STRICT: only pick jobs explicitly created by this user.
-      // (Previously also accepted created_by IS NULL — but that allowed
-      // legacy/system jobs to be claimed by ANY logged-in agent.)
-      query = query.eq('created_by', AGENT_USER_ID)
-    } else {
-      const excludedUserIds = await getExcludedUserIds()
-      if (excludedUserIds.length > 0) {
-        query = query.not('created_by', 'in', `(${excludedUserIds.join(',')})`)
+    // Fetch via REST API (moved off direct pg for latency + reliability).
+    // Server-side does ORDER BY priority ASC, scheduled_at ASC, LIMIT slots.
+    let jobs = []
+    try {
+      if (AGENT_USER_ID) {
+        jobs = await apiClient.getPendingJobs({ slots, userId: AGENT_USER_ID })
+      } else {
+        const excludedUserIds = await getExcludedUserIds()
+        jobs = await apiClient.getPendingJobs({ slots, excludeUserIds: excludedUserIds })
       }
+    } catch (err) {
+      pollFails++
+      if (pollFails === 1 || pollFails % 4 === 0) {
+        console.error(`[POLL ERROR] /agent-jobs/pending ${err.message} (failed ${pollFails}x)`)
+      }
+      return
     }
-
-    const { data: jobs } = await query
 
     // Audit 2026-04-12: never open a browser for check_group_membership while
     // any campaign_nurture / campaign_send_friend_request is still pending.
@@ -300,7 +301,7 @@ async function _pollInner() {
         if (!statusOk) {
           // Auto-cancel job for inactive nick — prevent infinite skip loop
           try {
-            await supabase.from('jobs').update({ status: 'cancelled', error_message: 'account_not_active' }).eq('id', job.id).eq('status', 'pending')
+            try { await apiClient.cancelInactiveJob({ jobId: job.id, accountId: accId }) } catch {}
           } catch {}
           console.log(`[POLLER] Nick ${accId.slice(0,8)} not active — CANCELLED ${job.type} job ${job.id}`)
           continue
@@ -315,7 +316,7 @@ async function _pollInner() {
           if (warning.risk_level === 'critical') {
             // Critical: pause nick, cancel job
             try {
-              await supabase.from('jobs').update({ status: 'cancelled', error_message: 'risk_level_critical' }).eq('id', job.id).eq('status', 'pending')
+              try { await apiClient.updateJobStatus(job.id, { status: 'cancelled', error_message: 'risk_level_critical' }) } catch {}
               await supabase.from('accounts').update({ status: 'at_risk' }).eq('id', accId)
               await supabase.from('notifications').insert({
                 user_id: job.created_by || job.payload?.owner_id,
@@ -495,19 +496,17 @@ async function _pollInner() {
         }
       }
 
-      // Claim job in DB (atomic via WHERE status='pending').
-      // Audit 2026-04-12: chain .select('id') so we can verify the UPDATE
-      // actually matched a row. Supabase returns error:null even when 0 rows
-      // are updated (another poll cycle already flipped it to 'claimed'), so
-      // checking `error` alone allowed duplicate execution.
-      const { data: claimed, error } = await supabase.from('jobs')
-        .update({ status: 'claimed', agent_id: AGENT_ID, started_at: new Date() })
-        .eq('id', job.id)
-        .eq('status', 'pending')
-        .select('id')
-
-      if (error || !claimed?.length) {
-        // Another poll cycle (or agent) already claimed it — release pool slot
+      // Claim via REST — server returns 409 if already claimed by another
+      // poll cycle / agent. API does the atomic UPDATE WHERE status='pending'
+      // and checks rowCount, so the duplicate-execution race from the old
+      // supabase.from('jobs').update() path is gone.
+      let claimOk = null
+      try {
+        claimOk = await apiClient.claimJob(job.id, AGENT_ID)
+      } catch (err) {
+        console.warn(`[JOB] Claim ${job.id} threw: ${err.message}`)
+      }
+      if (!claimOk) {
         if (accId) pool.release(accId, job.id)
         continue
       }
@@ -667,10 +666,10 @@ async function executeJob(job) {
     if (err.code === 'SESSION_POOL_BUSY' || err.message === 'SESSION_POOL_BUSY') {
       console.log(`[JOB] Session pool busy, requeue ${handlerKey} (${job.id}) for retry in 30s`)
       try {
-        await supabase.from('jobs').update({
+        await apiClient.updateJobStatus(job.id, {
           status: 'pending',
           scheduled_at: new Date(Date.now() + 30000).toISOString(),
-        }).eq('id', job.id)
+        })
       } catch {}
       return // skip the rest of the error handling — not a real failure
     }
@@ -696,19 +695,19 @@ async function executeJob(job) {
       }
       // Requeue with 60s delay — don't increment attempt counter, don't fail
       try {
-        await supabase.from('jobs').update({
+        await apiClient.updateJobStatus(job.id, {
           status: 'pending',
           scheduled_at: new Date(Date.now() + 60000).toISOString(),
           error_message: 'BROWSER_CRASH — auto-retry after clearing profile lock',
-        }).eq('id', job.id)
+        })
       } catch {}
       console.log(`[JOB] BROWSER_CRASH ${handlerKey} (${job.id}) — cleared lock, requeue in 60s (no penalty)`)
       return // skip rest of error handling
     }
 
-    // ─── Save to job_failures table ────────────────────
+    // ─── Save to job_failures table (via REST) ─────────
     try {
-      await supabase.from('job_failures').insert({
+      await apiClient.recordFailure({
         job_id: job.id,
         account_id: job.payload?.account_id || null,
         campaign_id: job.payload?.campaign_id || null,
@@ -720,7 +719,7 @@ async function executeJob(job) {
         attempt: nextAttempt,
         will_retry: isRetryable(classified) && nextAttempt < maxAttempts,
         next_retry_at: isRetryable(classified) && nextAttempt < maxAttempts
-          ? new Date(Date.now() + getRetryDelayMs(classified, nextAttempt - 1)) : null,
+          ? new Date(Date.now() + getRetryDelayMs(classified, nextAttempt - 1)).toISOString() : null,
       })
     } catch (insertErr) {
       console.error(`[JOB] Failed to save job_failure:`, insertErr.message)
@@ -761,11 +760,7 @@ async function executeJob(job) {
           } catch {}
           // Mark job as failed (single attempt) but don't disable account
           try {
-            await supabase.from('jobs').update({
-              status: 'failed',
-              error_message: 'CHECKPOINT first strike — health check queued',
-              finished_at: new Date(),
-            }).eq('id', job.id)
+            await apiClient.failJob(job.id, { error_message: 'CHECKPOINT first strike — health check queued', attempt: nextAttempt })
           } catch {}
           return // bypass disable
         }
@@ -831,12 +826,11 @@ async function executeJob(job) {
 
     // ─── Skip errors — mark done with skip result ──────
     if (err.message.startsWith('SKIP_')) {
-      await supabase.from('jobs').update({
+      await apiClient.updateJobStatus(job.id, {
         status: 'done',
         result: { skipped: true, reason: err.message },
-        finished_at: new Date(),
         error_message: err.message,
-      }).eq('id', job.id)
+      })
       console.log(`[JOB] Skipped ${job.id}: ${err.message}`)
 
       // Track consecutive skips per campaign+role — prevent infinite loop
@@ -877,21 +871,19 @@ async function executeJob(job) {
     if (canRetry) {
       const retryDelayMs = getRetryDelayMs(classified, nextAttempt - 1)
       const retryAfter = new Date(Date.now() + retryDelayMs)
-      await supabase.from('jobs').update({
+      await apiClient.updateJobStatus(job.id, {
         status: 'pending',
         attempt: nextAttempt,
         scheduled_at: retryAfter.toISOString(),
-        error_message: `[${classified.type}] ${err.message}`
-      }).eq('id', job.id)
+        error_message: `[${classified.type}] ${err.message}`,
+      })
       console.log(`[JOB] Retry #${nextAttempt} in ${Math.ceil(retryDelayMs / 60000)}min [${classified.type}]`)
     } else {
       const reason = !isRetryable(classified) ? classified.type : `max_attempts (${maxAttempts})`
-      await supabase.from('jobs').update({
-        status: 'failed',
-        attempt: nextAttempt,
+      await apiClient.failJob(job.id, {
         error_message: `[${classified.type}] ${err.message}`,
-        finished_at: new Date()
-      }).eq('id', job.id)
+        attempt: nextAttempt,
+      })
       console.log(`[JOB] Failed permanently: ${reason} (${job.id})`)
 
       // Notify user on permanent failure (if alert worthy)
@@ -912,35 +904,24 @@ async function executeJob(job) {
 }
 
 async function updateJobStatus(id, status, result = null, error = null) {
-  await supabase.from('jobs').update({
-    status,
-    ...(result && { result }),
-    ...(error && { error_message: error }),
-    ...(status === 'done' || status === 'failed' ? { finished_at: new Date() } : {})
-  }).eq('id', id)
+  const update = { status }
+  if (result) update.result = result
+  if (error) update.error_message = error
+  await apiClient.updateJobStatus(id, update)
 }
 
 async function recoverStaleJobs() {
-  // Reset jobs stuck in 'claimed' or 'running' for > 10 minutes (agent likely crashed)
-  const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString()
-  const { data: stale } = await supabase
-    .from('jobs')
-    .select('id, type, status, started_at')
-    .in('status', ['claimed', 'running'])
-    .lt('started_at', staleTime)
-
-  for (const job of (stale || [])) {
-    const nextAttempt = (job.attempt || 0) + 1
-    await supabase.from('jobs').update({
-      status: 'pending',
-      agent_id: null,
-      started_at: null,
-      scheduled_at: new Date().toISOString(),
-      attempt: nextAttempt,
-      error_message: 'Agent crashed or timed out, retrying'
-    }).eq('id', job.id)
-    console.log(`[POLLER] Recovered stale job ${job.type} (${job.id}) - was ${job.status} since ${job.started_at}`)
+  // Reset jobs stuck in 'claimed' or 'running' for > 10 minutes (agent likely crashed).
+  // API does the SELECT + UPDATE server-side in one call — saves 2 round trips.
+  try {
+    const res = await apiClient.recoverStaleJobs()
+    if (res?.recovered > 0) {
+      console.log(`[POLLER] Recovered ${res.recovered}/${res.total_stale} stale jobs`)
+    }
+  } catch (err) {
+    console.warn(`[POLLER] recoverStaleJobs failed: ${err.message}`)
   }
+  return
   if ((stale || []).length > 0) {
     console.log(`[POLLER] Recovered ${stale.length} stale jobs`)
   }

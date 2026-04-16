@@ -63,8 +63,9 @@ async function main() {
   }
   console.log('[OK] Supabase connected')
 
-  // Start heartbeat
+  // Start heartbeat (via REST — audit 2026-04-14)
   const { config } = require('./lib/supabase')
+  const apiClient = require('./lib/api-client')
   const AGENT_ID = process.env.AGENT_ID || config.AGENT_ID || `${os.hostname()}-${process.pid}`
   const pkg = require('./package.json')
   let heartbeatFails = 0
@@ -72,25 +73,21 @@ async function main() {
     try {
       const pool = getPool()
       const memUsage = process.memoryUsage()
-      await supabase.from('agent_heartbeats').upsert({
-        agent_id: AGENT_ID,
-        machine_name: os.hostname(),
-        owner_id: process.env.AGENT_USER_ID || null,
-        version: pkg.version,
-        status: 'online',
-        platform: os.platform(),
-        cpu_usage: os.loadavg()[0],
-        mem_usage: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
-        running_jobs: pool.size,
-        running_accounts: [...pool.interactionNicks, ...pool.utilityNicks],
-        jobs_today: pool.jobsToday,
-        jobs_failed: pool.jobsFailed,
-        last_seen_at: new Date().toISOString(),
-        // Keep legacy fields for backward compat
-        last_seen: new Date().toISOString(),
+      await apiClient.heartbeat({
+        agentId: AGENT_ID,
         hostname: os.hostname(),
-        ...(process.env.AGENT_USER_ID && { user_id: process.env.AGENT_USER_ID }),
-      }, { onConflict: 'agent_id' })
+        platform: os.platform(),
+        userId: process.env.AGENT_USER_ID || null,
+        stats: {
+          version: pkg.version,
+          cpu_usage: os.loadavg()[0],
+          mem_usage: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
+          running_jobs: pool.size,
+          running_accounts: [...pool.interactionNicks, ...pool.utilityNicks],
+          jobs_today: pool.jobsToday,
+          jobs_failed: pool.jobsFailed,
+        },
+      })
       if (heartbeatFails > 0) {
         console.log(`[HEARTBEAT] Reconnected after ${heartbeatFails} failures`)
         heartbeatFails = 0
