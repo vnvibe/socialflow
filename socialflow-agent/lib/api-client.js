@@ -99,11 +99,9 @@ async function failJob(jobId, { error_message, attempt } = {}) {
  * POST /agent-jobs/recover-stale — reset jobs stuck in claimed/running > 10 min.
  */
 async function recoverStaleJobs() {
-  const { data } = await client.post('/recover-stale', {}, {
-    // avoid FST_ERR_CTP_EMPTY_JSON_BODY — send raw empty buffer
-    headers: { 'Content-Type': 'application/octet-stream' },
-    data: '',
-  })
+  // Fastify 5 default parser rejects unregistered Content-Types (octet-stream
+  // returns 415). An empty JSON object works — the route ignores the body.
+  const { data } = await client.post('/recover-stale', {})
   return data
 }
 
