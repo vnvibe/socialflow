@@ -3,12 +3,46 @@
 const HERMES_URL = process.env.HERMES_URL || 'http://127.0.0.1:8100'
 const AGENT_SECRET = process.env.AGENT_SECRET
 
+// Map agent's function_name → Hermes skill task_type.
+// Audit 2026-04-14: agent was sending 'relevance_review' but Hermes only has
+// 'relevance_score' → Hermes fell to generic skill → meaningless output. This
+// translation layer keeps the orchestrator's naming stable while matching
+// whatever skills Hermes actually exposes on this deployment.
+const HERMES_SKILL_MAP = {
+  relevance_review: 'relevance_score',
+  group_eval: 'content_eval',
+  profile_eval: 'post_eval',
+  post_strategy: 'action_decision',
+  // passthrough for names that match on both sides
+  comment_gen: 'comment_gen',
+  quality_gate: 'quality_gate',
+  caption_gen: 'caption_gen',
+  content_eval: 'content_eval',
+  lead_score: 'lead_score',
+  reply_gen: 'reply_gen',
+  post_eval: 'post_eval',
+  action_decision: 'action_decision',
+}
+
+function mapSkill(functionName) {
+  if (!functionName) return 'generic'
+  return HERMES_SKILL_MAP[functionName] || 'generic'
+}
+
 function createHermes() {
   return {
-    async chat(model, messages, maxTokens) {
+    /**
+     * @param {string} model - model name (currently ignored — Hermes uses its own config)
+     * @param {Array} messages - chat messages
+     * @param {number} maxTokens
+     * @param {string} [functionName] - agent's function name; mapped to Hermes skill
+     */
+    async chat(model, messages, maxTokens, functionName, config = {}) {
       if (!AGENT_SECRET) {
         throw new Error('AGENT_SECRET not configured — cannot call Hermes')
       }
+
+      const skill = mapSkill(functionName)
 
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 60000)
@@ -24,7 +58,10 @@ function createHermes() {
             messages,
             max_tokens: maxTokens || 500,
             temperature: 0.7,
-            function_name: 'generic',
+            task_type: skill,
+            function_name: functionName || 'generic',
+            account_id: config.account_id,
+            campaign_id: config.campaign_id,
           }),
           signal: controller.signal,
         })
