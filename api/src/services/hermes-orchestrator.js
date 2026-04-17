@@ -190,6 +190,7 @@ async function buildOrchestrationContext(campaignId, supabase) {
     campaign: {
       id: campaign.id,
       name: campaign.name,
+      owner_id: campaign.owner_id || campaign.created_by || null,
       goal: campaign.goal || campaign.mission || null,
       hermes_context: campaign.hermes_context || null,
       brand_config: campaign.brand_config || null,
