@@ -79,7 +79,7 @@ module.exports = async (fastify) => {
 
   // POST /ai/generate - Generic AI generation (supports service-role key OR agent secret)
   fastify.post('/generate', async (req, reply) => {
-    const { function_name, messages, provider, model } = req.body
+    const { function_name, messages, provider, model, account_id, campaign_id } = req.body
     if (!messages?.length) return reply.code(400).send({ error: 'messages required' })
 
     // Allow service-role key, agent secret key, OR authenticated user
@@ -97,7 +97,7 @@ module.exports = async (fastify) => {
       const result = await orchestrator.call(
         function_name || 'caption_gen',
         messages,
-        { ...(provider && { provider }), ...(model && { model }) }
+        { ...(provider && { provider }), ...(model && { model }), account_id, campaign_id }
       )
 
       return {
@@ -679,7 +679,7 @@ Chỉ trả về NỘI DUNG bình luận, không giải thích.`)
   // POST /ai/evaluate - AI Brain quality gate + relevance evaluation
   // Used by agent and frontend to check content/post relevance
   fastify.post('/evaluate', async (req, reply) => {
-    const { type, data: evalData, topic, campaign, ownerId } = req.body
+    const { type, data: evalData, topic, campaign, ownerId, account_id, campaign_id } = req.body
     const userId = ownerId || req.body.user_id || req.user?.id
 
     if (!type || !evalData) {
@@ -692,7 +692,7 @@ Chỉ trả về NỘI DUNG bình luận, không giải thích.`)
       if (type === 'post_relevance') {
         // Evaluate if a post is relevant to campaign topic
         const { post_text, group_name, author } = evalData
-        const result = await orchestrator.generate('relevance_review', [{
+        const result = await orchestrator.call('relevance_review', [{
           role: 'user',
           content: `Đánh giá bài viết này có LIÊN QUAN đến chủ đề "${topic}" không:
 
@@ -704,8 +704,8 @@ Chiến dịch: ${campaign?.name || topic}
 Đối tượng mục tiêu: Người CÓ NHU CẦU về "${topic}" (người mua/dùng)
 
 Trả về JSON:
-{"relevant": true/false, "score": 0-10, "reason": "...", "is_competitor": true/false, "comment_worthy": true/false, "comment_angle": "gợi ý góc bình luận nếu đáng"}`
-        }], { max_tokens: 150, temperature: 0 })
+            "comment_angle": "gợi ý góc bình luận nếu đáng"}`
+        }], { max_tokens: 150, temperature: 0, account_id, campaign_id })
 
         const text = result?.text || ''
         const match = text.match(/\{[\s\S]*?\}/)
@@ -716,7 +716,7 @@ Trả về JSON:
       if (type === 'comment_quality') {
         // Quality gate for generated comment
         const { comment, post_text, group_name } = evalData
-        const result = await orchestrator.generate('caption_gen', [{
+        const result = await orchestrator.call('quality_gate', [{
           role: 'user',
           content: `Đánh giá bình luận Facebook:
 
@@ -730,7 +730,7 @@ Chấm điểm 1-10:
 - value: Mang lại giá trị cho cuộc trò chuyện?
 
 JSON: {"naturalness": N, "relevance": N, "value": N, "approved": true/false, "reason": "..."}`
-        }], { max_tokens: 100, temperature: 0 })
+        }], { max_tokens: 100, temperature: 0, account_id, campaign_id })
 
         const text = result?.text || ''
         const match = text.match(/\{[\s\S]*?\}/)
@@ -745,7 +745,7 @@ JSON: {"naturalness": N, "relevance": N, "value": N, "approved": true/false, "re
       if (type === 'lead_quality') {
         // Score potential lead
         const { name, context: leadContext } = evalData
-        const result = await orchestrator.generate('caption_gen', [{
+        const result = await orchestrator.call('lead_score', [{
           role: 'user',
           content: `Đánh giá người này có phải KHÁCH TIỀM NĂNG cho "${topic}" không:
 

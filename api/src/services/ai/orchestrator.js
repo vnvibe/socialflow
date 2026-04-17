@@ -27,7 +27,7 @@ class AIOrchestrator {
       if (!providerConfig?.enabled || !providerConfig?.api_key) continue
 
       try {
-        return await this.callProvider(providerName, providerConfig, config.model, messages, config.max_tokens)
+        return await this.callProvider(providerName, providerConfig, config.model, messages, config.max_tokens, functionName, config)
       } catch (err) {
         if (err.status === 429 || err.status >= 500) continue
         throw err
@@ -37,7 +37,7 @@ class AIOrchestrator {
     throw new Error('All AI providers are unavailable')
   }
 
-  async callProvider(providerName, providerConfig, model, messages, maxTokens) {
+  async callProvider(providerName, providerConfig, model, messages, maxTokens, functionName, config = {}) {
     const OPENAI_COMPATIBLE = ['openai', 'deepseek', 'groq', 'kimi']
     const PROVIDER_URLS = {
       deepseek: 'https://api.deepseek.com/v1',
@@ -47,7 +47,7 @@ class AIOrchestrator {
 
     if (providerName === 'hermes') {
       const client = createHermes()
-      return client.chat(model, messages, maxTokens)
+      return client.chat(model, messages, maxTokens, functionName, config)
     }
 
     if (OPENAI_COMPATIBLE.includes(providerName)) {
