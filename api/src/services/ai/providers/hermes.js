@@ -10,7 +10,7 @@ const AGENT_SECRET = process.env.AGENT_SECRET
 // whatever skills Hermes actually exposes on this deployment.
 const HERMES_SKILL_MAP = {
   relevance_review: 'relevance_score',
-  group_eval: 'content_eval',
+  group_eval: 'group_evaluator',  // uses the dedicated orchestrator-facing skill
   profile_eval: 'post_eval',
   post_strategy: 'action_decision',
   // passthrough for names that match on both sides
@@ -22,6 +22,10 @@ const HERMES_SKILL_MAP = {
   reply_gen: 'reply_gen',
   post_eval: 'post_eval',
   action_decision: 'action_decision',
+  // Orchestrator-family skills (registered in Hermes TASK_ALIASES 2026-04-14)
+  orchestrator: 'orchestrator',
+  group_evaluator: 'group_evaluator',
+  reporter: 'reporter',
 }
 
 function mapSkill(functionName) {

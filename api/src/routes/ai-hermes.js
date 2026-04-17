@@ -229,8 +229,6 @@ module.exports = async (fastify) => {
   })
 
   fastify.put('/config', { preHandler: fastify.requireAdmin }, async (req, reply) => {
-    const { status, json } = await proxyToHermes('/config', req.body, 10000)
-    // Use PUT method — proxyToHermes only does POST, so roll manual:
     try {
       const res = await fetch(`${HERMES_URL}/config`, {
         method: 'PUT',
@@ -308,6 +306,87 @@ module.exports = async (fastify) => {
       }
     }
     return reply.code(status).send(json)
+  })
+
+  // ─── Orchestrator routes ─────────────────────────────────
+  // POST /ai-hermes/orchestrate/:campaign_id — one-shot run
+  const orchestrator = require('../services/hermes-orchestrator')
+
+  fastify.post('/orchestrate/:campaign_id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const result = await orchestrator.runOrchestration(req.params.campaign_id, fastify.supabase)
+      return result
+    } catch (err) {
+      fastify.log.error({ err }, '[ORCHESTRATOR] Run failed')
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // POST /ai-hermes/report/:campaign_id — generate AI weekly report
+  fastify.post('/report/:campaign_id', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const report = await orchestrator.generateReport(req.params.campaign_id, fastify.supabase)
+      return report
+    } catch (err) {
+      fastify.log.error({ err }, '[ORCHESTRATOR] Report failed')
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // GET /ai-hermes/decisions?campaign_id=&limit=&outcome= — audit log for UI
+  fastify.get('/decisions', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { campaign_id, limit = 50, outcome, decision_type } = req.query
+    let q = fastify.supabase
+      .from('hermes_decisions')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(Math.min(parseInt(limit) || 50, 200))
+    if (campaign_id) q = q.eq('campaign_id', campaign_id)
+    if (outcome) q = q.eq('outcome', outcome)
+    if (decision_type) q = q.eq('decision_type', decision_type)
+    const { data, error } = await q
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
+  // PATCH /ai-hermes/decisions/:id/approve — user approves a pending action
+  fastify.patch('/decisions/:id/approve', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: decision, error: fetchErr } = await fastify.supabase
+      .from('hermes_decisions')
+      .select('*')
+      .eq('id', req.params.id)
+      .single()
+    if (fetchErr || !decision) return reply.code(404).send({ error: 'Not found' })
+    if (decision.auto_applied || decision.outcome === 'user_approved') {
+      return reply.code(400).send({ error: 'Already applied' })
+    }
+    // Build fresh context + execute
+    try {
+      const ctx = await orchestrator.buildOrchestrationContext(decision.campaign_id, fastify.supabase)
+      const r = await orchestrator.executeAction(decision.decision, decision.campaign_id, ctx, fastify.supabase)
+      await fastify.supabase
+        .from('hermes_decisions')
+        .update({
+          auto_applied: r.ok,
+          applied_at: new Date().toISOString(),
+          outcome: r.ok ? 'user_approved' : 'failed',
+          outcome_detail: r.detail,
+        })
+        .eq('id', req.params.id)
+      return { ok: r.ok, detail: r.detail }
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // PATCH /ai-hermes/decisions/:id/reject — user dismisses a pending action
+  fastify.patch('/decisions/:id/reject', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { error } = await fastify.supabase
+      .from('hermes_decisions')
+      .update({ outcome: 'user_rejected', applied_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+    if (error) return reply.code(500).send({ error: error.message })
+    return { ok: true }
   })
 
   // ─── Memory + feedback delete ────────────────────────────

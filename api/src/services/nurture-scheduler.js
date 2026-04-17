@@ -332,6 +332,20 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
+  // HERMES_ORCHESTRATOR.md — every 15 minutes, run Hermes Orchestrator on each
+  // is_active campaign. Hermes decides: assign idle nicks to jobs, skip stale
+  // pending groups, recheck recent pending groups, alert user on checkpoints,
+  // etc. Auto-apply flagged actions fire immediately; others are queued in
+  // hermes_decisions with outcome='pending' for user approval.
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      const { runAllRunningCampaigns } = require('./hermes-orchestrator')
+      await runAllRunningCampaigns(supabase)
+    } catch (err) {
+      console.error('[ORCHESTRATOR] 15-min cron error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // Audit 2026-04-12: Daily warmup budget rebalance at 00:30 VN.
   // Fixes the issue where nick age 3-4 days still had like.max=80 (same as
   // 100-day nicks). Each active account's daily_budget is recomputed from its
