@@ -2,8 +2,10 @@
  * /campaigns — Mission Board.
  * Card grid showing campaigns with Hermes plan summary.
  */
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { Edit, Trash2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import api from '../../lib/api'
 import DenseStat from '../../components/hermes/DenseStat'
 import HermesCaller from '../../components/hermes/HermesCaller'
@@ -17,7 +19,7 @@ const STATUS_COLOR = {
   archived: 'text-app-dim',
 }
 
-function CampaignCard({ campaign, onClick }) {
+function CampaignCard({ campaign, onClick, onEdit, onDelete }) {
   const plan = campaign.plan_summary || campaign.description || campaign.mission || ''
   const status = campaign.status || 'draft'
   const rolesCount = campaign.roles_count ?? campaign.role_count ?? 0
@@ -28,13 +30,36 @@ function CampaignCard({ campaign, onClick }) {
   return (
     <div
       onClick={onClick}
-      className="cursor-pointer p-4 bg-app-surface hover:bg-app-hover transition-colors"
+      className="group relative cursor-pointer p-4 bg-app-surface hover:bg-app-hover transition-colors"
       style={{
         border: '1px solid var(--border)',
         borderLeft: status === 'active' || status === 'running' ? '2px solid var(--hermes)' : '1px solid var(--border)',
       }}
     >
-      <div className="flex items-start justify-between mb-3">
+      {/* Hover quick actions — absolute top-right */}
+      <div
+        className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={() => onEdit(campaign)}
+          className="p-1.5 rounded bg-app-elevated hover:bg-app-hover"
+          style={{ border: '1px solid var(--border)' }}
+          title="Sửa"
+        >
+          <Edit size={12} />
+        </button>
+        <button
+          onClick={() => onDelete(campaign)}
+          className="p-1.5 rounded bg-app-elevated hover:bg-app-hover"
+          style={{ border: '1px solid var(--border)', color: 'var(--danger)' }}
+          title="Xóa"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+
+      <div className="flex items-start justify-between mb-3 pr-20">
         <div className="min-w-0 flex-1">
           <div className="text-app-primary truncate font-ui">{campaign.name}</div>
           <div className="text-[10px] font-mono-ui text-app-muted uppercase tracking-wider mt-0.5">
@@ -82,11 +107,29 @@ export default function MissionBoard() {
     : Array.isArray(d?.results) ? d.results
     : []
 
+  const qc = useQueryClient()
+
   const { data: campaigns = [] } = useQuery({
     queryKey: ['campaigns'],
     queryFn: async () => asArray((await api.get('/campaigns')).data),
     refetchInterval: 30000,
   })
+
+  const deleteMut = useMutation({
+    mutationFn: async (id) => { await api.delete(`/campaigns/${id}`) },
+    onSuccess: () => {
+      toast.success('Đã xóa campaign')
+      qc.invalidateQueries({ queryKey: ['campaigns'] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
+  const handleEdit = (c) => nav(`/campaigns/${c.id}/edit`)
+  const handleDelete = (c) => {
+    if (window.confirm(`Xóa campaign "${c.name}"?\nViệc này không hoàn tác được.`)) {
+      deleteMut.mutate(c.id)
+    }
+  }
 
   const active = campaigns.filter(c => c.status === 'active' || c.status === 'running').length
   const paused = campaigns.filter(c => c.status === 'paused').length
@@ -129,6 +172,8 @@ export default function MissionBoard() {
                 key={c.id}
                 campaign={c}
                 onClick={() => nav(`/campaigns/${c.id}`)}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
               />
             ))}
           </div>

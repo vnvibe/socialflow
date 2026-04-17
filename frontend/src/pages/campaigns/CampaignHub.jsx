@@ -8,7 +8,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Play, Pause, Edit, Loader, Brain, X } from 'lucide-react'
+import { ArrowLeft, Play, Pause, Edit, Loader, Brain, X, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 import DenseStat from '../../components/hermes/DenseStat'
@@ -1510,6 +1510,16 @@ export default function CampaignHub() {
     onError: (err) => toast.error(err.response?.data?.error || err.message),
   })
 
+  const deleteMut = useMutation({
+    mutationFn: async () => { await api.delete(`/campaigns/${id}`) },
+    onSuccess: () => {
+      toast.success('Đã xóa campaign')
+      qc.invalidateQueries({ queryKey: ['campaigns'] })
+      nav('/campaigns')
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -1596,9 +1606,22 @@ export default function CampaignHub() {
           <button
             onClick={() => nav(`/campaigns/${id}/edit`)}
             className="btn-ghost"
-            title="Edit campaign"
+            title="Sửa campaign"
           >
             <Edit size={14} />
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm(`Xóa campaign "${campaign.name}"?\nViệc này không hoàn tác được.`)) {
+                deleteMut.mutate()
+              }
+            }}
+            disabled={deleteMut.isPending}
+            className="btn-ghost"
+            title="Xóa campaign"
+            style={{ color: 'var(--danger)' }}
+          >
+            <Trash2 size={14} />
           </button>
         </div>
 
