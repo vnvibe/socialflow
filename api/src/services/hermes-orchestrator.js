@@ -512,10 +512,262 @@ async function generateReport(campaignId, supabase) {
   return report
 }
 
+// ─── Daily Self-Review ─────────────────────────────────────
+const HERMES_URL2 = process.env.HERMES_URL || 'http://127.0.0.1:8100'
+
+async function hermesPut(path, body) {
+  const res = await fetch(`${HERMES_URL2}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Agent-Key': AGENT_SECRET },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
+  })
+  return { ok: res.ok, status: res.status, json: await res.json().catch(() => ({})) }
+}
+
+async function fetchCurrentSkill(taskType) {
+  try {
+    const res = await fetch(`${HERMES_URL2}/skills/${encodeURIComponent(taskType)}`, {
+      headers: { 'X-Agent-Key': AGENT_SECRET },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return null
+    const j = await res.json()
+    // Returns { task_type, content, file } or similar — the full md text
+    return j.content || j.prompt || j.text || null
+  } catch { return null }
+}
+
+async function buildReviewContext(supabase) {
+  const dayStart = new Date()
+  dayStart.setUTCHours(0, 0, 0, 0)
+  const dayStartIso = dayStart.toISOString()
+  const dateStr = dayStart.toISOString().slice(0, 10)
+
+  // Calls summary per task_type
+  const { data: calls } = await supabase
+    .from('hermes_calls')
+    .select('task_type, latency_ms, ok')
+    .gte('created_at', dayStartIso)
+
+  const callsMap = new Map()
+  for (const c of calls || []) {
+    const e = callsMap.get(c.task_type) || { count: 0, latency_sum: 0, errors: 0 }
+    e.count++
+    e.latency_sum += c.latency_ms || 0
+    if (!c.ok) e.errors++
+    callsMap.set(c.task_type, e)
+  }
+  const calls_summary = [...callsMap.entries()].map(([task_type, e]) => ({
+    task_type,
+    count: e.count,
+    avg_latency_ms: Math.round(e.latency_sum / e.count),
+    error_rate: +(e.errors / e.count).toFixed(3),
+  }))
+
+  // Feedback per task_type (stats)
+  const { data: feedback } = await supabase
+    .from('hermes_feedback')
+    .select('id, task_type, score, reason, output_text, prompt')
+    .gte('created_at', dayStartIso)
+
+  const fbMap = new Map()
+  for (const f of feedback || []) {
+    const e = fbMap.get(f.task_type) || { count: 0, sum: 0, dist: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 } }
+    e.count++
+    e.sum += f.score
+    if (e.dist[f.score] !== undefined) e.dist[f.score]++
+    fbMap.set(f.task_type, e)
+  }
+  const feedback_by_skill = [...fbMap.entries()].map(([task_type, e]) => ({
+    task_type,
+    count: e.count,
+    avg_score: +(e.sum / e.count).toFixed(2),
+    score_dist: e.dist,
+  }))
+
+  // Low-score samples (<=2) for rewrite context + purge candidates
+  const low_score_samples = (feedback || [])
+    .filter(f => f.score <= 2)
+    .slice(0, 30)
+    .map(f => ({
+      id: f.id,
+      task_type: f.task_type,
+      score: f.score,
+      reason: f.reason,
+      output: (f.output_text || '').slice(0, 300),
+      prompt_preview: (f.prompt || '').slice(0, 200),
+    }))
+
+  // Jobs today
+  const { data: todayJobs } = await supabase
+    .from('jobs')
+    .select('status, error_message')
+    .gte('created_at', dayStartIso)
+    .in('status', ['done', 'failed'])
+  const jobs_stats = { done: 0, failed: 0, errors: {} }
+  for (const j of todayJobs || []) {
+    if (j.status === 'done') jobs_stats.done++
+    else if (j.status === 'failed') {
+      jobs_stats.failed++
+      const tag = (j.error_message || 'UNKNOWN').split(':')[0].trim().slice(0, 40)
+      jobs_stats.errors[tag] = (jobs_stats.errors[tag] || 0) + 1
+    }
+  }
+  const total = jobs_stats.done + jobs_stats.failed
+  const success_rate = total > 0 ? +(jobs_stats.done / total).toFixed(3) : null
+  const top_error = Object.entries(jobs_stats.errors).sort((a, b) => b[1] - a[1])[0]?.[0] || null
+
+  // Comment rejection — proxy via campaign_activity_log action_type='comment' vs log of rejections
+  const { count: commentsPosted } = await supabase
+    .from('campaign_activity_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('action_type', 'comment')
+    .gte('created_at', dayStartIso)
+  const { count: commentsRejected } = await supabase
+    .from('campaign_activity_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('action_type', 'comment_rejected')
+    .gte('created_at', dayStartIso)
+  const postedN = commentsPosted || 0
+  const rejectedN = commentsRejected || 0
+  const comment_rejection = {
+    posted: postedN,
+    rejected_by_fb: rejectedN,
+    rejection_rate: postedN + rejectedN > 0 ? +(rejectedN / (postedN + rejectedN)).toFixed(3) : 0,
+  }
+
+  // Fetch current skill prompts for any skill with avg_score < 3.5 (so Hermes can rewrite them)
+  const low_skills = feedback_by_skill.filter(s => s.avg_score < 3.5).map(s => s.task_type)
+  const current_skill_prompts = {}
+  for (const t of low_skills.slice(0, 5)) {
+    const content = await fetchCurrentSkill(t)
+    if (content) current_skill_prompts[t] = content
+  }
+
+  return {
+    date: dateStr,
+    calls_summary,
+    feedback_by_skill,
+    low_score_samples,
+    jobs_stats: { ...jobs_stats, success_rate, top_error },
+    comment_rejection,
+    current_skill_prompts,
+  }
+}
+
+async function applyReviewRecommendations(review, supabase) {
+  const applied = {
+    skills_rewritten: [],
+    skills_rewrite_failed: [],
+    feedback_purged: 0,
+    quality_gate_updated: null,
+  }
+
+  // 1. Rewrite skills with provided new_prompt
+  for (const s of review.skills_to_rewrite || []) {
+    if (!s.task_type || !s.new_prompt) continue
+    try {
+      const r = await hermesPut(`/skills/${encodeURIComponent(s.task_type)}`, { content: s.new_prompt })
+      if (r.ok) applied.skills_rewritten.push({ task_type: s.task_type, reason: s.reason })
+      else applied.skills_rewrite_failed.push({ task_type: s.task_type, status: r.status })
+    } catch (err) {
+      applied.skills_rewrite_failed.push({ task_type: s.task_type, error: err.message })
+    }
+  }
+
+  // 2. Purge low-score feedback rows (direct SQL — Hermes DELETE /feedback is all-or-nothing)
+  const ids = (review.feedback_to_purge || []).map(f => f.id).filter(n => Number.isInteger(n))
+  if (ids.length > 0) {
+    const { error, count } = await supabase
+      .from('hermes_feedback')
+      .delete({ count: 'exact' })
+      .in('id', ids)
+    if (!error) applied.feedback_purged = count || 0
+  }
+
+  // 3. Quality gate threshold — persist to hermes_config table if present, else record only
+  if (review.adjust_quality_gate?.new_threshold != null) {
+    applied.quality_gate_updated = {
+      new_threshold: review.adjust_quality_gate.new_threshold,
+      reason: review.adjust_quality_gate.reason,
+    }
+    // Best-effort: upsert into hermes_config
+    try {
+      await supabase.from('hermes_config').upsert(
+        { key: 'quality_gate_threshold', value: String(review.adjust_quality_gate.new_threshold) },
+        { onConflict: 'key' }
+      )
+    } catch {}
+  }
+
+  // 4. Ask Hermes to hot-reload so rewritten skills take effect immediately
+  if (applied.skills_rewritten.length > 0) {
+    try {
+      await fetch(`${HERMES_URL2}/skills/reload`, {
+        method: 'POST',
+        headers: { 'X-Agent-Key': AGENT_SECRET },
+        signal: AbortSignal.timeout(5000),
+      })
+    } catch {}
+  }
+
+  return applied
+}
+
+async function runDailyReview(supabase) {
+  const started = Date.now()
+  const orchestrationId = randomUUID()
+  const context = await buildReviewContext(supabase)
+
+  const raw = await callHermes('self_reviewer', JSON.stringify(context), 2500)
+  const review = extractJson(raw)
+  if (!review) throw new Error('self_reviewer returned unparseable JSON')
+
+  const applied = await applyReviewRecommendations(review, supabase)
+
+  // Log to hermes_decisions (campaign_id NULL since this is system-wide)
+  await supabase.from('hermes_decisions').insert({
+    campaign_id: null,
+    orchestration_id: orchestrationId,
+    decision_type: 'self_improvement',
+    action_type: 'daily_review',
+    context_summary: review.summary || null,
+    decision: {
+      date: context.date,
+      review,
+      applied,
+      elapsed_ms: Date.now() - started,
+    },
+    auto_apply: true,
+    auto_applied: applied.skills_rewritten.length > 0 || applied.feedback_purged > 0 || applied.quality_gate_updated !== null,
+    applied_at: new Date().toISOString(),
+    outcome: 'success',
+    outcome_detail: review.learning_log_entry || null,
+  })
+
+  console.log(`[SELF-REVIEW] date=${context.date} rewrote=${applied.skills_rewritten.length} purged=${applied.feedback_purged} qgate=${applied.quality_gate_updated ? 'adj' : 'keep'} (${Date.now() - started}ms)`)
+
+  return {
+    orchestration_id: orchestrationId,
+    date: context.date,
+    summary: review.summary,
+    skills_rewritten: applied.skills_rewritten,
+    skills_rewrite_failed: applied.skills_rewrite_failed,
+    feedback_purged: applied.feedback_purged,
+    quality_gate_updated: applied.quality_gate_updated,
+    learning_log_entry: review.learning_log_entry,
+    insights: review.insights || [],
+  }
+}
+
 module.exports = {
   buildOrchestrationContext,
   runOrchestration,
   runAllRunningCampaigns,
   generateReport,
   executeAction,  // exported for tests
+  buildReviewContext,
+  runDailyReview,
+  applyReviewRecommendations,
 }

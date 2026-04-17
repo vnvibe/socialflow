@@ -26,6 +26,7 @@ const HERMES_SKILL_MAP = {
   orchestrator: 'orchestrator',
   group_evaluator: 'group_evaluator',
   reporter: 'reporter',
+  self_reviewer: 'self_reviewer',
 }
 
 function mapSkill(functionName) {

@@ -379,6 +379,32 @@ module.exports = async (fastify) => {
     }
   })
 
+  // POST /ai-hermes/daily-review — self-review: analyze today's performance,
+  // rewrite low-scoring skills, purge bad feedback, adjust quality gate.
+  // Triggered daily at 23:00 VN by the scheduler, but admins can hit manually.
+  fastify.post('/daily-review', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    try {
+      const result = await orchestrator.runDailyReview(fastify.supabase)
+      return result
+    } catch (err) {
+      fastify.log.error({ err }, '[SELF-REVIEW] Failed')
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // GET /ai-hermes/learning-log — "Nhật ký học tập" tab in /hermes page
+  fastify.get('/learning-log', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const limit = Math.min(parseInt(req.query.limit) || 30, 100)
+    const { data, error } = await fastify.supabase
+      .from('hermes_decisions')
+      .select('id, decision_type, action_type, decision, context_summary, auto_applied, outcome, outcome_detail, created_at')
+      .eq('decision_type', 'self_improvement')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || []
+  })
+
   // PATCH /ai-hermes/decisions/:id/reject — user dismisses a pending action
   fastify.patch('/decisions/:id/reject', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { error } = await fastify.supabase

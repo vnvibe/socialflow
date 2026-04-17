@@ -332,6 +332,19 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
+  // Daily Self-Review at 23:00 VN. Hermes inspects its own performance for the
+  // day (calls, feedback scores, job success rate, comment rejection rate),
+  // rewrites skills with avg score < 3.5, purges low-score feedback samples,
+  // and adjusts the quality gate threshold if rejection rate is high.
+  cron.schedule('0 23 * * *', async () => {
+    try {
+      const { runDailyReview } = require('./hermes-orchestrator')
+      await runDailyReview(supabase)
+    } catch (err) {
+      console.error('[SELF-REVIEW] Daily cron error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // HERMES_ORCHESTRATOR.md — every 15 minutes, run Hermes Orchestrator on each
   // is_active campaign. Hermes decides: assign idle nicks to jobs, skip stale
   // pending groups, recheck recent pending groups, alert user on checkpoints,
