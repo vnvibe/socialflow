@@ -5,15 +5,15 @@ import toast from 'react-hot-toast'
 import api from '../../../lib/api'
 
 const TYPE_BADGE = {
-  public: 'bg-green-100 text-green-700',
+  public: 'bg-green-100 text-hermes',
   closed: 'bg-yellow-100 text-yellow-700',
   secret: 'bg-red-100 text-red-700',
 }
 
 // Phase 9 UI helpers
 const TIER_CONFIG = {
-  A: { label: 'A', badge: 'bg-green-100 text-green-700 border-green-200', dot: 'bg-green-500', bar: 'bg-green-500' },
-  B: { label: 'B', badge: 'bg-blue-100 text-blue-700 border-blue-200', dot: 'bg-blue-500', bar: 'bg-blue-500' },
+  A: { label: 'A', badge: 'bg-green-100 text-hermes border-green-200', dot: 'bg-hermes', bar: 'bg-hermes' },
+  B: { label: 'B', badge: 'bg-blue-100 text-blue-700 border-blue-200', dot: 'bg-info', bar: 'bg-info' },
   C: { label: 'C', badge: 'bg-yellow-100 text-yellow-800 border-yellow-200', dot: 'bg-yellow-500', bar: 'bg-yellow-500' },
   D: { label: 'D', badge: 'bg-red-100 text-red-700 border-red-200', dot: 'bg-red-500', bar: 'bg-red-500' },
 }
@@ -204,14 +204,14 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-gray-900">
+        <h2 className="text-lg font-bold text-app-primary">
           Nhom Facebook ({showAll ? `${allGroups.length} tat ca` : `${campaignGroups.length} campaign`})
         </h2>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowAll(!showAll)}
             className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-              showAll ? 'border-purple-200 bg-purple-100 text-purple-700' : 'border-gray-200 text-gray-500 hover:bg-gray-100'
+              showAll ? 'border-purple-200 bg-purple-100 text-purple-700' : 'border-app-border text-app-muted hover:bg-app-elevated'
             }`}
           >
             {showAll ? 'Tat ca nhom' : 'Campaign only'}
@@ -222,7 +222,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
               queryClient.invalidateQueries({ queryKey: ['all-account-groups'] })
             }}
             disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-muted border border-app-border rounded-lg hover:bg-app-elevated disabled:opacity-50"
           >
             <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
             {isLoading ? 'Dang tai...' : 'Refresh'}
@@ -236,7 +236,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
           </button>
           <button
             onClick={() => setShowAdd(!showAdd)}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-info text-white rounded-lg hover:opacity-90 transition-colors"
           >
             <Plus size={14} /> Them nhom
           </button>
@@ -246,18 +246,18 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
       {/* Phase 14: Import from other campaigns modal */}
       {showImport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowImport(false)}>
-          <div className="bg-white rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+          <div className="bg-app-surface rounded w-full max-w-lg max-h-[80vh] flex flex-col " onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-app-border flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-app-primary flex items-center gap-2">
                 <Download size={16} className="text-purple-600" /> Import nhóm từ chiến dịch khác
               </h3>
-              <button onClick={() => { setShowImport(false); setSelectedSourceIds([]) }} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setShowImport(false); setSelectedSourceIds([]) }} className="text-app-dim hover:text-app-muted">
                 <X size={18} />
               </button>
             </div>
 
             <div className="px-5 py-4 overflow-y-auto flex-1">
-              <p className="text-xs text-gray-500 mb-3">
+              <p className="text-xs text-app-muted mb-3">
                 Chọn các chiến dịch nguồn. Nhóm sẽ được copy sang chiến dịch này, dedup theo fb_group_id.
                 Nếu không có nick nào trong CD hiện tại là member của nhóm → sẽ skip (cần scout join trước).
               </p>
@@ -265,7 +265,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
               {refLoading ? (
                 <div className="flex items-center justify-center py-8"><Loader size={20} className="animate-spin text-purple-500" /></div>
               ) : refCampaigns.length === 0 ? (
-                <div className="text-center py-8 text-sm text-gray-400">
+                <div className="text-center py-8 text-sm text-app-dim">
                   Không có chiến dịch nào khác có nhóm
                 </div>
               ) : (
@@ -276,7 +276,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
                       <label
                         key={c.id}
                         className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                          isSelected ? 'border-purple-300 bg-purple-50' : 'border-gray-200 hover:bg-gray-50'
+                          isSelected ? 'border-purple-300 bg-purple-50' : 'border-app-border hover:bg-app-base'
                         }`}
                       >
                         <input
@@ -289,11 +289,11 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
                         />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-medium text-gray-900">{c.name}</span>
-                            {c.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Đang chạy</span>}
-                            {c.language && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{c.language}</span>}
+                            <span className="text-sm font-medium text-app-primary">{c.name}</span>
+                            {c.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-hermes">Đang chạy</span>}
+                            {c.language && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-app-elevated text-app-muted">{c.language}</span>}
                           </div>
-                          <div className="flex items-center gap-3 mt-0.5 text-[11px] text-gray-500">
+                          <div className="flex items-center gap-3 mt-0.5 text-[11px] text-app-muted">
                             {c.topic && <span>Topic: {c.topic}</span>}
                             <span className="font-semibold text-purple-600">{c.groups_count} nhóm</span>
                           </div>
@@ -305,14 +305,14 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
               )}
             </div>
 
-            <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
-              <span className="text-[11px] text-gray-500">
+            <div className="px-5 py-3 border-t border-app-border flex items-center justify-between">
+              <span className="text-[11px] text-app-muted">
                 Đã chọn {selectedSourceIds.length} / {refCampaigns.length} chiến dịch
               </span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => { setShowImport(false); setSelectedSourceIds([]) }}
-                  className="px-4 py-1.5 text-sm text-gray-500 hover:text-gray-700"
+                  className="px-4 py-1.5 text-sm text-app-muted hover:text-app-primary"
                 >
                   Hủy
                 </button>
@@ -331,7 +331,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
       )}
 
       {/* Priority Groups (tier A) */}
-      <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 space-y-3">
+      <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-amber-900 flex items-center gap-2">
             <Star size={14} className="text-amber-500 fill-amber-400" /> Nhóm ưu tiên
@@ -347,7 +347,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
             value={priorityInput}
             onChange={e => setPriorityInput(e.target.value)}
             placeholder="https://facebook.com/groups/123456 hoặc 123456"
-            className="flex-1 px-3 py-2 border border-amber-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            className="flex-1 px-3 py-2 border border-amber-200 rounded-lg text-sm bg-app-surface focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
             onKeyDown={e => { if (e.key === 'Enter' && priorityInput.trim()) addPriorityMut.mutate(priorityInput) }}
           />
           <button
@@ -364,7 +364,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
         ) : priorityGroups.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {priorityGroups.map(g => (
-              <div key={g.fb_group_id} className="inline-flex items-center gap-1.5 bg-white border border-amber-300 rounded-full pl-3 pr-1.5 py-1 text-xs">
+              <div key={g.fb_group_id} className="inline-flex items-center gap-1.5 bg-app-surface border border-amber-300 rounded-full pl-3 pr-1.5 py-1 text-xs">
                 <Star size={10} className="text-amber-500 fill-amber-400" />
                 <a
                   href={g.url || `https://facebook.com/groups/${g.fb_group_id}`}
@@ -391,17 +391,17 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
 
       {/* Add Panel */}
       {showAdd && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 mb-2">Moi dong 1 URL hoac ID nhom</p>
+        <div className="bg-app-surface rounded border border-app-border p-4">
+          <p className="text-xs text-app-muted mb-2">Moi dong 1 URL hoac ID nhom</p>
           <textarea
             value={addInput} onChange={e => setAddInput(e.target.value)} rows={4}
-            className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm font-mono"
+            className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm font-mono"
             placeholder="https://facebook.com/groups/123456"
           />
           <div className="flex justify-end gap-2 mt-2">
-            <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm text-gray-500">Huy</button>
+            <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm text-app-muted">Huy</button>
             <button onClick={() => bulkAddMut.mutate(addInput)} disabled={bulkAddMut.isPending}
-              className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50">
+              className="px-4 py-1.5 bg-info text-white rounded-lg hover:opacity-90 transition-colors text-sm disabled:opacity-50">
               {bulkAddMut.isPending ? 'Dang them...' : 'Them'}
             </button>
           </div>
@@ -414,7 +414,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
           <button
             onClick={() => setTagFilter('')}
             className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-              !tagFilter ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-100'
+              !tagFilter ? 'bg-purple-600 text-white' : 'bg-app-elevated text-app-muted hover:bg-app-elevated'
             }`}
           >
             Tat ca ({groups.length})
@@ -457,13 +457,13 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
                 active
                   ? 'bg-purple-600 text-white border-purple-600'
-                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  : 'bg-app-surface text-app-muted border-app-border hover:bg-app-base'
               }`}
             >
               {tierCfg && <span className={`w-2 h-2 rounded-full ${tierCfg.dot}`} />}
               {t.label}
               <span className={`px-1.5 py-0 rounded-full text-[10px] font-semibold ${
-                active ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'
+                active ? 'bg-app-surface/20 text-white' : 'bg-app-elevated text-app-muted'
               }`}>{count}</span>
             </button>
           )
@@ -472,10 +472,10 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
 
       {/* Search */}
       <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-app-muted" />
         <input type="text" value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Tim theo ten, ID, tag..."
-          className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" />
+          className="w-full pl-9 pr-3 py-2 border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" />
       </div>
 
       {/* Table — Phase 9 responsive */}
@@ -484,8 +484,8 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
             md  (≥768):     + nick                                      → 5 cols
             lg  (≥1024):    + last_nurtured + language                  → 7 cols
       */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="grid grid-cols-[1fr_60px_70px_60px] md:grid-cols-[1fr_60px_70px_120px_60px] lg:grid-cols-[1fr_60px_80px_120px_110px_60px_60px] gap-2 px-4 py-2.5 bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase tracking-wider">
+      <div className="bg-app-surface rounded border border-app-border overflow-hidden">
+        <div className="grid grid-cols-[1fr_60px_70px_60px] md:grid-cols-[1fr_60px_70px_120px_60px] lg:grid-cols-[1fr_60px_80px_120px_110px_60px_60px] gap-2 px-4 py-2.5 bg-app-base border-b text-xs font-semibold text-app-muted uppercase tracking-wider">
           <div>Tên nhóm</div>
           <div>Tier</div>
           <div>Score</div>
@@ -500,7 +500,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
             <Loader size={20} className="animate-spin text-purple-600" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-12 text-gray-500 text-sm">
+          <div className="text-center py-12 text-app-muted text-sm">
             {showAll ? 'Chua co nhom nao' : 'Chua co nhom nao trong campaign. Bam "Tat ca nhom" de gan.'}
           </div>
         ) : (
@@ -519,14 +519,14 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
             return (
               <div
                 key={g.id}
-                className={`grid grid-cols-[1fr_60px_70px_60px] md:grid-cols-[1fr_60px_70px_120px_60px] lg:grid-cols-[1fr_60px_80px_120px_110px_60px_60px] gap-2 px-4 py-2.5 border-b border-gray-100 hover:bg-gray-50 transition-colors items-center text-sm ${
+                className={`grid grid-cols-[1fr_60px_70px_60px] md:grid-cols-[1fr_60px_70px_120px_60px] lg:grid-cols-[1fr_60px_80px_120px_110px_60px_60px] gap-2 px-4 py-2.5 border-b border-app-border hover:bg-app-base transition-colors items-center text-sm ${
                   isDimmed ? 'opacity-50' : ''
                 } ${isBlacklisted ? 'bg-red-50/30' : ''}`}
                 title={aiEval?.reason || g.ai_note || ''}
               >
                 {/* Tên nhóm */}
                 <div className="min-w-0">
-                  <p className="font-medium text-gray-900 truncate">
+                  <p className="font-medium text-app-primary truncate">
                     {g.url ? (
                       <a href={g.url} target="_blank" rel="noopener noreferrer" className="hover:text-purple-700">
                         {g.name || g.fb_group_id}
@@ -534,9 +534,9 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
                     ) : (g.name || g.fb_group_id)}
                   </p>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-gray-400">{g.member_count?.toLocaleString() || '?'} members</span>
+                    <span className="text-[10px] text-app-dim">{g.member_count?.toLocaleString() || '?'} members</span>
                     {g.group_type && (
-                      <span className={`px-1.5 py-0 rounded text-[9px] font-medium ${TYPE_BADGE[g.group_type] || 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`px-1.5 py-0 rounded text-[9px] font-medium ${TYPE_BADGE[g.group_type] || 'bg-app-elevated text-app-muted'}`}>
                         {g.group_type}
                       </span>
                     )}
@@ -556,7 +556,7 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
                       {tierCfg.label}
                     </span>
                   ) : (
-                    <span className="text-[10px] text-gray-300">--</span>
+                    <span className="text-[10px] text-app-dim">--</span>
                   )}
                 </div>
 
@@ -564,16 +564,16 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
                 <div>
                   {score != null ? (
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[11px] text-gray-700 font-medium">{Number(score).toFixed(1)}/10</span>
-                      <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                      <span className="text-[11px] text-app-primary font-medium">{Number(score).toFixed(1)}/10</span>
+                      <div className="w-full h-1 bg-app-elevated rounded-full overflow-hidden">
                         <div
-                          className={`h-full ${tierCfg?.bar || 'bg-gray-300'} transition-all`}
+                          className={`h-full ${tierCfg?.bar || 'bg-app-hover'} transition-all`}
                           style={{ width: `${scorePct}%` }}
                         />
                       </div>
                     </div>
                   ) : (
-                    <span className="text-[10px] text-gray-300">--</span>
+                    <span className="text-[10px] text-app-dim">--</span>
                   )}
                 </div>
 
@@ -590,30 +590,30 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
                           </div>
                         ))}
                         {(g.assigned_nicks?.length || 0) > 4 && (
-                          <div className="w-6 h-6 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-[9px] font-bold border-2 border-white shrink-0">
+                          <div className="w-6 h-6 rounded-full bg-app-hover text-app-muted flex items-center justify-center text-[9px] font-bold border-2 border-white shrink-0">
                             +{g.assigned_nicks.length - 4}
                           </div>
                         )}
                       </div>
                       {(g.assigned_nicks?.length || 0) <= 2 && (
-                        <span className="text-[11px] text-gray-700 truncate ml-1.5">
+                        <span className="text-[11px] text-app-primary truncate ml-1.5">
                           {(g.assigned_nicks || [{ username: g.account_username }]).map(n => n.username).filter(Boolean).join(', ')}
                         </span>
                       )}
                     </div>
                   ) : (
-                    <span className="text-[10px] text-gray-300">--</span>
+                    <span className="text-[10px] text-app-dim">--</span>
                   )}
                 </div>
 
                 {/* Last nurtured — lg+ */}
                 <div className="hidden lg:block">
                   {g.last_nurtured_at ? (
-                    <span className="text-[11px] text-gray-600" title={new Date(g.last_nurtured_at).toLocaleString('vi-VN')}>
+                    <span className="text-[11px] text-app-muted" title={new Date(g.last_nurtured_at).toLocaleString('vi-VN')}>
                       {timeAgo(g.last_nurtured_at)}
                     </span>
                   ) : (
-                    <span className="text-[10px] text-gray-400 italic">Chưa tương tác</span>
+                    <span className="text-[10px] text-app-dim italic">Chưa tương tác</span>
                   )}
                 </div>
 
@@ -622,31 +622,31 @@ export default function GroupsSection({ campaignId, campaign, accountIds }) {
                   {langCfg ? (
                     <>
                       <span className="text-sm leading-none">{langCfg.flag}</span>
-                      <span className="text-[10px] text-gray-500">{langCfg.label}</span>
+                      <span className="text-[10px] text-app-muted">{langCfg.label}</span>
                     </>
                   ) : (
-                    <span className="text-[10px] text-gray-300">--</span>
+                    <span className="text-[10px] text-app-dim">--</span>
                   )}
                 </div>
 
                 {/* Review */}
                 <div className="flex items-center gap-1">
                   {g.user_approved === true ? (
-                    <CheckCircle size={14} className="text-green-600" />
+                    <CheckCircle size={14} className="text-hermes" />
                   ) : g.user_approved === false ? (
                     <XCircle size={14} className="text-red-500" />
                   ) : (
                     <>
                       <button
                         onClick={() => reviewMut.mutate({ groupId: g.id, approved: true })}
-                        className="p-0.5 text-gray-300 hover:text-green-600 transition-colors"
+                        className="p-0.5 text-app-dim hover:text-hermes transition-colors"
                         title="Duyet group nay"
                       >
                         <CheckCircle size={14} />
                       </button>
                       <button
                         onClick={() => reviewMut.mutate({ groupId: g.id, approved: false })}
-                        className="p-0.5 text-gray-300 hover:text-red-500 transition-colors"
+                        className="p-0.5 text-app-dim hover:text-red-500 transition-colors"
                         title="Tu choi group nay"
                       >
                         <XCircle size={14} />

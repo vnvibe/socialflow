@@ -119,9 +119,9 @@ export default function InboxPage() {
   if (pages.length === 0) {
     return (
       <div className="text-center py-16">
-        <Inbox size={48} className="mx-auto mb-4 text-gray-300" />
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Chưa có fanpage nào</h2>
-        <p className="text-sm text-gray-400">Thêm fanpage trước để sử dụng hộp thư</p>
+        <Inbox size={48} className="mx-auto mb-4 text-app-dim" />
+        <h2 className="text-lg font-semibold text-app-primary mb-2">Chưa có fanpage nào</h2>
+        <p className="text-sm text-app-dim">Thêm fanpage trước để sử dụng hộp thư</p>
       </div>
     )
   }
@@ -130,11 +130,11 @@ export default function InboxPage() {
     <div className="h-[calc(100vh-120px)]">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900">Hộp thư</h1>
+          <h1 className="text-2xl font-bold text-app-primary">Hộp thư</h1>
           <select
             value={filterAccountId}
             onChange={e => setFilterAccountId(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-blue-500"
+            className="border border-app-border rounded-lg px-3 py-1.5 text-sm bg-app-surface focus:ring-2 focus:ring-blue-500"
           >
             <option value="">Tất cả nick ({allPages.length} page)</option>
             {accounts.map(a => (
@@ -148,7 +148,7 @@ export default function InboxPage() {
           <button
             onClick={() => fetchInboxMutation.mutate()}
             disabled={fetchInboxMutation.isPending}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+            className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 text-sm"
           >
             <RefreshCw size={14} className={fetchInboxMutation.isPending ? 'animate-spin' : ''} />
             Tải tin mới
@@ -160,7 +160,7 @@ export default function InboxPage() {
         {/* Left: Page list + Message list */}
         <div className="w-80 flex flex-col shrink-0">
           {/* Page list grouped by account */}
-          <div className="bg-white rounded-t-xl shadow-sm border-b overflow-y-auto max-h-48">
+          <div className="bg-app-surface rounded-t-xl  border-b overflow-y-auto max-h-48">
             {(() => {
               // Group pages by account
               const grouped = {}
@@ -173,7 +173,7 @@ export default function InboxPage() {
               return groups.map(([acctName, acctPages]) => (
                 <div key={acctName}>
                   {groups.length > 1 && (
-                    <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase bg-gray-50 border-b">{acctName}</div>
+                    <div className="px-3 py-1.5 text-xs font-semibold text-app-dim uppercase bg-app-base border-b">{acctName}</div>
                   )}
                   {acctPages.map(page => (
                     <button
@@ -181,8 +181,8 @@ export default function InboxPage() {
                       onClick={() => handleSelectPage(page.id)}
                       className={`w-full text-left px-3 py-2 text-sm border-b transition-colors ${
                         selectedPageId === page.id
-                          ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-l-blue-500'
-                          : 'text-gray-700 hover:bg-gray-50'
+                          ? 'bg-blue-50 text-info font-medium border-l-3 border-l-blue-500'
+                          : 'text-app-primary hover:bg-app-base'
                       }`}
                     >
                       <span className="truncate block">{page.name || page.fb_page_id}</span>
@@ -194,15 +194,15 @@ export default function InboxPage() {
           </div>
 
           {/* Message list */}
-          <div className="bg-white rounded-b-xl shadow flex-1 overflow-y-auto">
+          <div className="bg-app-surface rounded-b-xl shadow flex-1 overflow-y-auto">
             {messagesLoading ? (
               <div className="flex justify-center py-8">
                 <div className="animate-spin w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full" />
               </div>
             ) : messages.length === 0 ? (
               <div className="p-8 text-center">
-                <MessageSquare size={32} className="mx-auto mb-2 text-gray-300" />
-                <p className="text-sm text-gray-400">Chưa có tin nhắn</p>
+                <MessageSquare size={32} className="mx-auto mb-2 text-app-dim" />
+                <p className="text-sm text-app-dim">Chưa có tin nhắn</p>
               </div>
             ) : (
               messages.map(msg => (
@@ -216,16 +216,16 @@ export default function InboxPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       {msg.is_read
-                        ? <MailOpen size={14} className="text-gray-400 shrink-0" />
-                        : <Mail size={14} className="text-blue-600 shrink-0" />
+                        ? <MailOpen size={14} className="text-app-dim shrink-0" />
+                        : <Mail size={14} className="text-info shrink-0" />
                       }
-                      <span className={`truncate ${!msg.is_read ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+                      <span className={`truncate ${!msg.is_read ? 'font-semibold text-app-primary' : 'text-app-primary'}`}>
                         {msg.sender_name || 'Không rõ'}
                       </span>
                     </div>
-                    <span className="text-xs text-gray-400 shrink-0">{formatTime(msg.created_at)}</span>
+                    <span className="text-xs text-app-dim shrink-0">{formatTime(msg.created_at)}</span>
                   </div>
-                  <p className={`text-sm mt-1 truncate ${!msg.is_read ? 'text-gray-800' : 'text-gray-500'}`}>
+                  <p className={`text-sm mt-1 truncate ${!msg.is_read ? 'text-app-primary' : 'text-app-muted'}`}>
                     {msg.message || msg.snippet || 'Không có nội dung'}
                   </p>
                 </button>
@@ -235,28 +235,28 @@ export default function InboxPage() {
         </div>
 
         {/* Right: Message detail */}
-        <div className="flex-1 bg-white rounded-xl shadow overflow-hidden flex flex-col">
+        <div className="flex-1 bg-app-surface rounded shadow overflow-hidden flex flex-col">
           {selectedMsg ? (
             <>
-              <div className="p-4 border-b bg-gray-50">
-                <h3 className="font-semibold text-gray-900">{selectedMsg.sender_name || 'Không rõ'}</h3>
-                <p className="text-xs text-gray-500">
-                  {selectedPage && <span className="text-blue-600">{selectedPage.name}</span>}
+              <div className="p-4 border-b bg-app-base">
+                <h3 className="font-semibold text-app-primary">{selectedMsg.sender_name || 'Không rõ'}</h3>
+                <p className="text-xs text-app-muted">
+                  {selectedPage && <span className="text-info">{selectedPage.name}</span>}
                   {selectedMsg.sender_id && <span className="font-mono ml-2">ID: {selectedMsg.sender_id}</span>}
                   {selectedMsg.created_at && <span className="ml-3">{new Date(selectedMsg.created_at).toLocaleString('vi')}</span>}
                 </p>
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                <div className="bg-gray-100 rounded-lg p-4 max-w-[80%]">
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{selectedMsg.message}</p>
-                  <span className="text-xs text-gray-400 mt-2 block">{formatTime(selectedMsg.created_at)}</span>
+                <div className="bg-app-elevated rounded-lg p-4 max-w-[80%]">
+                  <p className="text-sm text-app-primary whitespace-pre-wrap">{selectedMsg.message}</p>
+                  <span className="text-xs text-app-dim mt-2 block">{formatTime(selectedMsg.created_at)}</span>
                 </div>
 
                 {selectedMsg.replies?.map((r, i) => (
-                  <div key={i} className={`rounded-lg p-4 max-w-[80%] ${r.from === 'page' ? 'bg-blue-100 ml-auto' : 'bg-gray-100'}`}>
+                  <div key={i} className={`rounded-lg p-4 max-w-[80%] ${r.from === 'page' ? 'bg-blue-100 ml-auto' : 'bg-app-elevated'}`}>
                     <p className="text-sm whitespace-pre-wrap">{r.text}</p>
-                    <span className="text-xs text-gray-400 mt-2 block">{formatTime(r.created_at)}</span>
+                    <span className="text-xs text-app-dim mt-2 block">{formatTime(r.created_at)}</span>
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
@@ -275,7 +275,7 @@ export default function InboxPage() {
                   <button
                     onClick={handleSendReply}
                     disabled={replyMutation.isPending || !reply.trim()}
-                    className="bg-blue-600 text-white px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                    className="bg-info text-white px-4 rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
                   >
                     <Send size={16} />
                     {replyMutation.isPending ? 'Đang gửi...' : 'Gửi'}
@@ -284,9 +284,9 @@ export default function InboxPage() {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-gray-400">
+            <div className="flex-1 flex items-center justify-center text-app-dim">
               <div className="text-center">
-                <Mail size={48} className="mx-auto mb-3 text-gray-300" />
+                <Mail size={48} className="mx-auto mb-3 text-app-dim" />
                 <p>Chọn tin nhắn để xem</p>
               </div>
             </div>

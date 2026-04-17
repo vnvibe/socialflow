@@ -7,7 +7,7 @@ import api from '../../lib/api'
 import useAgentGuard from '../../hooks/useAgentGuard'
 
 const typeBadge = {
-  public: { icon: Globe, label: 'Công khai', cls: 'bg-green-100 text-green-700' },
+  public: { icon: Globe, label: 'Công khai', cls: 'bg-green-100 text-hermes' },
   closed: { icon: Lock, label: 'Riêng tư', cls: 'bg-yellow-100 text-yellow-700' },
   secret: { icon: Shield, label: 'Bí mật', cls: 'bg-red-100 text-red-700' }
 }
@@ -156,12 +156,12 @@ export default function GroupList() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900">Quản lý nhóm</h1>
+          <h1 className="text-2xl font-bold text-app-primary">Quản lý nhóm</h1>
           {accounts.length > 1 && (
             <select
               value={filterAccountId}
               onChange={e => { setFilterAccountId(e.target.value); setSelected(new Set()) }}
-              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-blue-500"
+              className="border border-app-border rounded-lg px-3 py-1.5 text-sm bg-app-surface focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Tất cả ({groups.length})</option>
               {accounts.map(a => (
@@ -189,30 +189,30 @@ export default function GroupList() {
             {resolving ? <Loader size={18} className="animate-spin" /> : <RefreshCw size={18} />}
             Cập nhật tên nhóm
           </button>
-          <button onClick={() => { setShowBulk(true); setBulkAccountId(defaultAccountId) }} className="flex items-center gap-2 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50">
+          <button onClick={() => { setShowBulk(true); setBulkAccountId(defaultAccountId) }} className="flex items-center gap-2 border border-app-border px-4 py-2 rounded-lg hover:bg-app-base">
             <Upload size={18} /> Thêm hàng loạt
           </button>
-          <button onClick={() => { setShowAdd(true); setForm(f => ({ ...f, account_id: defaultAccountId })) }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+          <button onClick={() => { setShowAdd(true); setForm(f => ({ ...f, account_id: defaultAccountId })) }} className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90">
             <Plus size={18} /> Thêm nhóm
           </button>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow overflow-hidden">
+      <div className="bg-app-surface rounded shadow overflow-hidden">
         <table className="w-full">
-          <thead className="bg-gray-50">
+          <thead className="bg-app-base">
             <tr>
               <th className="px-3 py-3 w-10">
                 <input type="checkbox" checked={filteredGroups.length > 0 && selected.size === filteredGroups.length} onChange={toggleSelectAll}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                  className="rounded border-app-border text-info focus:ring-blue-500" />
               </th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Tên nhóm</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Tài khoản</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Loại nhóm</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Thành viên</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600" title="Bạn có quyền admin trong nhóm này không">Là admin?</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Đăng lần cuối</th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Thao tác</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Tên nhóm</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Tài khoản</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Loại nhóm</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Thành viên</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted" title="Bạn có quyền admin trong nhóm này không">Là admin?</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Đăng lần cuối</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-app-muted">Thao tác</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -221,16 +221,16 @@ export default function GroupList() {
               const BadgeIcon = badge.icon
               const hasName = group.name && group.name !== group.fb_group_id
               return (
-                <tr key={group.id} className={`hover:bg-gray-50 ${selected.has(group.id) ? 'bg-blue-50' : ''}`}>
+                <tr key={group.id} className={`hover:bg-app-base ${selected.has(group.id) ? 'bg-blue-50' : ''}`}>
                   <td className="px-3 py-3">
                     <input type="checkbox" checked={selected.has(group.id)} onChange={() => toggleSelect(group.id)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      className="rounded border-app-border text-info focus:ring-blue-500" />
                   </td>
                   <td className="px-4 py-3 font-medium">
                     <a href={group.url || `https://www.facebook.com/groups/${group.fb_group_id}`} target="_blank" rel="noopener noreferrer"
-                      className="hover:text-blue-600 hover:underline inline-flex items-center gap-1">
-                      {hasName ? group.name : <span className="text-gray-400 italic">{group.fb_group_id || '—'}</span>}
-                      <ExternalLink size={12} className="text-gray-400 shrink-0" />
+                      className="hover:text-info hover:underline inline-flex items-center gap-1">
+                      {hasName ? group.name : <span className="text-app-dim italic">{group.fb_group_id || '—'}</span>}
+                      <ExternalLink size={12} className="text-app-dim shrink-0" />
                     </a>
                   </td>
                   <td className="px-4 py-3 text-sm">{group.accounts?.username || '—'}</td>
@@ -239,26 +239,26 @@ export default function GroupList() {
                       <BadgeIcon size={12} /> {badge.label}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{group.member_count ? group.member_count.toLocaleString() : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-app-muted">{group.member_count ? group.member_count.toLocaleString() : '—'}</td>
                   <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${group.is_admin ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${group.is_admin ? 'bg-blue-100 text-info' : 'bg-app-elevated text-app-muted'}`}>
                       {group.is_admin ? 'Có' : 'Không'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">
+                  <td className="px-4 py-3 text-sm text-app-muted">
                     {group.last_posted_at ? new Date(group.last_posted_at).toLocaleString() : '—'}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button
                         onClick={() => navigate(`/publish?type=group&accountId=${group.account_id}&groupId=${group.id}`)}
-                        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-green-50 text-green-600 hover:bg-green-100"
+                        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-green-50 text-hermes hover:bg-green-100"
                         title="Đăng bài vào nhóm này">
                         <Send size={12} /> Đăng bài
                       </button>
                       <button
                         onClick={() => { if (confirm('Bạn có chắc muốn xoá nhóm này?')) deleteMutation.mutate(group.id) }}
-                        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50">
+                        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md text-app-dim hover:text-red-600 hover:bg-red-50">
                         <Trash2 size={12} /> Xoá
                       </button>
                     </div>
@@ -269,10 +269,10 @@ export default function GroupList() {
             {filteredGroups.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-12 text-center">
-                  <UsersRound size={40} className="mx-auto mb-3 text-gray-300" />
-                  <p className="text-gray-500 mb-2">Chưa có nhóm nào</p>
-                  <p className="text-sm text-gray-400 mb-3">Thêm nhóm Facebook để đăng bài tự động</p>
-                  <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                  <UsersRound size={40} className="mx-auto mb-3 text-app-dim" />
+                  <p className="text-app-muted mb-2">Chưa có nhóm nào</p>
+                  <p className="text-sm text-app-dim mb-3">Thêm nhóm Facebook để đăng bài tự động</p>
+                  <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90 text-sm">
                     <Plus size={16} /> Thêm nhóm đầu tiên
                   </button>
                 </td>
@@ -284,34 +284,34 @@ export default function GroupList() {
 
       {showAdd && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowAdd(false)}>
-          <div className="bg-white rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+          <div className="bg-app-surface rounded p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold mb-4">Thêm nhóm</h2>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tài khoản</label>
+                <label className="block text-sm font-medium text-app-primary mb-1">Tài khoản</label>
                 <select value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })} className="w-full border rounded-lg px-3 py-2">
                   <option value="">Chọn tài khoản Facebook</option>
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.username}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Group URL hoặc ID</label>
+                <label className="block text-sm font-medium text-app-primary mb-1">Group URL hoặc ID</label>
                 <input placeholder="https://facebook.com/groups/123456 hoặc 123456" value={form.input}
                   onChange={e => setForm({ ...form, input: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
                 {form.input && parseGroupInput(form.input) && (
-                  <p className="text-xs text-green-600 mt-1">ID: {parseGroupInput(form.input).fb_group_id}</p>
+                  <p className="text-xs text-hermes mt-1">ID: {parseGroupInput(form.input).fb_group_id}</p>
                 )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tên nhóm (để trống, hệ thống tự tìm)</label>
+                <label className="block text-sm font-medium text-app-primary mb-1">Tên nhóm (để trống, hệ thống tự tìm)</label>
                 <input placeholder="Để trống, Agent sẽ tự tìm tên nhóm" value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowAdd(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Huỷ</button>
+              <button onClick={() => setShowAdd(false)} className="px-4 py-2 border rounded-lg hover:bg-app-base">Huỷ</button>
               <button onClick={handleAdd} disabled={addMutation.isPending || !form.input}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400">
+                className="px-4 py-2 bg-info text-white rounded-lg hover:opacity-90 disabled:bg-blue-400">
                 {addMutation.isPending ? 'Đang thêm...' : 'Thêm nhóm'}
               </button>
             </div>
@@ -321,30 +321,30 @@ export default function GroupList() {
 
       {showBulk && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowBulk(false)}>
-          <div className="bg-white rounded-xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+          <div className="bg-app-surface rounded p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold mb-4">Thêm nhóm hàng loạt</h2>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tài khoản</label>
+                <label className="block text-sm font-medium text-app-primary mb-1">Tài khoản</label>
                 <select value={bulkAccountId} onChange={e => setBulkAccountId(e.target.value)} className="w-full border rounded-lg px-3 py-2">
                   <option value="">Chọn tài khoản Facebook</option>
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.username}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">URLs hoặc IDs (mỗi dòng 1 nhóm)</label>
+                <label className="block text-sm font-medium text-app-primary mb-1">URLs hoặc IDs (mỗi dòng 1 nhóm)</label>
                 <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} rows={8}
                   placeholder={"https://facebook.com/groups/123456\nhttps://facebook.com/groups/789012\n987654321"}
                   className="w-full border rounded-lg px-3 py-2 font-mono text-sm resize-none" />
               </div>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-app-muted">
                 {bulkText.split('\n').filter(l => l.trim()).length} nhóm đã nhập — Agent sẽ tự tìm tên & thông tin sau khi thêm
               </p>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowBulk(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Huỷ</button>
+              <button onClick={() => setShowBulk(false)} className="px-4 py-2 border rounded-lg hover:bg-app-base">Huỷ</button>
               <button onClick={handleBulkAdd} disabled={bulkAddMutation.isPending || !bulkAccountId}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400">
+                className="px-4 py-2 bg-info text-white rounded-lg hover:opacity-90 disabled:bg-blue-400">
                 {bulkAddMutation.isPending ? 'Đang thêm...' : 'Thêm tất cả'}
               </button>
             </div>

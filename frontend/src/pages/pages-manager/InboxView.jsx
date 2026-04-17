@@ -82,22 +82,22 @@ export default function InboxView() {
   return (
     <div>
       <div className="flex items-center gap-4 mb-6">
-        <Link to="/pages" className="text-gray-500 hover:text-gray-700"><ArrowLeft size={20} /></Link>
-        <h1 className="text-2xl font-bold text-gray-900">Inbox — {page?.name || 'Page'}</h1>
-        <button onClick={() => fetchInboxMutation.mutate()} disabled={fetchInboxMutation.isPending} className="ml-auto flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+        <Link to="/pages" className="text-app-muted hover:text-app-primary"><ArrowLeft size={20} /></Link>
+        <h1 className="text-2xl font-bold text-app-primary">Inbox — {page?.name || 'Page'}</h1>
+        <button onClick={() => fetchInboxMutation.mutate()} disabled={fetchInboxMutation.isPending} className="ml-auto flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90">
           <RefreshCw size={16} className={fetchInboxMutation.isPending ? 'animate-spin' : ''} /> Fetch New
         </button>
       </div>
 
       <div className="flex gap-4 h-[calc(100vh-180px)]">
         {/* Left panel - message list */}
-        <div className="w-1/3 bg-white rounded-xl shadow overflow-hidden flex flex-col">
-          <div className="p-3 border-b bg-gray-50">
-            <span className="text-sm text-gray-500">{messages.length} conversations</span>
+        <div className="w-1/3 bg-app-surface rounded shadow overflow-hidden flex flex-col">
+          <div className="p-3 border-b bg-app-base">
+            <span className="text-sm text-app-muted">{messages.length} conversations</span>
           </div>
           <div className="flex-1 overflow-y-auto">
             {messages.length === 0 && (
-              <div className="p-8 text-center text-gray-400">No messages yet</div>
+              <div className="p-8 text-center text-app-dim">No messages yet</div>
             )}
             {messages.map(msg => (
               <button
@@ -109,14 +109,14 @@ export default function InboxView() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    {msg.is_read ? <MailOpen size={14} className="text-gray-400 shrink-0" /> : <Mail size={14} className="text-blue-600 shrink-0" />}
-                    <span className={`truncate ${!msg.is_read ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+                    {msg.is_read ? <MailOpen size={14} className="text-app-dim shrink-0" /> : <Mail size={14} className="text-info shrink-0" />}
+                    <span className={`truncate ${!msg.is_read ? 'font-semibold text-app-primary' : 'text-app-primary'}`}>
                       {msg.sender_name || 'Unknown'}
                     </span>
                   </div>
-                  <span className="text-xs text-gray-400 shrink-0">{formatTime(msg.created_at)}</span>
+                  <span className="text-xs text-app-dim shrink-0">{formatTime(msg.created_at)}</span>
                 </div>
-                <p className={`text-sm mt-1 truncate ${!msg.is_read ? 'text-gray-800' : 'text-gray-500'}`}>
+                <p className={`text-sm mt-1 truncate ${!msg.is_read ? 'text-app-primary' : 'text-app-muted'}`}>
                   {msg.message || msg.snippet || 'No preview'}
                 </p>
               </button>
@@ -125,27 +125,27 @@ export default function InboxView() {
         </div>
 
         {/* Right panel - message detail */}
-        <div className="flex-1 bg-white rounded-xl shadow overflow-hidden flex flex-col">
+        <div className="flex-1 bg-app-surface rounded shadow overflow-hidden flex flex-col">
           {selectedMsg ? (
             <>
-              <div className="p-4 border-b bg-gray-50">
-                <h3 className="font-semibold text-gray-900">{selectedMsg.sender_name || 'Unknown'}</h3>
-                <p className="text-xs text-gray-500">
+              <div className="p-4 border-b bg-app-base">
+                <h3 className="font-semibold text-app-primary">{selectedMsg.sender_name || 'Unknown'}</h3>
+                <p className="text-xs text-app-muted">
                   {selectedMsg.sender_id && <span className="font-mono">ID: {selectedMsg.sender_id}</span>}
                   {selectedMsg.created_at && <span className="ml-3">{new Date(selectedMsg.created_at).toLocaleString()}</span>}
                 </p>
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                <div className="bg-gray-100 rounded-lg p-4 max-w-[80%]">
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{selectedMsg.message}</p>
-                  <span className="text-xs text-gray-400 mt-2 block">{formatTime(selectedMsg.created_at)}</span>
+                <div className="bg-app-elevated rounded-lg p-4 max-w-[80%]">
+                  <p className="text-sm text-app-primary whitespace-pre-wrap">{selectedMsg.message}</p>
+                  <span className="text-xs text-app-dim mt-2 block">{formatTime(selectedMsg.created_at)}</span>
                 </div>
 
                 {selectedMsg.replies?.map((r, i) => (
-                  <div key={i} className={`rounded-lg p-4 max-w-[80%] ${r.from === 'page' ? 'bg-blue-100 ml-auto' : 'bg-gray-100'}`}>
+                  <div key={i} className={`rounded-lg p-4 max-w-[80%] ${r.from === 'page' ? 'bg-blue-100 ml-auto' : 'bg-app-elevated'}`}>
                     <p className="text-sm whitespace-pre-wrap">{r.text}</p>
-                    <span className="text-xs text-gray-400 mt-2 block">{formatTime(r.created_at)}</span>
+                    <span className="text-xs text-app-dim mt-2 block">{formatTime(r.created_at)}</span>
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
@@ -164,7 +164,7 @@ export default function InboxView() {
                   <button
                     onClick={handleSendReply}
                     disabled={replyMutation.isPending || !reply.trim()}
-                    className="bg-blue-600 text-white px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                    className="bg-info text-white px-4 rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
                   >
                     <Send size={16} />
                     {replyMutation.isPending ? 'Sending...' : 'Send'}
@@ -173,9 +173,9 @@ export default function InboxView() {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-gray-400">
+            <div className="flex-1 flex items-center justify-center text-app-dim">
               <div className="text-center">
-                <Mail size={48} className="mx-auto mb-3 text-gray-300" />
+                <Mail size={48} className="mx-auto mb-3 text-app-dim" />
                 <p>Select a message to view</p>
               </div>
             </div>

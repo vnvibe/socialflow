@@ -32,18 +32,18 @@ const ACTION_LABELS = {
 }
 
 const STATUS_COLORS = {
-  success: { bg: 'bg-green-100', text: 'text-green-700', icon: CheckCircle },
+  success: { bg: 'bg-green-100', text: 'text-hermes', icon: CheckCircle },
   failed: { bg: 'bg-red-100', text: 'text-red-700', icon: XCircle },
   skipped: { bg: 'bg-yellow-100', text: 'text-yellow-700', icon: AlertTriangle },
-  done: { bg: 'bg-green-100', text: 'text-green-700', icon: CheckCircle },
+  done: { bg: 'bg-green-100', text: 'text-hermes', icon: CheckCircle },
 }
 
 const JOB_STATUS = {
-  running: { color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
-  done: { color: 'bg-green-100 text-green-700', dot: 'bg-green-500' },
+  running: { color: 'bg-blue-100 text-blue-700', dot: 'bg-info' },
+  done: { color: 'bg-green-100 text-hermes', dot: 'bg-hermes' },
   failed: { color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
   pending: { color: 'bg-yellow-100 text-yellow-700', dot: 'bg-yellow-500' },
-  cancelled: { color: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' },
+  cancelled: { color: 'bg-app-elevated text-app-muted', dot: 'bg-app-hover' },
 }
 
 const SUB_TABS = [
@@ -54,7 +54,7 @@ const SUB_TABS = [
 ]
 
 const AI_ASSESSMENT = {
-  good:    { label: 'Tốt', color: 'bg-green-100 text-green-700' },
+  good:    { label: 'Tốt', color: 'bg-green-100 text-hermes' },
   warning: { label: 'Cảnh báo', color: 'bg-yellow-100 text-yellow-700' },
   critical:{ label: 'Nghiêm trọng', color: 'bg-red-100 text-red-700' },
 }
@@ -252,11 +252,11 @@ export default function MonitorSection({ campaignId, campaign }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-gray-900">Theo doi & Nhat ky</h2>
+        <h2 className="text-lg font-bold text-app-primary">Theo doi & Nhat ky</h2>
         <div className="flex items-center gap-2">
           {pollEnabled && (
-            <span className="flex items-center gap-1 text-[11px] text-green-600">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Đang theo dõi trực tiếp
+            <span className="flex items-center gap-1 text-[11px] text-hermes">
+              <span className="w-1.5 h-1.5 rounded-full bg-hermes animate-pulse" /> Đang theo dõi trực tiếp
             </span>
           )}
           <button
@@ -267,7 +267,7 @@ export default function MonitorSection({ campaignId, campaign }) {
               setUnseenCount(0)
               try { await Promise.all([refetchJobs(), refetchDetail()]) } finally { setRefreshing(false) }
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-muted border border-app-border rounded-lg hover:bg-app-elevated disabled:opacity-50"
           >
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
             {refreshing ? 'Dang tai...' : 'Refresh'}
@@ -276,13 +276,13 @@ export default function MonitorSection({ campaignId, campaign }) {
       </div>
 
       {/* Sub-tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+      <div className="flex gap-1 bg-app-elevated rounded-lg p-1">
         {SUB_TABS.map(t => (
           <button
             key={t.key}
             onClick={() => setSubTab(t.key)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              subTab === t.key ? 'bg-white text-gray-900 shadow-sm rounded-md' : 'text-gray-500 hover:text-gray-700 rounded-md transition-colors'
+              subTab === t.key ? 'bg-app-surface text-app-primary  rounded-md' : 'text-app-muted hover:text-app-primary rounded-md transition-colors'
             }`}
           >
             <t.icon size={14} /> {t.label}
@@ -291,7 +291,7 @@ export default function MonitorSection({ campaignId, campaign }) {
       </div>
 
       {/* Date Filter */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex gap-1 bg-app-elevated rounded-lg p-1 w-fit">
         {[
           { key: 'today', label: 'Hom nay' },
           { key: '3days', label: '3 ngay' },
@@ -301,7 +301,7 @@ export default function MonitorSection({ campaignId, campaign }) {
         ].map(f => (
           <button key={f.key} onClick={() => { setDateFilter(f.key); setDetailPage(1) }}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-              dateFilter === f.key ? 'bg-white text-gray-900 shadow-sm rounded-md' : 'text-gray-500 hover:text-gray-700 rounded-md transition-colors'
+              dateFilter === f.key ? 'bg-app-surface text-app-primary  rounded-md' : 'text-app-muted hover:text-app-primary rounded-md transition-colors'
             }`}>
             {f.label}
           </button>
@@ -323,14 +323,14 @@ export default function MonitorSection({ campaignId, campaign }) {
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                       actionFilter === action
                         ? 'border-purple-200 bg-purple-100 text-purple-700'
-                        : 'border-gray-200 bg-gray-100 text-gray-600 hover:bg-gray-100'
+                        : 'border-app-border bg-app-elevated text-app-muted hover:bg-app-elevated'
                     }`}
                   >
                     <Icon size={12} />
                     <span>{ACTION_LABELS[action] || action}</span>
-                    <span className="text-green-600">{data.success || 0}</span>
+                    <span className="text-hermes">{data.success || 0}</span>
                     {data.failed > 0 && <span className="text-red-500">{data.failed}</span>}
-                    <span className="text-gray-500">({data.total})</span>
+                    <span className="text-app-muted">({data.total})</span>
                   </button>
                 )
               })}
@@ -342,7 +342,7 @@ export default function MonitorSection({ campaignId, campaign }) {
             <select
               value={actionFilter}
               onChange={e => { setActionFilter(e.target.value); setDetailPage(1) }}
-              className="border border-gray-300 rounded-lg bg-white text-gray-700"
+              className="border border-app-border rounded-lg bg-app-surface text-app-primary"
             >
               <option value="">Tat ca action</option>
               {Object.entries(ACTION_LABELS).map(([k, v]) => (
@@ -352,7 +352,7 @@ export default function MonitorSection({ campaignId, campaign }) {
             <select
               value={statusFilter}
               onChange={e => { setStatusFilter(e.target.value); setDetailPage(1) }}
-              className="border border-gray-300 rounded-lg bg-white text-gray-700"
+              className="border border-app-border rounded-lg bg-app-surface text-app-primary"
             >
               <option value="">Tat ca status</option>
               <option value="success">Thanh cong</option>
@@ -360,14 +360,14 @@ export default function MonitorSection({ campaignId, campaign }) {
               <option value="skipped">Bo qua</option>
             </select>
             <div className="flex-1" />
-            <span className="text-xs text-gray-500 self-center">{detailTotal} entries</span>
+            <span className="text-xs text-app-muted self-center">{detailTotal} entries</span>
           </div>
 
           {/* "N entries mới" floating badge */}
           {unseenCount > 0 && (
             <button
               onClick={scrollToTop}
-              className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-full shadow-lg hover:bg-blue-700 animate-bounce"
+              className="sticky top-2 z-10 mx-auto flex items-center gap-1.5 px-3 py-1.5 bg-info text-white text-xs font-medium rounded-full  hover:opacity-90 animate-bounce"
               style={{ width: 'fit-content', display: 'block' }}
             >
               <ArrowUp size={12} className="inline" /> {unseenCount} entries mới
@@ -377,11 +377,11 @@ export default function MonitorSection({ campaignId, campaign }) {
           {/* Detail Log List — grouped by date */}
           <div ref={containerRef} className="space-y-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
             {detailLoading && detailLogs.length === 0 ? (
-              <div className="flex items-center justify-center py-12 bg-white rounded-xl border border-gray-200">
+              <div className="flex items-center justify-center py-12 bg-app-surface rounded border border-app-border">
                 <Loader size={20} className="animate-spin text-purple-600" />
               </div>
             ) : detailLogs.length === 0 ? (
-              <div className="text-center py-12 text-gray-500 text-sm bg-white rounded-xl border border-gray-200">Chua co log</div>
+              <div className="text-center py-12 text-app-muted text-sm bg-app-surface rounded border border-app-border">Chua co log</div>
             ) : (
               Object.entries(
                 detailLogs.reduce((groups, log) => {
@@ -397,11 +397,11 @@ export default function MonitorSection({ campaignId, campaign }) {
                 return (
                   <div key={dateKey}>
                     <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-xs font-semibold text-gray-500 uppercase">{dateLabel}</span>
-                      <div className="flex-1 h-px bg-gray-200" />
-                      <span className="text-xs text-gray-400">{logs.length} entries</span>
+                      <span className="text-xs font-semibold text-app-muted uppercase">{dateLabel}</span>
+                      <div className="flex-1 h-px bg-app-hover" />
+                      <span className="text-xs text-app-dim">{logs.length} entries</span>
                     </div>
-                    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="bg-app-surface rounded border border-app-border overflow-hidden">
                       {logs.map((log, i) => {
                 const ActionIcon = ACTION_ICONS[log.action_type] || Eye
                 const statusCfg = STATUS_COLORS[log.result_status] || STATUS_COLORS.done
@@ -409,25 +409,25 @@ export default function MonitorSection({ campaignId, campaign }) {
                 const isFresh = polledEntries.some(p => p.id === log.id)
 
                 return (
-                  <div key={log.id || i} className={`px-4 py-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 ${isFresh ? 'animate-fadeInLog' : ''}`}>
+                  <div key={log.id || i} className={`px-4 py-3 border-b border-app-border last:border-b-0 hover:bg-app-base ${isFresh ? 'animate-fadeInLog' : ''}`}>
                     {/* Row 1: Action + Status + Target + Account + Time */}
                     <div className="flex items-center gap-2">
                       <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${statusCfg.bg}`}>
                         <ActionIcon size={14} className={statusCfg.text} />
                       </div>
                       <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <span className="text-sm font-medium text-gray-900">
+                        <span className="text-sm font-medium text-app-primary">
                           {ACTION_LABELS[log.action_type] || log.action_type}
                         </span>
                         <StatusIcon size={12} className={statusCfg.text} />
-                        <span className="text-gray-500 mx-1">&rarr;</span>
+                        <span className="text-app-muted mx-1">&rarr;</span>
                         {log.target_url ? (
                           <a href={log.target_url} target="_blank" rel="noopener noreferrer"
                             className="text-sm text-blue-600 hover:underline truncate">
                             {log.target_name || log.target_url}
                           </a>
                         ) : (
-                          <span className="text-sm text-gray-600 truncate">{log.target_name || ''}</span>
+                          <span className="text-sm text-app-muted truncate">{log.target_name || ''}</span>
                         )}
                       </div>
                       {log.account_name && (
@@ -435,7 +435,7 @@ export default function MonitorSection({ campaignId, campaign }) {
                           {log.account_name}
                         </span>
                       )}
-                      <span className="text-xs text-gray-500 shrink-0">
+                      <span className="text-xs text-app-muted shrink-0">
                         {log.created_at ? format(new Date(log.created_at), 'HH:mm:ss') : '--'}
                       </span>
                     </div>
@@ -446,11 +446,11 @@ export default function MonitorSection({ campaignId, campaign }) {
                         {/* Comment text */}
                         {log.details.comment_text && (
                           <div className="flex items-start gap-1.5">
-                            <MessageCircle size={11} className="text-gray-500 mt-0.5 shrink-0" />
-                            <p className="text-xs text-gray-600">
+                            <MessageCircle size={11} className="text-app-muted mt-0.5 shrink-0" />
+                            <p className="text-xs text-app-muted">
                               "{log.details.comment_text}"
                               {log.details.ai_generated !== undefined && (
-                                <span className={`ml-1.5 ${log.details.ai_generated ? 'text-purple-600' : 'text-gray-500'}`}>
+                                <span className={`ml-1.5 ${log.details.ai_generated ? 'text-purple-600' : 'text-app-muted'}`}>
                                   {log.details.ai_generated ? '🤖 AI' : '📝 Template'}
                                 </span>
                               )}
@@ -461,7 +461,7 @@ export default function MonitorSection({ campaignId, campaign }) {
                         {/* Post URL */}
                         {log.details.post_url && (
                           <div className="flex items-center gap-1.5">
-                            <ExternalLink size={11} className="text-gray-500 shrink-0" />
+                            <ExternalLink size={11} className="text-app-muted shrink-0" />
                             <a href={log.details.post_url} target="_blank" rel="noopener noreferrer"
                               className="text-xs text-blue-600 hover:underline truncate">
                               {log.details.post_url.replace('https://www.facebook.com/', '')}
@@ -472,14 +472,14 @@ export default function MonitorSection({ campaignId, campaign }) {
                         {/* Post author */}
                         {log.details.post_author && (
                           <div className="flex items-center gap-1.5">
-                            <Users size={11} className="text-gray-500 shrink-0" />
-                            <span className="text-xs text-gray-500">Bai cua: {log.details.post_author}</span>
+                            <Users size={11} className="text-app-muted shrink-0" />
+                            <span className="text-xs text-app-muted">Bai cua: {log.details.post_author}</span>
                           </div>
                         )}
 
                         {/* Engagement counts */}
                         {(log.details.reactions !== undefined || log.details.comments !== undefined) && (
-                          <div className="flex items-center gap-3 text-xs text-gray-500">
+                          <div className="flex items-center gap-3 text-xs text-app-muted">
                             {log.details.reactions !== undefined && (
                               <span>👍 {log.details.reactions}</span>
                             )}
@@ -491,8 +491,8 @@ export default function MonitorSection({ campaignId, campaign }) {
 
                         {/* AI evaluation details */}
                         {log.details.total_eligible !== undefined && (
-                          <div className="flex items-center gap-2 text-xs text-gray-500">
-                            <Bot size={11} className="text-gray-500 shrink-0" />
+                          <div className="flex items-center gap-2 text-xs text-app-muted">
+                            <Bot size={11} className="text-app-muted shrink-0" />
                             <span>
                               Eligible: {log.details.total_eligible} bai
                               {log.details.selected !== undefined && ` → Chon: ${log.details.selected}`}
@@ -502,8 +502,8 @@ export default function MonitorSection({ campaignId, campaign }) {
 
                         {/* AI filter details */}
                         {log.details.submitted !== undefined && (
-                          <div className="flex items-center gap-2 text-xs text-gray-500">
-                            <Filter size={11} className="text-gray-500 shrink-0" />
+                          <div className="flex items-center gap-2 text-xs text-app-muted">
+                            <Filter size={11} className="text-app-muted shrink-0" />
                             <span>
                               {log.details.accepted}/{log.details.submitted} nhom phu hop
                               {log.details.method && ` (${log.details.method})`}
@@ -529,7 +529,7 @@ export default function MonitorSection({ campaignId, campaign }) {
 
                         {/* Language/skip info */}
                         {log.details.lang && (
-                          <span className="text-xs text-gray-500">Ngon ngu: {log.details.lang} | VN: {log.details.vi_posts}/{log.details.total_posts}</span>
+                          <span className="text-xs text-app-muted">Ngon ngu: {log.details.lang} | VN: {log.details.vi_posts}/{log.details.total_posts}</span>
                         )}
                       </div>
                     )}
@@ -546,33 +546,33 @@ export default function MonitorSection({ campaignId, campaign }) {
           {/* Pagination */}
           {detailPages > 1 && (
             <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">Trang {detailPage}/{detailPages} ({detailTotal} entries)</span>
+              <span className="text-xs text-app-muted">Trang {detailPage}/{detailPages} ({detailTotal} entries)</span>
               <div className="flex gap-1">
                 <button
                   disabled={detailPage <= 1}
                   onClick={() => setDetailPage(1)}
-                  className="px-2 py-1 text-xs bg-gray-50 border border-gray-200 text-gray-600 rounded disabled:opacity-30"
+                  className="px-2 py-1 text-xs bg-app-base border border-app-border text-app-muted rounded disabled:opacity-30"
                 >
                   ««
                 </button>
                 <button
                   disabled={detailPage <= 1}
                   onClick={() => setDetailPage(p => p - 1)}
-                  className="px-2 py-1 text-xs bg-gray-50 border border-gray-200 text-gray-600 rounded disabled:opacity-30"
+                  className="px-2 py-1 text-xs bg-app-base border border-app-border text-app-muted rounded disabled:opacity-30"
                 >
                   «
                 </button>
                 <button
                   disabled={detailPage >= detailPages}
                   onClick={() => setDetailPage(p => p + 1)}
-                  className="px-2 py-1 text-xs bg-gray-50 border border-gray-200 text-gray-600 rounded disabled:opacity-30"
+                  className="px-2 py-1 text-xs bg-app-base border border-app-border text-app-muted rounded disabled:opacity-30"
                 >
                   »
                 </button>
                 <button
                   disabled={detailPage >= detailPages}
                   onClick={() => setDetailPage(detailPages)}
-                  className="px-2 py-1 text-xs bg-gray-50 border border-gray-200 text-gray-600 rounded disabled:opacity-30"
+                  className="px-2 py-1 text-xs bg-app-base border border-app-border text-app-muted rounded disabled:opacity-30"
                 >
                   »»
                 </button>
@@ -600,41 +600,41 @@ export default function MonitorSection({ campaignId, campaign }) {
             </div>
           )}
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-app-surface rounded border border-app-border overflow-hidden">
             {jobsLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader size={20} className="animate-spin text-purple-600" />
               </div>
             ) : jobs.length === 0 ? (
-              <div className="text-center py-12 text-gray-500 text-sm">Chua co job</div>
+              <div className="text-center py-12 text-app-muted text-sm">Chua co job</div>
             ) : (
               jobs.map((job, i) => {
                 const st = JOB_STATUS[job.status] || JOB_STATUS.pending
                 return (
-                  <div key={job.id || i} className="px-4 py-3 border-b border-gray-100 hover:bg-gray-50">
+                  <div key={job.id || i} className="px-4 py-3 border-b border-app-border hover:bg-app-base">
                     <div className="flex items-center gap-3">
                       <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${st.dot}`} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-gray-900">{job.type}</span>
+                          <span className="text-sm font-medium text-app-primary">{job.type}</span>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${st.color}`}>{job.status}</span>
                           {job.role_name && job.role_name !== '-' && (
                             <span className="text-xs text-purple-600">{job.role_name}</span>
                           )}
                         </div>
-                        <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+                        <div className="flex items-center gap-3 mt-0.5 text-xs text-app-muted">
                           <span>{job.account_name}</span>
-                          {job.topic && <span className="text-gray-500">topic: {job.topic}</span>}
+                          {job.topic && <span className="text-app-muted">topic: {job.topic}</span>}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-app-muted">
                           {job.finished_at || job.created_at
                             ? formatDistanceToNow(new Date(job.finished_at || job.created_at), { addSuffix: true, locale: vi })
                             : '--'}
                         </p>
                         {job.started_at && job.finished_at && (
-                          <p className="text-[10px] text-gray-500">
+                          <p className="text-[10px] text-app-muted">
                             {Math.round((new Date(job.finished_at) - new Date(job.started_at)) / 1000)}s
                           </p>
                         )}
@@ -642,7 +642,7 @@ export default function MonitorSection({ campaignId, campaign }) {
                     </div>
                     {/* Job summary */}
                     {job.summary && (
-                      <p className="text-xs text-gray-500 mt-1 ml-5">{job.summary}</p>
+                      <p className="text-xs text-app-muted mt-1 ml-5">{job.summary}</p>
                     )}
                     {job.error_message && (
                       <p className="text-xs text-red-500 mt-1 ml-5">⚠️ {job.error_message}</p>
@@ -661,45 +661,45 @@ export default function MonitorSection({ campaignId, campaign }) {
           {/* Summary cards */}
           {report?.summary && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+              <div className="bg-app-surface rounded border border-app-border p-3 text-center">
                 <p className="text-xl font-bold text-blue-600">{report.summary.total_activities || 0}</p>
-                <p className="text-[10px] text-gray-500 uppercase">Tong tuong tac</p>
+                <p className="text-[10px] text-app-muted uppercase">Tong tuong tac</p>
               </div>
-              <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
-                <p className="text-xl font-bold text-green-600">{report.summary.success_rate ? `${Math.round(report.summary.success_rate)}%` : '-'}</p>
-                <p className="text-[10px] text-gray-500 uppercase">Thanh cong</p>
+              <div className="bg-app-surface rounded border border-app-border p-3 text-center">
+                <p className="text-xl font-bold text-hermes">{report.summary.success_rate ? `${Math.round(report.summary.success_rate)}%` : '-'}</p>
+                <p className="text-[10px] text-app-muted uppercase">Thanh cong</p>
               </div>
-              <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+              <div className="bg-app-surface rounded border border-app-border p-3 text-center">
                 <p className="text-xl font-bold text-purple-600">{report.summary.friends_sent || 0}</p>
-                <p className="text-[10px] text-gray-500 uppercase">Friend Sent</p>
+                <p className="text-[10px] text-app-muted uppercase">Friend Sent</p>
               </div>
-              <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+              <div className="bg-app-surface rounded border border-app-border p-3 text-center">
                 <p className="text-xl font-bold text-orange-600">{report.summary.accept_rate ? `${Math.round(report.summary.accept_rate)}%` : '-'}</p>
-                <p className="text-[10px] text-gray-500 uppercase">Accept Rate</p>
+                <p className="text-[10px] text-app-muted uppercase">Accept Rate</p>
               </div>
             </div>
           )}
 
           {/* Recent Comments */}
           <div>
-            <h3 className="text-sm font-semibold text-gray-600 mb-2 flex items-center gap-1.5">
+            <h3 className="text-sm font-semibold text-app-muted mb-2 flex items-center gap-1.5">
               <MessageCircle size={14} /> Comments ({(report?.recent_comments || []).length})
             </h3>
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="bg-app-surface rounded border border-app-border overflow-hidden">
               {(report?.recent_comments || []).length === 0 ? (
-                <div className="text-center py-8 text-gray-500 text-sm">Chua co comment</div>
+                <div className="text-center py-8 text-app-muted text-sm">Chua co comment</div>
               ) : (
                 (report?.recent_comments || []).slice(0, 20).map((c, i) => (
-                  <div key={i} className="px-4 py-3 border-b border-gray-100">
+                  <div key={i} className="px-4 py-3 border-b border-app-border">
                     <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium text-gray-600">{c.account_name || '?'}</span>
-                      <span className="text-gray-500">&rarr;</span>
-                      <span className="text-gray-500 truncate flex-1">{c.group_name || c.source_name || '?'}</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${c.ai_generated ? 'bg-purple-50 text-purple-700' : 'bg-gray-100 text-gray-500'}`}>
+                      <span className="font-medium text-app-muted">{c.account_name || '?'}</span>
+                      <span className="text-app-muted">&rarr;</span>
+                      <span className="text-app-muted truncate flex-1">{c.group_name || c.source_name || '?'}</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${c.ai_generated ? 'bg-purple-50 text-purple-700' : 'bg-app-elevated text-app-muted'}`}>
                         {c.ai_generated ? '🤖 AI' : '📝 Template'}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-600 mt-1 bg-gray-50 rounded px-2 py-1.5">
+                    <p className="text-xs text-app-muted mt-1 bg-app-base rounded px-2 py-1.5">
                       "{(c.comment_text || '').substring(0, 200)}"
                     </p>
                     {c.post_url && (
@@ -716,19 +716,19 @@ export default function MonitorSection({ campaignId, campaign }) {
 
           {/* Recent Likes */}
           <div>
-            <h3 className="text-sm font-semibold text-gray-600 mb-2 flex items-center gap-1.5">
+            <h3 className="text-sm font-semibold text-app-muted mb-2 flex items-center gap-1.5">
               <ThumbsUp size={14} /> Likes ({(report?.recent_likes || []).length})
             </h3>
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="bg-app-surface rounded border border-app-border overflow-hidden">
               {(report?.recent_likes || []).length === 0 ? (
-                <div className="text-center py-8 text-gray-500 text-sm">Chua co like</div>
+                <div className="text-center py-8 text-app-muted text-sm">Chua co like</div>
               ) : (
                 (report?.recent_likes || []).slice(0, 20).map((l, i) => (
-                  <div key={i} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 text-sm">
+                  <div key={i} className="flex items-center gap-3 px-4 py-2.5 border-b border-app-border text-sm">
                     <ThumbsUp size={12} className="text-blue-600 shrink-0" />
-                    <span className="font-medium text-gray-600">{l.account_name || '?'}</span>
-                    <span className="text-gray-500">&rarr;</span>
-                    <span className="text-gray-500 truncate">{l.group_name || l.target_name || '?'}</span>
+                    <span className="font-medium text-app-muted">{l.account_name || '?'}</span>
+                    <span className="text-app-muted">&rarr;</span>
+                    <span className="text-app-muted truncate">{l.group_name || l.target_name || '?'}</span>
                     {l.post_url && (
                       <a href={l.post_url} target="_blank" rel="noopener noreferrer" className="shrink-0">
                         <ExternalLink size={12} className="text-blue-600" />
@@ -751,7 +751,7 @@ export default function MonitorSection({ campaignId, campaign }) {
             <>
               {/* Phase 17: Daily Plan card */}
               {dailyPlanLog?.details?.plan && (
-                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-4">
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded border border-blue-200 p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-lg">📋</span>
                     <h3 className="text-sm font-semibold text-blue-900">Kế hoạch hôm nay</h3>
@@ -779,9 +779,9 @@ export default function MonitorSection({ campaignId, campaign }) {
                     <div className="flex flex-wrap gap-1.5 mt-2">
                       {dailyPlanLog.details.plan.nick_guidance.map((g, i) => (
                         <span key={i} className={`text-[10px] px-2 py-0.5 rounded font-medium ${
-                          g.mode === 'boost' ? 'bg-green-100 text-green-700' :
+                          g.mode === 'boost' ? 'bg-green-100 text-hermes' :
                           g.mode === 'rest' ? 'bg-red-100 text-red-700' :
-                          'bg-gray-100 text-gray-600'
+                          'bg-app-elevated text-app-muted'
                         }`}>
                           {g.mode === 'boost' ? '🚀' : g.mode === 'rest' ? '😴' : '➡️'} {(g.nick_id || '').slice(0, 8)} {g.mode}
                         </span>
@@ -813,42 +813,42 @@ export default function MonitorSection({ campaignId, campaign }) {
               {/* Summary cards */}
               {aiPilotReport?.summary && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                  <div className="bg-app-surface rounded border border-app-border p-3 text-center">
                     <p className="text-2xl font-bold text-purple-600">{aiPilotReport.summary.total_decisions}</p>
-                    <p className="text-[10px] text-gray-500">Tổng quyết định</p>
+                    <p className="text-[10px] text-app-muted">Tổng quyết định</p>
                   </div>
-                  <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
-                    <p className="text-sm font-bold text-gray-900">
+                  <div className="bg-app-surface rounded border border-app-border p-3 text-center">
+                    <p className="text-sm font-bold text-app-primary">
                       {aiPilotReport.summary.last_fired_at
                         ? formatDistanceToNow(new Date(aiPilotReport.summary.last_fired_at), { locale: vi, addSuffix: true })
                         : 'Chưa fire'}
                     </p>
-                    <p className="text-[10px] text-gray-500">Lần fire cuối</p>
+                    <p className="text-[10px] text-app-muted">Lần fire cuối</p>
                   </div>
-                  <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                  <div className="bg-app-surface rounded border border-app-border p-3 text-center">
                     <p className="text-2xl font-bold text-blue-600">
                       {aiPilotReport.effectiveness?.accuracy_pct != null
                         ? `${aiPilotReport.effectiveness.accuracy_pct}%`
                         : '--'}
                     </p>
-                    <p className="text-[10px] text-gray-500">
+                    <p className="text-[10px] text-app-muted">
                       Hiệu quả ({aiPilotReport.effectiveness?.decisions_that_helped || 0}/{aiPilotReport.effectiveness?.total_settled || 0})
                     </p>
                   </div>
-                  <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                  <div className="bg-app-surface rounded border border-app-border p-3 text-center">
                     <div className="flex items-center justify-center gap-1">
-                      {aiPilotReport.summary.overall_trend === 'improving' && <TrendingUp size={16} className="text-green-600" />}
+                      {aiPilotReport.summary.overall_trend === 'improving' && <TrendingUp size={16} className="text-hermes" />}
                       {aiPilotReport.summary.overall_trend === 'declining' && <TrendingDown size={16} className="text-red-600" />}
-                      {aiPilotReport.summary.overall_trend === 'stable' && <Minus size={16} className="text-gray-500" />}
+                      {aiPilotReport.summary.overall_trend === 'stable' && <Minus size={16} className="text-app-muted" />}
                       <p className={`text-sm font-bold ${
-                        aiPilotReport.summary.overall_trend === 'improving' ? 'text-green-600' :
-                        aiPilotReport.summary.overall_trend === 'declining' ? 'text-red-600' : 'text-gray-700'
+                        aiPilotReport.summary.overall_trend === 'improving' ? 'text-hermes' :
+                        aiPilotReport.summary.overall_trend === 'declining' ? 'text-red-600' : 'text-app-primary'
                       }`}>
                         {aiPilotReport.summary.overall_trend === 'improving' ? 'Cải thiện' :
                          aiPilotReport.summary.overall_trend === 'declining' ? 'Giảm' : 'Ổn định'}
                       </p>
                     </div>
-                    <p className="text-[10px] text-gray-500">Xu hướng 3d</p>
+                    <p className="text-[10px] text-app-muted">Xu hướng 3d</p>
                   </div>
                 </div>
               )}
@@ -857,7 +857,7 @@ export default function MonitorSection({ campaignId, campaign }) {
                   This AI Pilot tab now only shows strategy memories + performance stats.
                   Keep aiPilotLogs variable out of render; the tab Hermes in CampaignHub is
                   the single source of truth for orchestrator decisions. */}
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-sm text-purple-900">
+              <div className="bg-purple-50 border border-purple-200 rounded p-4 text-sm text-purple-900">
                 <div className="font-medium mb-1">📋 Quyết định của Hermes đã chuyển</div>
                 <div className="text-xs text-purple-700">
                   Xem tab <strong>Hermes</strong> trong Campaign Hub để theo dõi quyết định
@@ -866,43 +866,43 @@ export default function MonitorSection({ campaignId, campaign }) {
               </div>
               {false && aiPilotLogs.length > 0 && (
                 <div className="space-y-2">
-                  <h3 className="text-xs font-semibold text-gray-500 uppercase">Quyết định gần đây ({aiPilotLogs.length})</h3>
+                  <h3 className="text-xs font-semibold text-app-muted uppercase">Quyết định gần đây ({aiPilotLogs.length})</h3>
                   {aiPilotLogs.map((d, idx) => {
-                    const assessment = AI_ASSESSMENT[d.assessment] || { label: d.assessment || '?', color: 'bg-gray-100 text-gray-600' }
+                    const assessment = AI_ASSESSMENT[d.assessment] || { label: d.assessment || '?', color: 'bg-app-elevated text-app-muted' }
                     const isExpanded = expandedPilot === idx
                     const effBadge = d.was_effective === true
-                      ? { text: '✅ Hiệu quả', cls: 'bg-green-100 text-green-700' }
+                      ? { text: '✅ Hiệu quả', cls: 'bg-green-100 text-hermes' }
                       : d.was_effective === false
                         ? { text: '❌ Không hiệu quả', cls: 'bg-red-100 text-red-700' }
-                        : { text: '⏳ Chờ đánh giá', cls: 'bg-gray-100 text-gray-500' }
+                        : { text: '⏳ Chờ đánh giá', cls: 'bg-app-elevated text-app-muted' }
 
                     return (
-                      <div key={d.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      <div key={d.id} className="bg-app-surface rounded border border-app-border overflow-hidden">
                         <button
                           onClick={() => setExpandedPilot(isExpanded ? null : idx)}
-                          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+                          className="w-full flex items-center justify-between px-4 py-3 hover:bg-app-base transition-colors"
                         >
                           <div className="flex items-center gap-2 flex-wrap">
                             <Brain size={16} className="text-purple-500" />
-                            <span className="text-sm font-medium text-gray-900">Run #{d.run_number || '?'}</span>
+                            <span className="text-sm font-medium text-app-primary">Run #{d.run_number || '?'}</span>
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${assessment.color}`}>
                               {assessment.label}
                             </span>
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${effBadge.cls}`}>
                               {effBadge.text}
                             </span>
-                            <span className="text-xs text-gray-400">{d.applied_count || 0} applied</span>
+                            <span className="text-xs text-app-dim">{d.applied_count || 0} applied</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-gray-400">
+                            <span className="text-[10px] text-app-dim">
                               {d.fired_at ? formatDistanceToNow(new Date(d.fired_at), { locale: vi, addSuffix: true }) : ''}
                             </span>
-                            {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                            {isExpanded ? <ChevronUp size={14} className="text-app-dim" /> : <ChevronDown size={14} className="text-app-dim" />}
                           </div>
                         </button>
 
                         {isExpanded && (
-                          <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-3">
+                          <div className="px-4 pb-4 border-t border-app-border pt-3 space-y-3">
                             {d.recommendation && (
                               <div className="bg-blue-50 rounded-lg px-3 py-2">
                                 <p className="text-xs font-medium text-blue-700 mb-0.5">Đề xuất</p>
@@ -912,18 +912,18 @@ export default function MonitorSection({ campaignId, campaign }) {
 
                             {d.adjustments?.length > 0 && (
                               <div>
-                                <p className="text-xs font-medium text-gray-500 mb-1.5">Điều chỉnh ({d.adjustments.length})</p>
+                                <p className="text-xs font-medium text-app-muted mb-1.5">Điều chỉnh ({d.adjustments.length})</p>
                                 <div className="space-y-1.5">
                                   {d.adjustments.map((adj, i) => (
-                                    <div key={i} className="flex items-start gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                                    <div key={i} className="flex items-start gap-2 bg-app-base rounded-lg px-3 py-2">
                                       <span className="text-lg leading-none mt-0.5">{AI_ACTION_ICONS[adj.action] || '•'}</span>
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
-                                          <span className="text-xs font-mono text-gray-500">{(adj.role_id || '').slice(0, 8)}</span>
-                                          <span className="text-xs font-medium text-gray-900">{adj.action}</span>
-                                          {adj.field && <span className="text-[10px] text-gray-400">{adj.field}={adj.new_value ?? adj.value}</span>}
+                                          <span className="text-xs font-mono text-app-muted">{(adj.role_id || '').slice(0, 8)}</span>
+                                          <span className="text-xs font-medium text-app-primary">{adj.action}</span>
+                                          {adj.field && <span className="text-[10px] text-app-dim">{adj.field}={adj.new_value ?? adj.value}</span>}
                                         </div>
-                                        {adj.reason && <p className="text-xs text-gray-500 mt-0.5">{adj.reason}</p>}
+                                        {adj.reason && <p className="text-xs text-app-muted mt-0.5">{adj.reason}</p>}
                                       </div>
                                     </div>
                                   ))}
@@ -934,24 +934,24 @@ export default function MonitorSection({ campaignId, campaign }) {
                             {/* Effectiveness windows */}
                             {(d.before_window?.total > 0 || d.after_window?.total > 0) && (
                               <div className="grid grid-cols-2 gap-2">
-                                <div className="bg-gray-50 rounded-lg px-3 py-2">
-                                  <p className="text-[10px] text-gray-500 mb-0.5">24h TRƯỚC</p>
-                                  <p className="text-xs text-gray-900">{d.before_window.total} actions</p>
+                                <div className="bg-app-base rounded-lg px-3 py-2">
+                                  <p className="text-[10px] text-app-muted mb-0.5">24h TRƯỚC</p>
+                                  <p className="text-xs text-app-primary">{d.before_window.total} actions</p>
                                   {d.before_window.success_rate != null && (
-                                    <p className="text-[10px] text-gray-500">{Math.round(d.before_window.success_rate * 100)}% success</p>
+                                    <p className="text-[10px] text-app-muted">{Math.round(d.before_window.success_rate * 100)}% success</p>
                                   )}
                                 </div>
-                                <div className="bg-gray-50 rounded-lg px-3 py-2">
-                                  <p className="text-[10px] text-gray-500 mb-0.5">24h SAU</p>
-                                  <p className="text-xs text-gray-900">{d.after_window.total} actions</p>
+                                <div className="bg-app-base rounded-lg px-3 py-2">
+                                  <p className="text-[10px] text-app-muted mb-0.5">24h SAU</p>
+                                  <p className="text-xs text-app-primary">{d.after_window.total} actions</p>
                                   {d.after_window.success_rate != null && (
-                                    <p className="text-[10px] text-gray-500">{Math.round(d.after_window.success_rate * 100)}% success</p>
+                                    <p className="text-[10px] text-app-muted">{Math.round(d.after_window.success_rate * 100)}% success</p>
                                   )}
                                 </div>
                               </div>
                             )}
 
-                            <div className="flex items-center gap-4 text-[10px] text-gray-400">
+                            <div className="flex items-center gap-4 text-[10px] text-app-dim">
                               <span>Activities phân tích: {d.activity_count || '?'}</span>
                               <span>{d.fired_at ? format(new Date(d.fired_at), 'dd/MM HH:mm', { locale: vi }) : ''}</span>
                             </div>
@@ -965,8 +965,8 @@ export default function MonitorSection({ campaignId, campaign }) {
 
               {/* Memory panel */}
               {aiPilotReport?.current_strategy?.memories_count > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
-                  <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">
+                <div className="bg-app-surface rounded border border-app-border p-4">
+                  <h3 className="text-xs font-semibold text-app-muted uppercase mb-3">
                     AI Memories ({aiPilotReport.current_strategy.memories_count})
                   </h3>
                   <div className="space-y-2">
@@ -977,31 +977,31 @@ export default function MonitorSection({ campaignId, campaign }) {
                         : type === 'group_response' ? 'Group response'
                         : type
                       return (
-                        <div key={type} className="border border-gray-100 rounded-lg overflow-hidden">
+                        <div key={type} className="border border-app-border rounded-lg overflow-hidden">
                           <button
                             onClick={() => setExpandedMemType(isOpen ? null : type)}
-                            className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-50"
+                            className="w-full flex items-center justify-between px-3 py-2 hover:bg-app-base"
                           >
-                            <span className="text-xs font-medium text-gray-700">{typeLabel} <span className="text-gray-400">({mems.length})</span></span>
-                            {isOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                            <span className="text-xs font-medium text-app-primary">{typeLabel} <span className="text-app-dim">({mems.length})</span></span>
+                            {isOpen ? <ChevronUp size={14} className="text-app-dim" /> : <ChevronDown size={14} className="text-app-dim" />}
                           </button>
                           {isOpen && (
-                            <div className="border-t border-gray-100 divide-y divide-gray-50">
+                            <div className="border-t border-app-border divide-y divide-gray-50">
                               {mems.map(m => (
                                 <div key={m.id} className="flex items-start gap-2 px-3 py-2 text-xs">
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 flex-wrap">
-                                      <span className="font-mono font-medium text-gray-800">{m.key}</span>
+                                      <span className="font-mono font-medium text-app-primary">{m.key}</span>
                                       <span className="text-[10px] text-purple-600">{Math.round((m.confidence || 0) * 100)}% confidence</span>
-                                      <span className="text-[10px] text-gray-400">{m.evidence_count || 0} evidence</span>
+                                      <span className="text-[10px] text-app-dim">{m.evidence_count || 0} evidence</span>
                                     </div>
-                                    <p className="text-[11px] text-gray-600 mt-0.5 break-words">
+                                    <p className="text-[11px] text-app-muted mt-0.5 break-words">
                                       {typeof m.value === 'string' ? m.value : JSON.stringify(m.value).slice(0, 200)}
                                     </p>
                                   </div>
                                   <button
                                     onClick={() => { if (confirm('Xóa memory này?')) deleteMemoryMut.mutate(m.id) }}
-                                    className="p-1 text-gray-300 hover:text-red-500 transition-colors"
+                                    className="p-1 text-app-dim hover:text-red-500 transition-colors"
                                     title="Xóa memory"
                                   >
                                     <Trash2 size={12} />

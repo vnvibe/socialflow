@@ -118,19 +118,19 @@ export default function ContentPublishModal({ contentId, content, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-app-surface rounded w-full max-w-lg  max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+        <div className="flex items-center justify-between p-4 border-b border-app-border">
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-gray-900">Đăng nội dung</h3>
+            <h3 className="font-semibold text-app-primary">Đăng nội dung</h3>
             {content && (
-              <p className="text-xs text-gray-500 mt-0.5 truncate">
+              <p className="text-xs text-app-muted mt-0.5 truncate">
                 {content.caption ? content.caption.slice(0, 60) + (content.caption.length > 60 ? '...' : '') : 'Không có nội dung'}
               </p>
             )}
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-            <X className="w-5 h-5 text-gray-500" />
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-app-elevated transition-colors">
+            <X className="w-5 h-5 text-app-muted" />
           </button>
         </div>
 
@@ -139,34 +139,34 @@ export default function ContentPublishModal({ contentId, content, onClose }) {
           {/* Target selection */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-gray-700">
+              <label className="text-sm font-medium text-app-primary">
                 Chọn nơi đăng <span className="text-blue-600">({selectedTargets.length})</span>
               </label>
               <div className="flex items-center gap-2 text-xs">
                 <button onClick={selectAll} className="text-blue-600 hover:text-blue-700">Chọn tất cả</button>
-                <button onClick={deselectAll} className="text-gray-500 hover:text-gray-700">Bỏ chọn</button>
+                <button onClick={deselectAll} className="text-app-muted hover:text-app-primary">Bỏ chọn</button>
               </div>
             </div>
 
             {/* Search + filter */}
             <div className="flex items-center gap-2 mb-2">
               <div className="flex-1 relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-app-dim" />
                 <input
                   type="text"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Tìm trang/nhóm..."
-                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
-              <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
+              <div className="flex gap-0.5 bg-app-elevated rounded-lg p-0.5">
                 {filterTabs.map(tab => (
                   <button
                     key={tab.key}
                     onClick={() => setFilterType(tab.key)}
                     className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
-                      filterType === tab.key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                      filterType === tab.key ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'
                     }`}
                   >
                     {tab.label}
@@ -177,45 +177,45 @@ export default function ContentPublishModal({ contentId, content, onClose }) {
 
             {/* Target list */}
             {hasTargets ? (
-              <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-lg divide-y">
+              <div className="max-h-52 overflow-y-auto border border-app-border rounded-lg divide-y">
                 {filteredTargets.map(target => (
                   <label
                     key={`${target.type}-${target.id}`}
                     className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${
-                      isSelected(target) ? 'bg-blue-50' : 'hover:bg-gray-50'
+                      isSelected(target) ? 'bg-blue-50' : 'hover:bg-app-base'
                     }`}
                   >
                     <input
                       type="checkbox"
                       checked={isSelected(target)}
                       onChange={() => toggleTarget(target)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="rounded border-app-border text-blue-600 focus:ring-blue-500"
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         {target.type === 'page'
                           ? <FileText className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                          : <UsersRound className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                          : <UsersRound className="w-3.5 h-3.5 text-hermes shrink-0" />
                         }
-                        <span className="text-sm text-gray-800 truncate">{target.name}</span>
+                        <span className="text-sm text-app-primary truncate">{target.name}</span>
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-gray-400">{target.accountName}</span>
-                        {target.info && <span className="text-xs text-gray-400">&middot; {target.info}</span>}
+                        <span className="text-xs text-app-dim">{target.accountName}</span>
+                        {target.info && <span className="text-xs text-app-dim">&middot; {target.info}</span>}
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {target.type === 'page' && (
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                          target.postingMethod === 'access_token' ? 'bg-green-100 text-green-600' :
+                          target.postingMethod === 'access_token' ? 'bg-green-100 text-hermes' :
                           target.postingMethod === 'cookie' ? 'bg-orange-100 text-orange-600' :
-                          'bg-gray-100 text-gray-500'
+                          'bg-app-elevated text-app-muted'
                         }`}>
                           {target.postingMethod === 'access_token' ? 'API' : target.postingMethod === 'cookie' ? 'Cookie' : 'Auto'}
                         </span>
                       )}
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                        target.type === 'page' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'
+                        target.type === 'page' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-hermes'
                       }`}>
                         {target.type === 'page' ? 'Trang' : 'Nhóm'}
                       </span>
@@ -223,15 +223,15 @@ export default function ContentPublishModal({ contentId, content, onClose }) {
                   </label>
                 ))}
                 {filteredTargets.length === 0 && (
-                  <p className="text-xs text-gray-400 text-center py-6">Không tìm thấy trang/nhóm nào</p>
+                  <p className="text-xs text-app-dim text-center py-6">Không tìm thấy trang/nhóm nào</p>
                 )}
               </div>
             ) : (
-              <div className="text-center py-6 border border-gray-200 rounded-lg">
-                <p className="text-sm text-gray-500 mb-2">Chưa có trang/nhóm nào</p>
+              <div className="text-center py-6 border border-app-border rounded-lg">
+                <p className="text-sm text-app-muted mb-2">Chưa có trang/nhóm nào</p>
                 <div className="flex items-center justify-center gap-2">
                   <Link to="/pages" onClick={onClose} className="text-xs text-blue-600 hover:underline">Thêm trang</Link>
-                  <span className="text-xs text-gray-300">|</span>
+                  <span className="text-xs text-app-dim">|</span>
                   <Link to="/groups" onClick={onClose} className="text-xs text-blue-600 hover:underline">Thêm nhóm</Link>
                 </div>
               </div>
@@ -245,10 +245,10 @@ export default function ContentPublishModal({ contentId, content, onClose }) {
                 type="checkbox"
                 checked={showSchedule}
                 onChange={e => setShowSchedule(e.target.checked)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                className="rounded border-app-border text-blue-600 focus:ring-blue-500"
               />
-              <Clock className="w-4 h-4 text-gray-500" />
-              <span className="text-sm text-gray-700">Hẹn giờ đăng bài</span>
+              <Clock className="w-4 h-4 text-app-muted" />
+              <span className="text-sm text-app-primary">Hẹn giờ đăng bài</span>
             </label>
             {showSchedule && (
               <>
@@ -257,9 +257,9 @@ export default function ContentPublishModal({ contentId, content, onClose }) {
                   value={scheduledAt}
                   onChange={e => setScheduledAt(e.target.value)}
                   min={new Date().toISOString().slice(0, 16)}
-                  className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="mt-2 w-full rounded-lg border border-app-border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
-                <p className="text-xs text-gray-400 mt-1">Để trống sẽ đăng ngay lập tức</p>
+                <p className="text-xs text-app-dim mt-1">Để trống sẽ đăng ngay lập tức</p>
               </>
             )}
           </div>
@@ -273,17 +273,17 @@ export default function ContentPublishModal({ contentId, content, onClose }) {
         )}
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-200 flex items-center justify-between">
+        <div className="p-4 border-t border-app-border flex items-center justify-between">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+            className="px-4 py-2 text-sm rounded-lg border border-app-border text-app-muted hover:bg-app-base transition-colors"
           >
             Huỷ
           </button>
           <button
             onClick={() => publishMutation.mutate()}
             disabled={publishMutation.isPending || selectedTargets.length === 0}
-            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400 transition-colors"
           >
             {publishMutation.isPending ? (
               <Loader className="w-4 h-4 animate-spin" />

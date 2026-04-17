@@ -63,13 +63,13 @@ export default function SpintaxEditor({ value, onChange, rows = 6, placeholder }
           onChange={(e) => onChange(e.target.value)}
           rows={rows}
           placeholder={placeholder || 'Enter text with {option1|option2} spintax syntax...'}
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
+          className="w-full rounded-lg border border-app-border px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
         />
       </div>
 
       {/* Highlighted preview of spintax tokens */}
       {value && (
-        <div className="text-sm text-gray-600 leading-relaxed p-3 bg-gray-50 rounded-lg whitespace-pre-wrap">
+        <div className="text-sm text-app-muted leading-relaxed p-3 bg-app-base rounded-lg whitespace-pre-wrap">
           {highlightSpintax(value)}
         </div>
       )}
@@ -79,7 +79,7 @@ export default function SpintaxEditor({ value, onChange, rows = 6, placeholder }
         <button
           type="button"
           onClick={handlePreview}
-          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-app-elevated text-app-primary hover:bg-app-hover transition-colors"
         >
           {showPreview ? (
             <EyeOff className="w-3.5 h-3.5" />
@@ -103,11 +103,11 @@ export default function SpintaxEditor({ value, onChange, rows = 6, placeholder }
 
       {/* Resolved preview */}
       {showPreview && (
-        <div className="p-4 bg-white border border-gray-200 rounded-lg">
-          <p className="text-xs font-medium text-gray-500 mb-1">
+        <div className="p-4 bg-app-surface border border-app-border rounded-lg">
+          <p className="text-xs font-medium text-app-muted mb-1">
             Resolved Preview
           </p>
-          <p className="text-sm text-gray-800 whitespace-pre-wrap">
+          <p className="text-sm text-app-primary whitespace-pre-wrap">
             {previewText || '(empty)'}
           </p>
         </div>

@@ -166,14 +166,14 @@ export default function QuickPost({ accountId, target, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center">
-      <div className="bg-white w-full sm:rounded-2xl sm:max-w-lg sm:mx-4 shadow-2xl max-h-[95vh] sm:max-h-[90vh] flex flex-col rounded-t-2xl">
+      <div className="bg-app-surface w-full sm:rounded sm:max-w-lg sm:mx-4  max-h-[95vh] sm:max-h-[90vh] flex flex-col rounded-t-2xl">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-app-border shrink-0">
           <div className="min-w-0 flex-1">
-            <h3 className="font-semibold text-gray-900 text-base">Dang bai</h3>
-            <p className="text-xs text-gray-500 truncate">
-              {targetLabel[target.type]}: <span className="font-medium text-gray-700">{target.name}</span>
+            <h3 className="font-semibold text-app-primary text-base">Dang bai</h3>
+            <p className="text-xs text-app-muted truncate">
+              {targetLabel[target.type]}: <span className="font-medium text-app-primary">{target.name}</span>
             </p>
           </div>
           {/* Cookie / Graph API toggle */}
@@ -183,15 +183,15 @@ export default function QuickPost({ accountId, target, onClose }) {
               className="flex items-center gap-1.5 cursor-pointer select-none mr-2"
               title={postMethod === 'graph' ? 'Dang qua Graph API (nhanh, khong can Agent)' : 'Dang qua Cookie (can Agent chay)'}
             >
-              <span className={`text-xs font-medium ${postMethod === 'cookie' ? 'text-orange-600' : 'text-gray-400'}`}>Cookie</span>
-              <div className={`relative w-9 h-5 rounded-full transition-colors ${postMethod === 'graph' ? 'bg-blue-500' : 'bg-orange-500'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${postMethod === 'graph' ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+              <span className={`text-xs font-medium ${postMethod === 'cookie' ? 'text-orange-600' : 'text-app-dim'}`}>Cookie</span>
+              <div className={`relative w-9 h-5 rounded-full transition-colors ${postMethod === 'graph' ? 'bg-info' : 'bg-orange-500'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 bg-app-surface rounded-full shadow transition-transform ${postMethod === 'graph' ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
               </div>
-              <span className={`text-xs font-medium ${postMethod === 'graph' ? 'text-blue-600' : 'text-gray-400'}`}>Graph</span>
+              <span className={`text-xs font-medium ${postMethod === 'graph' ? 'text-blue-600' : 'text-app-dim'}`}>Graph</span>
             </div>
           )}
-          <button onClick={onClose} className="p-2 -mr-2 rounded-full hover:bg-gray-100 shrink-0">
-            <X className="w-5 h-5 text-gray-400" />
+          <button onClick={onClose} className="p-2 -mr-2 rounded-full hover:bg-app-elevated shrink-0">
+            <X className="w-5 h-5 text-app-dim" />
           </button>
         </div>
 
@@ -202,30 +202,30 @@ export default function QuickPost({ accountId, target, onClose }) {
           <section>
             <div className="flex items-center gap-2 mb-2">
               <div className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-100 text-purple-600 text-xs font-bold shrink-0">1</div>
-              <h4 className="text-sm font-semibold text-gray-800">Thong tin dau vao</h4>
+              <h4 className="text-sm font-semibold text-app-primary">Thong tin dau vao</h4>
             </div>
-            <p className="text-xs text-gray-500 mb-2 ml-7">Nhap y tuong, thong tin san pham, hoac link bai viet. AI se viet noi dung chuyen nghiep tu day.</p>
+            <p className="text-xs text-app-muted mb-2 ml-7">Nhap y tuong, thong tin san pham, hoac link bai viet. AI se viet noi dung chuyen nghiep tu day.</p>
             <textarea
               value={inputBrief}
               onChange={(e) => setInputBrief(e.target.value)}
               placeholder="VD: Gioi thieu dich vu hosting gia re, SSD NVMe, uptime 99.9%, ho tro 24/7..."
               rows={3}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none bg-gray-50 placeholder:text-gray-400"
+              className="w-full rounded border border-app-border px-3 py-2.5 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none bg-app-base placeholder:text-app-dim"
             />
             <div className="flex items-center gap-2 mt-2">
-              <Link2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+              <Link2 className="w-3.5 h-3.5 text-app-dim shrink-0" />
               <input
                 type="url"
                 value={referenceUrl}
                 onChange={(e) => setReferenceUrl(e.target.value)}
                 placeholder="Link tham khao (tuy chon)"
-                className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-gray-50"
+                className="flex-1 rounded-lg border border-app-border px-3 py-1.5 text-xs focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-app-base"
               />
             </div>
             <button
               onClick={handleAICaption}
               disabled={generatingCaption || !inputBrief.trim()}
-              className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors"
+              className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:bg-app-hover disabled:text-app-muted transition-colors"
             >
               {generatingCaption ? <Loader className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {generatingCaption ? 'Dang viet...' : 'AI Viet bai'}
@@ -237,13 +237,13 @@ export default function QuickPost({ accountId, target, onClose }) {
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <div className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold shrink-0">2</div>
-                <h4 className="text-sm font-semibold text-gray-800">Noi dung bai viet</h4>
+                <h4 className="text-sm font-semibold text-app-primary">Noi dung bai viet</h4>
               </div>
               {caption.trim() && (
                 <button
                   onClick={handleAICaption}
                   disabled={generatingCaption}
-                  className="text-xs text-purple-600 hover:text-purple-700 disabled:text-gray-400 flex items-center gap-1"
+                  className="text-xs text-purple-600 hover:text-purple-700 disabled:text-app-dim flex items-center gap-1"
                 >
                   {generatingCaption ? <Loader className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                   Viet lai
@@ -255,15 +255,15 @@ export default function QuickPost({ accountId, target, onClose }) {
               onChange={(e) => setCaption(e.target.value)}
               placeholder="Noi dung se duoc AI gen tu buoc 1, hoac nhap truc tiep..."
               rows={5}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+              className="w-full rounded border border-app-border px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
             />
             <div className="flex items-center justify-between mt-1">
-              <span className="text-xs text-gray-400">{caption.length} ky tu</span>
+              <span className="text-xs text-app-dim">{caption.length} ky tu</span>
               {caption.trim() && (
                 <button
                   onClick={handleAIHashtags}
                   disabled={generatingHashtags}
-                  className="text-xs text-purple-600 hover:text-purple-700 disabled:text-gray-400 flex items-center gap-1"
+                  className="text-xs text-purple-600 hover:text-purple-700 disabled:text-app-dim flex items-center gap-1"
                 >
                   {generatingHashtags ? <Loader className="w-3 h-3 animate-spin" /> : <Hash className="w-3 h-3" />}
                   AI gen hashtag
@@ -276,7 +276,7 @@ export default function QuickPost({ accountId, target, onClose }) {
                 value={hashtags}
                 onChange={(e) => setHashtags(e.target.value)}
                 placeholder="hashtag1 hashtag2 ..."
-                className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-blue-50 text-blue-700"
+                className="mt-2 w-full rounded-lg border border-app-border px-3 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-blue-50 text-blue-700"
               />
             )}
           </section>
@@ -284,22 +284,22 @@ export default function QuickPost({ accountId, target, onClose }) {
           {/* === STEP 3: Anh / Video === */}
           <section>
             <div className="flex items-center gap-2 mb-2">
-              <div className="flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-600 text-xs font-bold shrink-0">3</div>
-              <h4 className="text-sm font-semibold text-gray-800">Anh / Video</h4>
-              <span className="text-xs text-gray-400">(tuy chon)</span>
+              <div className="flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-hermes text-xs font-bold shrink-0">3</div>
+              <h4 className="text-sm font-semibold text-app-primary">Anh / Video</h4>
+              <span className="text-xs text-app-dim">(tuy chon)</span>
             </div>
 
             {/* Selected media preview */}
             {(selectedMedia || uploadFile) && (
-              <div className="flex items-center gap-3 p-3 bg-green-50 rounded-xl mb-3">
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center text-green-600 text-xs font-medium shrink-0">
+              <div className="flex items-center gap-3 p-3 bg-green-50 rounded mb-3">
+                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center text-hermes text-xs font-medium shrink-0">
                   {selectedMedia?.type === 'video' ? 'Video' : 'Anh'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-gray-700 truncate">{uploadFile?.name || selectedMedia?.title || 'Media'}</p>
-                  <p className="text-xs text-gray-500">{selectedMedia?.type === 'video' ? 'Video' : 'Anh'}</p>
+                  <p className="text-xs font-medium text-app-primary truncate">{uploadFile?.name || selectedMedia?.title || 'Media'}</p>
+                  <p className="text-xs text-app-muted">{selectedMedia?.type === 'video' ? 'Video' : 'Anh'}</p>
                 </div>
-                <button onClick={() => { setMediaId(null); setUploadFile(null) }} className="text-gray-400 hover:text-red-500 p-1">
+                <button onClick={() => { setMediaId(null); setUploadFile(null) }} className="text-app-dim hover:text-red-500 p-1">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -310,24 +310,24 @@ export default function QuickPost({ accountId, target, onClose }) {
               <button
                 onClick={handleAIImage}
                 disabled={generatingImage || (!caption.trim() && !imagePrompt.trim())}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-gray-200 hover:border-purple-300 hover:bg-purple-50 disabled:opacity-40 transition-colors"
+                className="flex flex-col items-center gap-1.5 p-3 rounded border border-app-border hover:border-purple-300 hover:bg-purple-50 disabled:opacity-40 transition-colors"
               >
                 {generatingImage ? <Loader className="w-5 h-5 text-purple-500 animate-spin" /> : <ImagePlus className="w-5 h-5 text-purple-500" />}
-                <span className="text-xs text-gray-600 font-medium">Tao AI</span>
+                <span className="text-xs text-app-muted font-medium">Tao AI</span>
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                className="flex flex-col items-center gap-1.5 p-3 rounded border border-app-border hover:border-blue-300 hover:bg-blue-50 transition-colors"
               >
                 <Upload className="w-5 h-5 text-blue-500" />
-                <span className="text-xs text-gray-600 font-medium">Tai len</span>
+                <span className="text-xs text-app-muted font-medium">Tai len</span>
               </button>
               <button
                 onClick={() => setShowMediaPicker(!showMediaPicker)}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-gray-200 hover:border-green-300 hover:bg-green-50 transition-colors"
+                className="flex flex-col items-center gap-1.5 p-3 rounded border border-app-border hover:border-green-300 hover:bg-green-50 transition-colors"
               >
-                <Image className="w-5 h-5 text-green-500" />
-                <span className="text-xs text-gray-600 font-medium">Thu vien</span>
+                <Image className="w-5 h-5 text-hermes" />
+                <span className="text-xs text-app-muted font-medium">Thu vien</span>
               </button>
             </div>
             <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleFileUpload} />
@@ -340,7 +340,7 @@ export default function QuickPost({ accountId, target, onClose }) {
                   value={imagePrompt}
                   onChange={(e) => setImagePrompt(e.target.value)}
                   placeholder="Nhap prompt cho anh AI (bat buoc neu chua co noi dung)"
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-gray-50"
+                  className="w-full rounded-lg border border-app-border px-3 py-2 text-xs focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-app-base"
                 />
               </div>
             )}
@@ -351,30 +351,30 @@ export default function QuickPost({ accountId, target, onClose }) {
                   type="text"
                   value={imagePrompt}
                   onChange={(e) => setImagePrompt(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 bg-gray-50 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  className="w-full rounded-lg border border-app-border px-3 py-2 text-xs text-app-muted bg-app-base focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                 />
-                <p className="text-xs text-gray-400 mt-0.5">Chinh sua prompt truoc khi tao anh</p>
+                <p className="text-xs text-app-dim mt-0.5">Chinh sua prompt truoc khi tao anh</p>
               </div>
             )}
 
             {/* Media picker dropdown */}
             {showMediaPicker && (
-              <div className="mt-2 max-h-36 overflow-y-auto border border-gray-200 rounded-xl p-2 space-y-1">
+              <div className="mt-2 max-h-36 overflow-y-auto border border-app-border rounded p-2 space-y-1">
                 {mediaList.length === 0 ? (
-                  <p className="text-xs text-gray-400 text-center py-4">Chua co media nao.</p>
+                  <p className="text-xs text-app-dim text-center py-4">Chua co media nao.</p>
                 ) : mediaList.map((m) => (
                   <button
                     key={m.id}
                     onClick={() => { setMediaId(m.id); setShowMediaPicker(false) }}
                     className={`w-full flex items-center gap-2 p-2 rounded-lg text-left transition-colors ${
-                      mediaId === m.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'
+                      mediaId === m.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-app-base'
                     }`}
                   >
-                    <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-gray-400 text-xs shrink-0">
+                    <div className="w-8 h-8 bg-app-elevated rounded flex items-center justify-center text-app-dim text-xs shrink-0">
                       {m.type === 'video' ? 'V' : 'A'}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-gray-700 truncate">{m.title || m.id.slice(0, 8)}</p>
+                      <p className="text-xs font-medium text-app-primary truncate">{m.title || m.id.slice(0, 8)}</p>
                     </div>
                   </button>
                 ))}
@@ -386,7 +386,7 @@ export default function QuickPost({ accountId, target, onClose }) {
           <section>
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 transition-colors w-full"
+              className="flex items-center gap-2 text-sm text-app-muted hover:text-app-primary transition-colors w-full"
             >
               {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               <Clock className="w-4 h-4" />
@@ -399,9 +399,9 @@ export default function QuickPost({ accountId, target, onClose }) {
                     type="checkbox"
                     checked={showSchedule}
                     onChange={(e) => setShowSchedule(e.target.checked)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    className="rounded border-app-border text-blue-600 focus:ring-blue-500"
                   />
-                  <span className="text-sm text-gray-700">Bat hen gio</span>
+                  <span className="text-sm text-app-primary">Bat hen gio</span>
                 </label>
                 {showSchedule && (
                   <input
@@ -409,7 +409,7 @@ export default function QuickPost({ accountId, target, onClose }) {
                     value={scheduledAt}
                     onChange={(e) => setScheduledAt(e.target.value)}
                     min={new Date().toISOString().slice(0, 16)}
-                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full rounded-lg border border-app-border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 )}
               </div>
@@ -418,14 +418,14 @@ export default function QuickPost({ accountId, target, onClose }) {
         </div>
 
         {/* Footer — sticky */}
-        <div className="px-4 py-3 border-t border-gray-100 flex items-center gap-3 shrink-0 bg-white sm:rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2.5 text-sm rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+        <div className="px-4 py-3 border-t border-app-border flex items-center gap-3 shrink-0 bg-app-surface sm:rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2.5 text-sm rounded border border-app-border text-app-muted hover:bg-app-base transition-colors">
             Huy
           </button>
           <button
             onClick={handleSubmit}
             disabled={postMutation.isPending || !canSubmit}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded bg-info text-white hover:opacity-90 disabled:bg-app-hover disabled:text-app-muted transition-colors"
           >
             {postMutation.isPending ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             {postMutation.isPending ? 'Dang xu ly...' : showSchedule && scheduledAt ? 'Hen gio' : 'Dang ngay'}

@@ -50,60 +50,60 @@ function SitePickerModal({ websiteId, email, onDone, onCancel }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-        <div className="p-5 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-900">Chọn website cần theo dõi</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Đã đăng nhập: <strong>{email}</strong></p>
+      <div className="bg-app-surface rounded  w-full max-w-md">
+        <div className="p-5 border-b border-app-border">
+          <h2 className="font-semibold text-app-primary">Chọn website cần theo dõi</h2>
+          <p className="text-xs text-app-muted mt-0.5">Đã đăng nhập: <strong>{email}</strong></p>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-100">
+        <div className="flex border-b border-app-border">
           <button
             onClick={() => setTab('gsc')}
-            className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 ${tab === 'gsc' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}
+            className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 ${tab === 'gsc' ? 'text-info border-b-2 border-blue-600' : 'text-app-muted'}`}
           >
             <Search size={14} /> Search Console
-            {selectedGscs.length > 0 && <span className="ml-1 bg-blue-600 text-white text-xs rounded-full px-1.5 py-0.5">{selectedGscs.length}</span>}
+            {selectedGscs.length > 0 && <span className="ml-1 bg-info text-white text-xs rounded-full px-1.5 py-0.5">{selectedGscs.length}</span>}
           </button>
           <button
             onClick={() => setTab('ga')}
-            className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 ${tab === 'ga' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}
+            className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 ${tab === 'ga' ? 'text-info border-b-2 border-blue-600' : 'text-app-muted'}`}
           >
-            <BarChart3 size={14} /> Analytics 4 <span className="text-xs text-gray-400">(tuỳ chọn)</span>
+            <BarChart3 size={14} /> Analytics 4 <span className="text-xs text-app-dim">(tuỳ chọn)</span>
           </button>
         </div>
 
         <div className="p-4 min-h-[200px] max-h-[320px] overflow-y-auto">
           {tab === 'gsc' && (
             gscQuery.isLoading ? (
-              <div className="flex items-center justify-center h-32 text-gray-400">
+              <div className="flex items-center justify-center h-32 text-app-dim">
                 <Loader size={20} className="animate-spin mr-2" /> Đang tải sites...
               </div>
             ) : gscQuery.error ? (
               <p className="text-red-500 text-sm text-center py-8">{gscQuery.error?.response?.data?.error || 'Lỗi tải Search Console sites'}</p>
             ) : (gscQuery.data?.sites || []).length === 0 ? (
-              <div className="text-center py-8 text-gray-400">
+              <div className="text-center py-8 text-app-dim">
                 <Search size={32} className="mx-auto mb-2 opacity-40" />
                 <p className="text-sm">Không tìm thấy site nào trong Search Console</p>
-                <p className="text-xs mt-1">Hãy thêm website vào <a href="https://search.google.com/search-console" target="_blank" rel="noreferrer" className="text-blue-500 underline">Google Search Console</a> trước</p>
+                <p className="text-xs mt-1">Hãy thêm website vào <a href="https://search.google.com/search-console" target="_blank" rel="noreferrer" className="text-info underline">Google Search Console</a> trước</p>
               </div>
             ) : (
               <div className="space-y-1.5">
-                <p className="text-xs text-gray-400 mb-2">Chọn một hoặc nhiều website</p>
+                <p className="text-xs text-app-dim mb-2">Chọn một hoặc nhiều website</p>
                 {gscQuery.data.sites.map(s => {
                   const checked = selectedGscs.some(x => x.url === s.url)
                   return (
                     <button
                       key={s.url}
                       onClick={() => toggleGsc(s)}
-                      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all flex items-center gap-3 ${checked ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
+                      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all flex items-center gap-3 ${checked ? 'border-blue-500 bg-blue-50' : 'border-app-border hover:border-app-border hover:bg-app-base'}`}
                     >
-                      <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${checked ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`}>
+                      <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${checked ? 'border-blue-500 bg-info' : 'border-app-border'}`}>
                         {checked && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-gray-800 truncate">{s.url}</div>
-                        <div className="text-xs text-gray-400">{s.level}</div>
+                        <div className="text-sm font-medium text-app-primary truncate">{s.url}</div>
+                        <div className="text-xs text-app-dim">{s.level}</div>
                       </div>
                     </button>
                   )
@@ -114,18 +114,18 @@ function SitePickerModal({ websiteId, email, onDone, onCancel }) {
 
           {tab === 'ga' && (
             gaQuery.isLoading ? (
-              <div className="flex items-center justify-center h-32 text-gray-400">
+              <div className="flex items-center justify-center h-32 text-app-dim">
                 <Loader size={20} className="animate-spin mr-2" /> Đang tải Analytics...
               </div>
             ) : gaQuery.error ? (
               <p className="text-red-500 text-sm text-center py-8">{gaQuery.error?.response?.data?.error || 'Lỗi tải GA properties'}</p>
             ) : (gaQuery.data?.properties || []).length === 0 ? (
-              <p className="text-center py-8 text-sm text-gray-400">Không tìm thấy GA4 property nào</p>
+              <p className="text-center py-8 text-sm text-app-dim">Không tìm thấy GA4 property nào</p>
             ) : (
               <div className="space-y-1.5">
                 <button
                   onClick={() => setSelectedGa(null)}
-                  className={`w-full text-left px-3 py-2 rounded-lg border text-sm text-gray-400 ${!selectedGa ? 'border-blue-500 bg-blue-100' : 'border-gray-200 hover:border-gray-300'}`}
+                  className={`w-full text-left px-3 py-2 rounded-lg border text-sm text-app-dim ${!selectedGa ? 'border-blue-500 bg-blue-100' : 'border-app-border hover:border-app-border'}`}
                 >
                   Bỏ qua (không kết nối GA)
                 </button>
@@ -133,13 +133,13 @@ function SitePickerModal({ websiteId, email, onDone, onCancel }) {
                   <button
                     key={p.id}
                     onClick={() => setSelectedGa(p)}
-                    className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all ${selectedGa?.id === p.id ? 'border-blue-500 bg-blue-100' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all ${selectedGa?.id === p.id ? 'border-blue-500 bg-blue-100' : 'border-app-border hover:border-app-border hover:bg-app-base'}`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-gray-800">{p.name}</span>
-                      {selectedGa?.id === p.id && <CheckCircle size={16} className="text-blue-500 shrink-0" />}
+                      <span className="text-sm font-medium text-app-primary">{p.name}</span>
+                      {selectedGa?.id === p.id && <CheckCircle size={16} className="text-info shrink-0" />}
                     </div>
-                    <span className="text-xs text-gray-400">{p.id}</span>
+                    <span className="text-xs text-app-dim">{p.id}</span>
                   </button>
                 ))}
               </div>
@@ -147,12 +147,12 @@ function SitePickerModal({ websiteId, email, onDone, onCancel }) {
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-100 flex gap-2 justify-end">
-          <button onClick={handleCancel} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Huỷ</button>
+        <div className="p-4 border-t border-app-border flex gap-2 justify-end">
+          <button onClick={handleCancel} className="px-4 py-2 text-sm text-app-muted hover:text-app-primary">Huỷ</button>
           <button
             onClick={() => finalizeMutation.mutate()}
             disabled={selectedGscs.length === 0 || finalizeMutation.isPending}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+            className="flex items-center gap-2 px-4 py-2 bg-info text-white rounded-lg hover:opacity-90 disabled:opacity-50 text-sm font-medium"
           >
             {finalizeMutation.isPending ? <Loader size={14} className="animate-spin" /> : <CheckCircle size={14} />}
             Xong {selectedGscs.length > 0 && `(${selectedGscs.length})`}
@@ -179,28 +179,28 @@ function WebsiteCard({ site, onRefresh }) {
   })
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl">
+    <div className="bg-app-surface border border-app-border rounded">
       <div className="flex items-center gap-3 p-4">
         <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
-          <Globe size={18} className="text-blue-600" />
+          <Globe size={18} className="text-info" />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-gray-900 text-sm truncate">{site.name}</h3>
-          <a href={site.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline flex items-center gap-1">
+          <h3 className="font-medium text-app-primary text-sm truncate">{site.name}</h3>
+          <a href={site.url} target="_blank" rel="noreferrer" className="text-xs text-info hover:underline flex items-center gap-1">
             {site.url} <ExternalLink size={10} />
           </a>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Link to={`/websites/${site.id}/report`} className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-xs font-medium">
+          <Link to={`/websites/${site.id}/report`} className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-info rounded-lg hover:bg-blue-100 text-xs font-medium">
             <FileBarChart size={13} /> Báo cáo
           </Link>
-          <button onClick={() => setExpanded(e => !e)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
+          <button onClick={() => setExpanded(e => !e)} className="p-1.5 text-app-dim hover:text-app-muted rounded-lg hover:bg-app-elevated">
             {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
           <button
             onClick={() => { if (confirm('Xoá website này?')) deleteMutation.mutate() }}
             disabled={deleteMutation.isPending}
-            className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-gray-100"
+            className="p-1.5 text-app-dim hover:text-red-500 rounded-lg hover:bg-app-elevated"
           >
             <Trash2 size={14} />
           </button>
@@ -209,7 +209,7 @@ function WebsiteCard({ site, onRefresh }) {
 
       {/* Badges */}
       <div className="px-4 pb-3 flex flex-wrap gap-1.5">
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-700">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-50 text-hermes">
           <CheckCircle size={10} /> {site.google_email}
         </span>
         {site.gsc_site_url && (
@@ -225,7 +225,7 @@ function WebsiteCard({ site, onRefresh }) {
       </div>
 
       {expanded && (
-        <div className="px-4 pb-4 pt-2 border-t border-gray-100 space-y-2 text-xs text-gray-600">
+        <div className="px-4 pb-4 pt-2 border-t border-app-border space-y-2 text-xs text-app-muted">
           <div className="flex justify-between">
             <span>Google: <strong>{site.google_email}</strong></span>
             <button onClick={() => disconnectMutation.mutate()} disabled={disconnectMutation.isPending} className="text-red-500 hover:underline">
@@ -294,13 +294,13 @@ export default function WebsiteSettings() {
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Website</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Kết nối Google Analytics & Search Console</p>
+          <h1 className="text-xl font-bold text-app-primary">Website</h1>
+          <p className="text-sm text-app-muted mt-0.5">Kết nối Google Analytics & Search Console</p>
         </div>
         <button
           onClick={handleConnectGoogle}
           disabled={connecting}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 text-sm font-medium shadow-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-app-surface border border-app-border rounded-lg hover:bg-app-base disabled:opacity-50 text-sm font-medium "
         >
           {connecting ? <Loader size={16} className="animate-spin" /> : (
             <svg width="16" height="16" viewBox="0 0 24 24">
@@ -326,12 +326,12 @@ export default function WebsiteSettings() {
 
       {/* Website list */}
       {isLoading ? (
-        <div className="text-center py-12 text-gray-400"><Loader className="animate-spin inline mr-2" size={18} />Đang tải...</div>
+        <div className="text-center py-12 text-app-dim"><Loader className="animate-spin inline mr-2" size={18} />Đang tải...</div>
       ) : websites.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-200">
-          <Globe size={48} className="mx-auto text-gray-200 mb-3" />
-          <p className="text-gray-500 font-medium">Chưa có website nào</p>
-          <p className="text-gray-400 text-sm mt-1">Nhấn "Kết nối Google" để thêm website từ Search Console</p>
+        <div className="text-center py-20 bg-app-surface rounded border border-dashed border-app-border">
+          <Globe size={48} className="mx-auto text-app-dim mb-3" />
+          <p className="text-app-muted font-medium">Chưa có website nào</p>
+          <p className="text-app-dim text-sm mt-1">Nhấn "Kết nối Google" để thêm website từ Search Console</p>
         </div>
       ) : (
         <div className="space-y-3">

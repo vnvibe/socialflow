@@ -50,9 +50,9 @@ function formatDate(dateStr) {
 // Fetch job status labels
 const FETCH_STATUS = {
   pending: { label: 'Queued...', color: 'text-yellow-600', bg: 'bg-yellow-50 border-yellow-200', icon: Clock },
-  claimed: { label: 'Starting...', color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200', icon: Loader },
-  running: { label: 'Scanning...', color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200', icon: Loader },
-  done: { label: 'Complete!', color: 'text-green-600', bg: 'bg-green-50 border-green-200', icon: CheckCircle2 },
+  claimed: { label: 'Starting...', color: 'text-info', bg: 'bg-blue-50 border-blue-200', icon: Loader },
+  running: { label: 'Scanning...', color: 'text-info', bg: 'bg-blue-50 border-blue-200', icon: Loader },
+  done: { label: 'Complete!', color: 'text-hermes', bg: 'bg-green-50 border-green-200', icon: CheckCircle2 },
   failed: { label: 'Failed', color: 'text-red-600', bg: 'bg-red-50 border-red-200', icon: XCircle },
 }
 
@@ -197,7 +197,7 @@ export default function AccountDetail() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader className="w-6 h-6 animate-spin text-blue-500" />
+        <Loader className="w-6 h-6 animate-spin text-info" />
       </div>
     )
   }
@@ -208,7 +208,7 @@ export default function AccountDetail() {
         <p className="text-red-500 text-sm">Failed to load account details.</p>
         <Link
           to="/accounts"
-          className="text-blue-600 text-sm mt-2 inline-block hover:underline"
+          className="text-info text-sm mt-2 inline-block hover:underline"
         >
           Back to accounts
         </Link>
@@ -221,23 +221,23 @@ export default function AccountDetail() {
       {/* Back link */}
       <Link
         to="/accounts"
-        className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+        className="inline-flex items-center gap-1.5 text-sm text-app-muted hover:text-app-primary transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />
         Back to Accounts
       </Link>
 
       {/* Header */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="bg-app-surface rounded border border-app-border p-6">
         <div className="flex items-start justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-3">
-              <h1 className="text-xl font-bold text-gray-900">
+              <h1 className="text-xl font-bold text-app-primary">
                 {account.username}
               </h1>
               <HealthBadge status={account.status} />
             </div>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-app-muted">
               FB User ID: {account.fb_user_id}
             </p>
           </div>
@@ -247,8 +247,8 @@ export default function AccountDetail() {
               disabled={isFetching}
               className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-colors ${
                 isFetching
-                  ? 'bg-blue-100 text-blue-700 cursor-not-allowed'
-                  : 'bg-green-600 text-white hover:bg-green-700'
+                  ? 'bg-blue-100 text-info cursor-not-allowed'
+                  : 'bg-hermes text-white hover:bg-green-700'
               }`}
             >
               {isFetching ? (
@@ -259,7 +259,7 @@ export default function AccountDetail() {
               {isFetching ? 'Scanning...' : 'Fetch Pages & Groups'}
             </button>
             <div className="text-right space-y-1">
-              <div className="flex items-center gap-2 text-sm text-gray-500">
+              <div className="flex items-center gap-2 text-sm text-app-muted">
                 <Monitor className="w-4 h-4" />
                 {account.browser_type || 'N/A'}
               </div>
@@ -267,7 +267,7 @@ export default function AccountDetail() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-6 mt-4 pt-4 border-t border-gray-100 text-sm text-gray-500">
+        <div className="flex items-center gap-6 mt-4 pt-4 border-t border-app-border text-sm text-app-muted">
           <span>
             Posts today: {account.posts_today ?? 0}/{account.max_daily_posts ?? '?'}
           </span>
@@ -280,7 +280,7 @@ export default function AccountDetail() {
 
       {/* Fetch Status Banner */}
       {fetchStatus && (
-        <div className={`rounded-xl border p-4 ${FETCH_STATUS[fetchStatus]?.bg || 'bg-gray-50 border-gray-200'}`}>
+        <div className={`rounded border p-4 ${FETCH_STATUS[fetchStatus]?.bg || 'bg-app-base border-app-border'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {(() => {
@@ -295,13 +295,13 @@ export default function AccountDetail() {
                   {fetchStatus === 'pending' && ' Waiting for agent to pick up...'}
                   {fetchStatus === 'claimed' && ' Agent picked up, launching browser...'}
                   {fetchElapsed > 0 && isFetching && (
-                    <span className="ml-2 font-normal text-gray-500">
+                    <span className="ml-2 font-normal text-app-muted">
                       ({Math.floor(fetchElapsed / 60)}:{String(fetchElapsed % 60).padStart(2, '0')})
                     </span>
                   )}
                 </p>
                 {fetchResult && (
-                  <p className="text-xs text-green-700 mt-0.5">
+                  <p className="text-xs text-hermes mt-0.5">
                     Found {fetchResult.pages_found || 0} pages ({fetchResult.pages_saved || 0} saved), {fetchResult.groups_found || 0} groups ({fetchResult.groups_saved || 0} saved)
                     {fetchResult.status && fetchResult.status !== 'ok' && (
                       <span className="ml-2 text-amber-600">Account status: {fetchResult.status}</span>
@@ -317,9 +317,9 @@ export default function AccountDetail() {
               {(fetchDone || fetchFailed) && (
                 <button
                   onClick={() => { setFetchStatus(null); setFetchJobId(null); setFetchResult(null); setFetchError(null) }}
-                  className="p-1 rounded-lg hover:bg-white/50 transition-colors"
+                  className="p-1 rounded-lg hover:bg-app-surface/50 transition-colors"
                 >
-                  <X className="w-4 h-4 text-gray-500" />
+                  <X className="w-4 h-4 text-app-muted" />
                 </button>
               )}
               {fetchFailed && (
@@ -337,7 +337,7 @@ export default function AccountDetail() {
       )}
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
+      <div className="border-b border-app-border">
         <nav className="flex gap-0">
           {TABS.map((tab) => (
             <button
@@ -345,8 +345,8 @@ export default function AccountDetail() {
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.key
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-blue-600 text-info'
+                  : 'border-transparent text-app-muted hover:text-app-primary hover:border-app-border'
               }`}
             >
               <tab.icon className="w-4 h-4" />
@@ -434,41 +434,41 @@ function ConfigTab({ account, queryClient }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-white rounded-xl border border-gray-200 p-6 space-y-6 max-w-2xl"
+      className="bg-app-surface rounded border border-app-border p-6 space-y-6 max-w-2xl"
     >
-      <h2 className="text-lg font-semibold text-gray-900">
+      <h2 className="text-lg font-semibold text-app-primary">
         Schedule Settings
       </h2>
 
       {/* Active hours */}
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-app-primary mb-1.5">
             Active Hours Start
           </label>
           <input
             type="time"
             value={form.active_hours_start}
             onChange={(e) => handleChange('active_hours_start', e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-app-primary mb-1.5">
             Active Hours End
           </label>
           <input
             type="time"
             value={form.active_hours_end}
             onChange={(e) => handleChange('active_hours_end', e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
       </div>
 
       {/* Active days */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="block text-sm font-medium text-app-primary mb-2">
           Active Days
         </label>
         <div className="flex gap-2">
@@ -479,8 +479,8 @@ function ConfigTab({ account, queryClient }) {
               onClick={() => toggleDay(i)}
               className={`w-10 h-10 rounded-lg text-xs font-medium transition-colors ${
                 form.active_days.includes(i)
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  ? 'bg-info text-white'
+                  : 'bg-app-elevated text-app-muted hover:bg-app-hover'
               }`}
             >
               {name}
@@ -491,7 +491,7 @@ function ConfigTab({ account, queryClient }) {
 
       {/* Max daily posts */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+        <label className="block text-sm font-medium text-app-primary mb-1.5">
           Max Daily Posts
         </label>
         <input
@@ -502,14 +502,14 @@ function ConfigTab({ account, queryClient }) {
           onChange={(e) =>
             handleChange('max_daily_posts', parseInt(e.target.value) || 1)
           }
-          className="w-full max-w-xs rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          className="w-full max-w-xs rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
       </div>
 
       {/* Delay range */}
       <div className="grid grid-cols-2 gap-4 max-w-md">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-app-primary mb-1.5">
             Min Delay (minutes)
           </label>
           <input
@@ -519,11 +519,11 @@ function ConfigTab({ account, queryClient }) {
             onChange={(e) =>
               handleChange('min_delay_minutes', parseInt(e.target.value) || 1)
             }
-            className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium text-app-primary mb-1.5">
             Max Delay (minutes)
           </label>
           <input
@@ -533,7 +533,7 @@ function ConfigTab({ account, queryClient }) {
             onChange={(e) =>
               handleChange('max_delay_minutes', parseInt(e.target.value) || 1)
             }
-            className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
       </div>
@@ -542,7 +542,7 @@ function ConfigTab({ account, queryClient }) {
       <button
         type="submit"
         disabled={updateMutation.isPending}
-        className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+        className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400 transition-colors"
       >
         {updateMutation.isPending ? (
           <Loader className="w-4 h-4 animate-spin" />
@@ -672,67 +672,67 @@ function FanpagesTab({ accountId, onQuickPost }) {
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <button onClick={() => requireAgent(() => fetchMutation.mutate())} disabled={fetchMutation.isPending}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors">
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400 transition-colors">
           {fetchMutation.isPending ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
           Fetch from Facebook
         </button>
         <button onClick={() => setShowAdd(!showAdd)}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-app-border text-app-primary hover:bg-app-base transition-colors">
           <Plus className="w-4 h-4" /> Add Manually
         </button>
       </div>
 
       {showAdd && (
-        <form onSubmit={handleAdd} className="bg-white rounded-xl border border-gray-200 p-4 space-y-3 max-w-lg">
+        <form onSubmit={handleAdd} className="bg-app-surface rounded border border-app-border p-4 space-y-3 max-w-lg">
           <div className="grid grid-cols-2 gap-3">
             <input type="text" placeholder="Page ID" value={addForm.fb_page_id} onChange={(e) => setAddForm(f => ({ ...f, fb_page_id: e.target.value }))}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+              className="rounded-lg border border-app-border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
             <input type="text" placeholder="Page Name" value={addForm.name} onChange={(e) => setAddForm(f => ({ ...f, name: e.target.value }))}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+              className="rounded-lg border border-app-border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
           <input type="text" placeholder="Facebook URL (optional)" value={addForm.url} onChange={(e) => setAddForm(f => ({ ...f, url: e.target.value }))}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+            className="w-full rounded-lg border border-app-border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <div className="flex gap-2">
             <button type="submit" disabled={addLoading}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400">
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400">
               {addLoading ? 'Adding...' : 'Add'}
             </button>
-            <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm rounded-lg border border-app-border text-app-muted hover:bg-app-base">Cancel</button>
           </div>
         </form>
       )}
 
       {initialLoading ? (
-        <div className="flex items-center justify-center h-32"><Loader className="w-5 h-5 animate-spin text-blue-500" /></div>
+        <div className="flex items-center justify-center h-32"><Loader className="w-5 h-5 animate-spin text-info" /></div>
       ) : fanpages.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-          <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-          <p className="text-sm text-gray-500">No fanpages found. Click "Fetch from Facebook" to import your pages.</p>
+        <div className="bg-app-surface rounded border border-app-border p-8 text-center">
+          <FileText className="w-8 h-8 text-app-dim mx-auto mb-2" />
+          <p className="text-sm text-app-muted">No fanpages found. Click "Fetch from Facebook" to import your pages.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-app-surface rounded border border-app-border overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Page Name</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Page ID</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Category</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Followers</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
+              <tr className="border-b border-app-border bg-app-base">
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Page Name</th>
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Page ID</th>
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Category</th>
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Followers</th>
+                <th className="text-right px-4 py-3 font-medium text-app-muted">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {fanpages.map((page) => (
-                <tr key={page.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{page.name}</td>
-                  <td className="px-4 py-3 text-gray-500">{page.fb_page_id}</td>
-                  <td className="px-4 py-3 text-gray-500">{page.category || '-'}</td>
-                  <td className="px-4 py-3 text-gray-500">{page.fan_count ? page.fan_count.toLocaleString() : '-'}</td>
+                <tr key={page.id} className="hover:bg-app-base">
+                  <td className="px-4 py-3 font-medium text-app-primary">{page.name}</td>
+                  <td className="px-4 py-3 text-app-muted">{page.fb_page_id}</td>
+                  <td className="px-4 py-3 text-app-muted">{page.category || '-'}</td>
+                  <td className="px-4 py-3 text-app-muted">{page.fan_count ? page.fan_count.toLocaleString() : '-'}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center gap-2 justify-end">
                       <button
                         onClick={() => onQuickPost({ type: 'page', id: page.id, name: page.name, postingMethod: page.posting_method || 'auto' })}
-                        className="text-blue-500 hover:text-blue-700" title="Quick Post"
+                        className="text-info hover:text-info" title="Quick Post"
                       >
                         <Send className="w-4 h-4" />
                       </button>
@@ -746,8 +746,8 @@ function FanpagesTab({ accountId, onQuickPost }) {
           </table>
           <div ref={sentinelRef} className="h-1" />
           {loading && (
-            <div className="flex justify-center py-3 border-t border-gray-100">
-              <Loader className="w-4 h-4 animate-spin text-gray-400" />
+            <div className="flex justify-center py-3 border-t border-app-border">
+              <Loader className="w-4 h-4 animate-spin text-app-dim" />
             </div>
           )}
         </div>
@@ -806,82 +806,82 @@ function GroupsTab({ accountId, onQuickPost }) {
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <button onClick={() => requireAgent(() => fetchMutation.mutate())} disabled={fetchMutation.isPending}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors">
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400 transition-colors">
           {fetchMutation.isPending ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
           Fetch from Facebook
         </button>
         <button onClick={() => setShowAdd(!showAdd)}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-app-border text-app-primary hover:bg-app-base transition-colors">
           <Plus className="w-4 h-4" /> Add Manually
         </button>
       </div>
 
       {showAdd && (
-        <form onSubmit={handleAdd} className="bg-white rounded-xl border border-gray-200 p-4 space-y-3 max-w-lg">
+        <form onSubmit={handleAdd} className="bg-app-surface rounded border border-app-border p-4 space-y-3 max-w-lg">
           <div className="grid grid-cols-2 gap-3">
             <input type="text" placeholder="Group ID" value={addForm.fb_group_id} onChange={(e) => setAddForm(f => ({ ...f, fb_group_id: e.target.value }))}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+              className="rounded-lg border border-app-border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
             <input type="text" placeholder="Group Name" value={addForm.name} onChange={(e) => setAddForm(f => ({ ...f, name: e.target.value }))}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+              className="rounded-lg border border-app-border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
           <input type="text" placeholder="Facebook Group URL (optional)" value={addForm.url} onChange={(e) => setAddForm(f => ({ ...f, url: e.target.value }))}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+            className="w-full rounded-lg border border-app-border px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <div className="flex gap-2">
             <button type="submit" disabled={addLoading}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400">
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400">
               {addLoading ? 'Adding...' : 'Add'}
             </button>
-            <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm rounded-lg border border-app-border text-app-muted hover:bg-app-base">Cancel</button>
           </div>
         </form>
       )}
 
       {initialLoading ? (
-        <div className="flex items-center justify-center h-32"><Loader className="w-5 h-5 animate-spin text-blue-500" /></div>
+        <div className="flex items-center justify-center h-32"><Loader className="w-5 h-5 animate-spin text-info" /></div>
       ) : groups.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-          <UsersRound className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-          <p className="text-sm text-gray-500">No groups found. Click "Fetch from Facebook" to import your groups.</p>
+        <div className="bg-app-surface rounded border border-app-border p-8 text-center">
+          <UsersRound className="w-8 h-8 text-app-dim mx-auto mb-2" />
+          <p className="text-sm text-app-muted">No groups found. Click "Fetch from Facebook" to import your groups.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-app-surface rounded border border-app-border overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Group Name</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Group ID</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Type</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Members</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Role</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
+              <tr className="border-b border-app-border bg-app-base">
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Group Name</th>
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Group ID</th>
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Type</th>
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Members</th>
+                <th className="text-left px-4 py-3 font-medium text-app-muted">Role</th>
+                <th className="text-right px-4 py-3 font-medium text-app-muted">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {groups.map((group) => (
-                <tr key={group.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">
+                <tr key={group.id} className="hover:bg-app-base">
+                  <td className="px-4 py-3 font-medium text-app-primary">
                     <a href={group.url || `https://www.facebook.com/groups/${group.fb_group_id}`} target="_blank" rel="noopener noreferrer"
-                      className="hover:text-blue-600 hover:underline inline-flex items-center gap-1">
-                      {group.name} <ExternalLink className="w-3 h-3 text-gray-400" />
+                      className="hover:text-info hover:underline inline-flex items-center gap-1">
+                      {group.name} <ExternalLink className="w-3 h-3 text-app-dim" />
                     </a>
                   </td>
-                  <td className="px-4 py-3 text-gray-500">{group.fb_group_id}</td>
+                  <td className="px-4 py-3 text-app-muted">{group.fb_group_id}</td>
                   <td className="px-4 py-3">
                     {group.group_type ? (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        group.group_type === 'public' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                        group.group_type === 'public' ? 'bg-green-100 text-hermes' : 'bg-yellow-100 text-yellow-700'
                       }`}>
                         {group.group_type === 'public' ? 'Public' : group.group_type === 'closed' ? 'Private' : group.group_type}
                       </span>
                     ) : '-'}
                   </td>
-                  <td className="px-4 py-3 text-gray-500">{group.member_count ? group.member_count.toLocaleString() : '-'}</td>
-                  <td className="px-4 py-3 text-gray-500">{group.is_admin ? 'Admin' : 'Member'}</td>
+                  <td className="px-4 py-3 text-app-muted">{group.member_count ? group.member_count.toLocaleString() : '-'}</td>
+                  <td className="px-4 py-3 text-app-muted">{group.is_admin ? 'Admin' : 'Member'}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center gap-2 justify-end">
                       <button
                         onClick={() => onQuickPost({ type: 'group', id: group.id, name: group.name })}
-                        className="text-blue-500 hover:text-blue-700" title="Quick Post"
+                        className="text-info hover:text-info" title="Quick Post"
                       >
                         <Send className="w-4 h-4" />
                       </button>
@@ -895,8 +895,8 @@ function GroupsTab({ accountId, onQuickPost }) {
           </table>
           <div ref={sentinelRef} className="h-1" />
           {loading && (
-            <div className="flex justify-center py-3 border-t border-gray-100">
-              <Loader className="w-4 h-4 animate-spin text-gray-400" />
+            <div className="flex justify-center py-3 border-t border-app-border">
+              <Loader className="w-4 h-4 animate-spin text-app-dim" />
             </div>
           )}
         </div>
@@ -911,16 +911,16 @@ function HistoryTab({ accountId }) {
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-32">
-        <Loader className="w-5 h-5 animate-spin text-blue-500" />
+        <Loader className="w-5 h-5 animate-spin text-info" />
       </div>
     )
   }
 
   if (history.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-        <History className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-        <p className="text-sm text-gray-500">No history available</p>
+      <div className="bg-app-surface rounded border border-app-border p-8 text-center">
+        <History className="w-8 h-8 text-app-dim mx-auto mb-2" />
+        <p className="text-sm text-app-muted">No history available</p>
       </div>
     )
   }
@@ -930,28 +930,28 @@ function HistoryTab({ accountId }) {
       {history.map((entry, i) => (
         <div
           key={entry.id || i}
-          className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-3"
+          className="bg-app-surface rounded border border-app-border p-4 flex items-start gap-3"
         >
           <div
             className={`w-2 h-2 rounded-full mt-2 shrink-0 ${
               entry.status === 'done'
-                ? 'bg-green-500'
+                ? 'bg-hermes'
                 : entry.status === 'failed'
                 ? 'bg-red-500'
-                : 'bg-gray-400'
+                : 'bg-app-hover'
             }`}
           />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900">
+            <p className="text-sm font-medium text-app-primary">
               {entry.action || entry.type || 'Action'}
             </p>
             {entry.detail && (
-              <p className="text-xs text-gray-500 mt-0.5 truncate">
+              <p className="text-xs text-app-muted mt-0.5 truncate">
                 {entry.detail}
               </p>
             )}
           </div>
-          <span className="text-xs text-gray-400 shrink-0">
+          <span className="text-xs text-app-dim shrink-0">
             {formatDate(entry.created_at)}
           </span>
         </div>
@@ -959,7 +959,7 @@ function HistoryTab({ accountId }) {
       <div ref={sentinelRef} className="h-1" />
       {loading && (
         <div className="flex justify-center py-3">
-          <Loader className="w-4 h-4 animate-spin text-gray-400" />
+          <Loader className="w-4 h-4 animate-spin text-app-dim" />
         </div>
       )}
     </div>

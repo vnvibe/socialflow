@@ -226,41 +226,41 @@ export default function CampaignForm() {
   return (
     <div className="max-w-2xl">
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate('/campaigns')} className="p-1.5 text-gray-400 hover:text-gray-600"><ArrowLeft size={20} /></button>
+        <button onClick={() => navigate('/campaigns')} className="p-1.5 text-app-dim hover:text-app-muted"><ArrowLeft size={20} /></button>
         <Target size={24} className="text-purple-600" />
-        <h1 className="text-2xl font-bold text-gray-900">{isEdit ? 'Sửa AI Pilot' : 'Tạo AI Pilot'}</h1>
+        <h1 className="text-2xl font-bold text-app-primary">{isEdit ? 'Sửa AI Pilot' : 'Tạo AI Pilot'}</h1>
       </div>
 
       <div className="space-y-5">
         {/* === Section 1: Basic === */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-gray-900">1. Thông tin cơ bản</h2>
+        <div className="bg-app-surface rounded border border-app-border p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-app-primary">1. Thông tin cơ bản</h2>
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-1 block">Tên chiến dịch *</label>
+            <label className="text-xs font-medium text-app-muted mb-1 block">Tên chiến dịch *</label>
             <input
               type="text"
               value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })}
               placeholder="VD: VPS Growth Campaign"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full border border-app-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-1 block">Chủ đề / Ngành hàng *</label>
+            <label className="text-xs font-medium text-app-muted mb-1 block">Chủ đề / Ngành hàng *</label>
             <input
               type="text"
               value={form.topic}
               onChange={e => { setForm({ ...form, topic: e.target.value }); resetPlan() }}
               placeholder="VD: vps hosting, openclaw"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full border border-app-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-1 block">Ngôn ngữ group</label>
+            <label className="text-xs font-medium text-app-muted mb-1 block">Ngôn ngữ group</label>
             <select
               value={form.language}
               onChange={e => { setForm({ ...form, language: e.target.value }); resetPlan() }}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full border border-app-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="vi">Tiếng Việt</option>
               <option value="en">Tiếng Anh</option>
@@ -270,41 +270,41 @@ export default function CampaignForm() {
         </div>
 
         {/* === Section 2: Mission (MAIN INPUT) === */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <div className="bg-app-surface rounded border border-app-border p-5 space-y-3">
           <div>
-            <h2 className="text-sm font-semibold text-gray-900">2. Mô tả mục tiêu *</h2>
-            <p className="text-xs text-gray-500 mt-1">AI sẽ tự lên kế hoạch dựa trên mô tả này</p>
+            <h2 className="text-sm font-semibold text-app-primary">2. Mô tả mục tiêu *</h2>
+            <p className="text-xs text-app-muted mt-1">AI sẽ tự lên kế hoạch dựa trên mô tả này</p>
           </div>
           <textarea
             value={form.mission}
             onChange={e => { setForm({ ...form, mission: e.target.value }); resetPlan() }}
             rows={5}
             placeholder={'VD: Tìm 4-6 nhóm VPS mỗi ngày, tương tác tự nhiên với thành viên,\nkết bạn những người quan tâm VPS, comment hữu ích trong group'}
-            className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full border border-app-border rounded-lg px-3 py-3 text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
 
         {/* === Section 3: Ads (toggle) === */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="bg-app-surface rounded border border-app-border p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Megaphone size={16} className="text-orange-500" />
-              <h2 className="text-sm font-semibold text-gray-900">3. Quảng cáo thương hiệu</h2>
+              <h2 className="text-sm font-semibold text-app-primary">3. Quảng cáo thương hiệu</h2>
             </div>
             <button
               type="button"
               onClick={() => { setAdsEnabled(!adsEnabled); resetPlan() }}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                adsEnabled ? 'bg-orange-500' : 'bg-gray-300'
+                adsEnabled ? 'bg-orange-500' : 'bg-app-hover'
               }`}
             >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-app-surface transition-transform ${
                 adsEnabled ? 'translate-x-6' : 'translate-x-1'
               }`} />
             </button>
           </div>
           {!adsEnabled ? (
-            <p className="text-xs text-gray-500">Bật để AI có thể đề xuất sản phẩm tự nhiên trong comment khi gặp bài viết liên quan.</p>
+            <p className="text-xs text-app-muted">Bật để AI có thể đề xuất sản phẩm tự nhiên trong comment khi gặp bài viết liên quan.</p>
           ) : (
             <div className="space-y-3 pt-2">
               <div className="flex items-start gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
@@ -316,47 +316,47 @@ export default function CampaignForm() {
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Tên thương hiệu *</label>
+                <label className="text-xs font-medium text-app-muted mb-1 block">Tên thương hiệu *</label>
                 <input
                   type="text"
                   value={brand.brand_name}
                   onChange={e => { setBrand({ ...brand, brand_name: e.target.value }); resetPlan() }}
                   placeholder="VD: OpenClaw"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full border border-app-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Mô tả sản phẩm *</label>
+                <label className="text-xs font-medium text-app-muted mb-1 block">Mô tả sản phẩm *</label>
                 <textarea
                   value={brand.brand_description}
                   onChange={e => { setBrand({ ...brand, brand_description: e.target.value }); resetPlan() }}
                   rows={2}
                   placeholder="VD: AI Agent tự động hóa công việc — phù hợp cho người dùng VPS / cần host nhẹ"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full border border-app-border rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Comment mẫu (tham khảo tone)</label>
+                <label className="text-xs font-medium text-app-muted mb-1 block">Comment mẫu (tham khảo tone)</label>
                 <textarea
                   value={brand.example_comment}
                   onChange={e => { setBrand({ ...brand, example_comment: e.target.value }); resetPlan() }}
                   rows={2}
                   placeholder='VD: "Mình đang dùng OpenClaw thấy ổn, giá hợp lý lại không lag"'
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full border border-app-border rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                 />
-                <p className="text-[10px] text-gray-400 mt-1">AI sẽ tham khảo tone này khi viết comment có mention thương hiệu</p>
+                <p className="text-[10px] text-app-dim mt-1">AI sẽ tham khảo tone này khi viết comment có mention thương hiệu</p>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-500 mb-2 block">Giọng điệu</label>
+                <label className="text-xs font-medium text-app-muted mb-2 block">Giọng điệu</label>
                 <div className="flex gap-2">
                   {VOICE_OPTIONS.map(v => (
                     <label key={v.value} className={`flex-1 cursor-pointer px-3 py-2 rounded-lg border text-center text-xs transition-colors ${
                       brand.brand_voice === v.value
                         ? 'bg-orange-50 border-orange-300 text-orange-700 font-medium'
-                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                        : 'bg-app-surface border-app-border text-app-muted hover:bg-app-base'
                     }`}>
                       <input
                         type="radio"
@@ -376,12 +376,12 @@ export default function CampaignForm() {
         </div>
 
         {/* === Section 4: Accounts === */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-900 mb-2">
-            4. Tài khoản thực hiện * <span className="text-xs text-gray-500 font-normal">({selectedAccountIds.length} đã chọn)</span>
+        <div className="bg-app-surface rounded border border-app-border p-5">
+          <h2 className="text-sm font-semibold text-app-primary mb-2">
+            4. Tài khoản thực hiện * <span className="text-xs text-app-muted font-normal">({selectedAccountIds.length} đã chọn)</span>
           </h2>
           {accounts.length === 0 ? (
-            <p className="text-xs text-gray-500 italic">Chưa có tài khoản nào.</p>
+            <p className="text-xs text-app-muted italic">Chưa có tài khoản nào.</p>
           ) : (
             <div className="space-y-2">
               <div className="flex flex-wrap gap-1.5">
@@ -393,7 +393,7 @@ export default function CampaignForm() {
                       setSelectedAccountIds(next); resetPlan()
                     }}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      sel ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                      sel ? 'bg-info text-white ' : 'bg-app-base text-app-muted hover:bg-app-elevated border border-app-border'
                     }`}>
                       {sel && <Check size={10} />}
                       {a.username || a.fb_user_id}
@@ -405,58 +405,58 @@ export default function CampaignForm() {
                 <button onClick={() => { setSelectedAccountIds(accounts.map(a => a.id)); resetPlan() }}
                   className="text-[10px] text-blue-600 hover:underline">Chọn tất cả</button>
                 <button onClick={() => { setSelectedAccountIds([]); resetPlan() }}
-                  className="text-[10px] text-gray-500 hover:underline">Bỏ chọn</button>
+                  className="text-[10px] text-app-muted hover:underline">Bỏ chọn</button>
               </div>
             </div>
           )}
         </div>
 
         {/* === Section 5: Schedule === */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
+        <div className="bg-app-surface rounded border border-app-border p-5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Clock size={16} className="text-gray-400" />
-              <h2 className="text-sm font-semibold text-gray-900">5. Lịch chạy</h2>
+              <Clock size={16} className="text-app-dim" />
+              <h2 className="text-sm font-semibold text-app-primary">5. Lịch chạy</h2>
             </div>
-            <span className="text-[11px] text-gray-500">{getScheduleDesc()}</span>
+            <span className="text-[11px] text-app-muted">{getScheduleDesc()}</span>
           </div>
           <div className="flex gap-2 flex-wrap">
             {DEFAULT_PRESETS.map(p => (
               <button key={p.key} onClick={() => { selectMode(p.key); resetPlan() }}
                 className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                  scheduleMode === p.key ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  scheduleMode === p.key ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-app-surface border-app-border text-app-muted hover:bg-app-base'
                 }`}>
                 <div>{p.label}</div>
               </button>
             ))}
             <button onClick={() => { selectMode('custom'); resetPlan() }}
               className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                scheduleMode === 'custom' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                scheduleMode === 'custom' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-app-surface border-app-border text-app-muted hover:bg-app-base'
               }`}>Tùy chỉnh</button>
           </div>
           {scheduleMode === 'custom' && (
-            <div className="bg-gray-50 rounded-lg p-3 space-y-3">
+            <div className="bg-app-base rounded-lg p-3 space-y-3">
               <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-500 w-8">Giờ:</span>
+                <span className="text-xs text-app-muted w-8">Giờ:</span>
                 <select value={customHour} onChange={e => { const h = parseInt(e.target.value); setCustomHour(h); updateCron('custom', null, null, h, customMinute, customDays); resetPlan() }}
-                  className="border border-gray-300 rounded px-2 py-1 text-sm">
+                  className="border border-app-border rounded px-2 py-1 text-sm">
                   {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, '0')}</option>)}
                 </select>
-                <span className="text-gray-500">:</span>
+                <span className="text-app-muted">:</span>
                 <select value={customMinute} onChange={e => { const m = parseInt(e.target.value); setCustomMinute(m); updateCron('custom', null, null, customHour, m, customDays); resetPlan() }}
-                  className="border border-gray-300 rounded px-2 py-1 text-sm">
+                  className="border border-app-border rounded px-2 py-1 text-sm">
                   {[0, 15, 30, 45].map(m => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
                 </select>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500 w-8">Ngày:</span>
+                <span className="text-xs text-app-muted w-8">Ngày:</span>
                 {DAY_LABELS.map(d => (
                   <button key={d.value} onClick={() => {
                     const next = customDays.includes(d.value) ? customDays.filter(x => x !== d.value) : [...customDays, d.value].sort()
                     if (!next.length) return
                     setCustomDays(next); updateCron('custom', null, null, customHour, customMinute, next); resetPlan()
                   }} className={`w-8 h-8 rounded-full text-xs font-medium transition-colors ${
-                    customDays.includes(d.value) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+                    customDays.includes(d.value) ? 'bg-info text-white' : 'bg-app-hover text-app-muted hover:bg-app-hover'
                   }`}>{d.label}</button>
                 ))}
               </div>
@@ -469,9 +469,9 @@ export default function CampaignForm() {
           <button
             onClick={() => previewMut.mutate()}
             disabled={!canPreview || previewMut.isPending}
-            className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all ${
-              canPreview ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 shadow-lg shadow-purple-200'
-                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            className={`w-full flex items-center justify-center gap-2 py-3 rounded text-sm font-semibold transition-all ${
+              canPreview ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700  shadow-purple-200'
+                : 'bg-app-elevated text-app-dim cursor-not-allowed'
             }`}
           >
             {previewMut.isPending
@@ -479,7 +479,7 @@ export default function CampaignForm() {
               : <><Sparkles size={16} /> AI tạo kế hoạch</>}
           </button>
         ) : (
-          <div className="bg-white rounded-xl border-2 border-purple-200 overflow-hidden">
+          <div className="bg-app-surface rounded border-2 border-purple-200 overflow-hidden">
             <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center justify-between">
               <span className="text-sm font-semibold text-purple-800 flex items-center gap-2">
                 <Sparkles size={14} /> 6. Kế hoạch AI (AI tự quyết định)
@@ -503,7 +503,7 @@ export default function CampaignForm() {
               </div>
             )}
 
-            <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
+            <div className="px-5 py-3 border-t border-app-border flex items-center justify-between">
               <button
                 onClick={() => { resetPlan(); previewMut.mutate() }}
                 className="flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-800"
@@ -511,13 +511,13 @@ export default function CampaignForm() {
                 <Sparkles size={12} /> Tạo lại
               </button>
               {planConfirmed ? (
-                <span className="flex items-center gap-1.5 text-sm text-green-600 font-medium">
+                <span className="flex items-center gap-1.5 text-sm text-hermes font-medium">
                   <Check size={14} /> Đã xác nhận
                 </span>
               ) : (
                 <button
                   onClick={() => setPlanConfirmed(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-hermes text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
                 >
                   <Check size={14} /> Xác nhận & Lưu
                 </button>
@@ -528,13 +528,13 @@ export default function CampaignForm() {
 
         {/* === Submit === */}
         <div className="flex justify-end gap-3 pb-8">
-          <button onClick={() => navigate('/campaigns')} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Hủy</button>
+          <button onClick={() => navigate('/campaigns')} className="px-4 py-2 text-sm text-app-muted hover:text-app-primary">Hủy</button>
           <button
             onClick={() => saveMut.mutate()}
             disabled={!canSubmit || saveMut.isPending}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-              canSubmit ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'
-                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            className={`flex items-center gap-2 px-6 py-2.5 rounded text-sm font-semibold transition-all ${
+              canSubmit ? 'bg-info text-white hover:opacity-90  shadow-blue-200'
+                : 'bg-app-hover text-app-dim cursor-not-allowed'
             }`}
           >
             <Save size={16} /> {isEdit ? 'Cập nhật' : 'Tạo AI Pilot'}

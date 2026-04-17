@@ -94,14 +94,14 @@ export default function AgentStatus() {
           online
             ? bothOnline && !preferredId
               ? 'text-yellow-700 bg-yellow-50 hover:bg-yellow-100'
-              : 'text-green-700 bg-green-50 hover:bg-green-100'
+              : 'text-hermes bg-green-50 hover:bg-green-100'
             : 'text-red-700 bg-red-50 hover:bg-red-100'
         }`}
       >
         {online
           ? bothOnline && !preferredId
             ? <AlertTriangle size={13} className="text-yellow-500" />
-            : <span className="w-2 h-2 rounded-full bg-green-500" />
+            : <span className="w-2 h-2 rounded-full bg-hermes" />
           : <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
         }
         {online && <StatusIcon size={12} />}
@@ -111,19 +111,19 @@ export default function AgentStatus() {
       {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowModal(false)}>
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-app-surface rounded p-6 w-full max-w-md " onClick={e => e.stopPropagation()}>
 
             {/* Header */}
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${online ? 'bg-green-100' : 'bg-red-100'}`}>
-                  <Terminal className={`w-4 h-4 ${online ? 'text-green-600' : 'text-red-600'}`} />
+                  <Terminal className={`w-4 h-4 ${online ? 'text-hermes' : 'text-red-600'}`} />
                 </div>
-                <h2 className="text-lg font-bold text-gray-900">
+                <h2 className="text-lg font-bold text-app-primary">
                   {online ? 'Executor đang chạy' : 'Chưa có executor'}
                 </h2>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowModal(false)} className="text-app-dim hover:text-app-muted">
                 <X size={20} />
               </button>
             </div>
@@ -146,23 +146,23 @@ export default function AgentStatus() {
                 {extensions.map(a => {
                   const isActive = preferredId === a.agent_id || (!preferredId && !bothOnline)
                   return (
-                    <div key={a.agent_id} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${isActive && !bothOnline ? 'border-green-300 bg-green-50' : preferredId === a.agent_id ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50'}`}>
+                    <div key={a.agent_id} className={`flex items-center gap-3 rounded border-2 px-4 py-3 ${isActive && !bothOnline ? 'border-green-300 bg-green-50' : preferredId === a.agent_id ? 'border-blue-400 bg-blue-50' : 'border-app-border bg-app-base'}`}>
                       <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center shrink-0">
                         <Globe size={18} className="text-purple-600" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800">Chrome Extension</p>
-                        <p className="text-xs text-gray-400">Chạy trong trình duyệt</p>
+                        <p className="text-sm font-semibold text-app-primary">Chrome Extension</p>
+                        <p className="text-xs text-app-dim">Chạy trong trình duyệt</p>
                       </div>
-                      <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                      <span className="w-2 h-2 rounded-full bg-hermes shrink-0" />
                       {bothOnline && (
                         <button
                           onClick={() => handleSetExecutor(preferredId === a.agent_id ? null : a.agent_id)}
                           disabled={settingExecutor}
                           className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
                             preferredId === a.agent_id
-                              ? 'bg-blue-600 text-white hover:bg-blue-700'
-                              : 'bg-white border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
+                              ? 'bg-info text-white hover:opacity-90'
+                              : 'bg-app-surface border border-app-border text-app-muted hover:border-blue-400 hover:text-blue-600'
                           }`}
                         >
                           {settingExecutor ? <Loader2 size={11} className="animate-spin" /> : preferredId === a.agent_id ? <><CheckCircle2 size={11} /> Đang dùng</> : <><Circle size={11} /> Chọn</>}
@@ -176,23 +176,23 @@ export default function AgentStatus() {
                 {desktopAgents.map(a => {
                   const isActive = preferredId === a.agent_id || (!preferredId && !bothOnline)
                   return (
-                    <div key={a.agent_id} className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 ${isActive && !bothOnline ? 'border-green-300 bg-green-50' : preferredId === a.agent_id ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50'}`}>
+                    <div key={a.agent_id} className={`flex items-center gap-3 rounded border-2 px-4 py-3 ${isActive && !bothOnline ? 'border-green-300 bg-green-50' : preferredId === a.agent_id ? 'border-blue-400 bg-blue-50' : 'border-app-border bg-app-base'}`}>
                       <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
                         <Monitor size={18} className="text-blue-600" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800">Desktop Agent</p>
-                        <p className="text-xs text-gray-400 truncate">{a.hostname}</p>
+                        <p className="text-sm font-semibold text-app-primary">Desktop Agent</p>
+                        <p className="text-xs text-app-dim truncate">{a.hostname}</p>
                       </div>
-                      <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                      <span className="w-2 h-2 rounded-full bg-hermes shrink-0" />
                       {bothOnline && (
                         <button
                           onClick={() => handleSetExecutor(preferredId === a.agent_id ? null : a.agent_id)}
                           disabled={settingExecutor}
                           className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
                             preferredId === a.agent_id
-                              ? 'bg-blue-600 text-white hover:bg-blue-700'
-                              : 'bg-white border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600'
+                              ? 'bg-info text-white hover:opacity-90'
+                              : 'bg-app-surface border border-app-border text-app-muted hover:border-blue-400 hover:text-blue-600'
                           }`}
                         >
                           {settingExecutor ? <Loader2 size={11} className="animate-spin" /> : preferredId === a.agent_id ? <><CheckCircle2 size={11} /> Đang dùng</> : <><Circle size={11} /> Chọn</>}
@@ -203,11 +203,11 @@ export default function AgentStatus() {
                 })}
 
                 <div className="flex items-center justify-between pt-1">
-                  <p className="text-xs text-gray-400">Cập nhật mỗi 15s</p>
+                  <p className="text-xs text-app-dim">Cập nhật mỗi 15s</p>
                   <button
                     onClick={handleRecheck}
                     disabled={isRefetching}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-app-border text-app-muted rounded-lg hover:bg-app-base disabled:opacity-50"
                   >
                     <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
                     {isRefetching ? 'Đang kiểm tra...' : 'Làm mới'}
@@ -217,36 +217,36 @@ export default function AgentStatus() {
             ) : (
               /* ── OFFLINE: setup guide ── */
               <div className="space-y-4">
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-app-muted">
                   Cần có executor để đăng bài, fetch dữ liệu, kiểm tra tài khoản...
                 </p>
-                <p className="text-sm font-medium text-gray-700">Tuỳ chọn:</p>
+                <p className="text-sm font-medium text-app-primary">Tuỳ chọn:</p>
                 <div className="space-y-2">
                   <div className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-lg px-4 py-3">
                     <Globe size={18} className="text-purple-500 shrink-0" />
                     <div>
-                      <p className="text-sm font-semibold text-gray-800">Chrome Extension</p>
-                      <p className="text-xs text-gray-500">Cài addon vào trình duyệt, đăng nhập SocialFlow</p>
+                      <p className="text-sm font-semibold text-app-primary">Chrome Extension</p>
+                      <p className="text-xs text-app-muted">Cài addon vào trình duyệt, đăng nhập SocialFlow</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
                     <Monitor size={18} className="text-blue-500 shrink-0" />
                     <div>
-                      <p className="text-sm font-semibold text-gray-800">Desktop Agent</p>
-                      <p className="text-xs text-gray-500">Tải file ZIP, chạy SocialFlow.bat</p>
+                      <p className="text-sm font-semibold text-app-primary">Desktop Agent</p>
+                      <p className="text-xs text-app-muted">Tải file ZIP, chạy SocialFlow.bat</p>
                     </div>
                   </div>
                 </div>
                 <button
                   onClick={handleDownload}
                   disabled={downloading}
-                  className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                  className="w-full flex items-center justify-center gap-2 bg-info text-white px-4 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 text-sm font-medium"
                 >
                   {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                   {downloading ? 'Đang đóng gói...' : 'Tải Desktop Agent'}
                 </button>
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-gray-400">Đã chạy rồi?</p>
+                  <p className="text-xs text-app-dim">Đã chạy rồi?</p>
                   <button
                     onClick={handleRecheck}
                     disabled={isRefetching}

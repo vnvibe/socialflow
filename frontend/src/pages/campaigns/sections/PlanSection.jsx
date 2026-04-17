@@ -112,10 +112,10 @@ export default function PlanSection({ campaign }) {
 
   if (!campaign?.ai_plan?.roles?.length) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-        <Sparkles className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-        <p className="text-sm text-gray-500">Chiến dịch chưa có kế hoạch AI</p>
-        <p className="text-xs text-gray-400 mt-1">Vào tab Cài đặt để tạo kế hoạch</p>
+      <div className="bg-app-surface rounded border border-app-border p-8 text-center">
+        <Sparkles className="w-10 h-10 text-app-dim mx-auto mb-3" />
+        <p className="text-sm text-app-muted">Chiến dịch chưa có kế hoạch AI</p>
+        <p className="text-xs text-app-dim mt-1">Vào tab Cài đặt để tạo kế hoạch</p>
       </div>
     )
   }
@@ -123,9 +123,9 @@ export default function PlanSection({ campaign }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-gray-900">Kế hoạch chiến dịch</h2>
+        <h2 className="text-lg font-bold text-app-primary">Kế hoạch chiến dịch</h2>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500 flex items-center gap-1">
+          <span className="text-xs text-app-muted flex items-center gap-1">
             <Clock size={12} /> {runsPerDay} lần chạy/ngày
           </span>
           <button
@@ -139,24 +139,24 @@ export default function PlanSection({ campaign }) {
 
       {/* ── Regenerate Panel ── */}
       {showRegen && (
-        <div className="bg-white rounded-xl border-2 border-purple-300 overflow-hidden">
+        <div className="bg-app-surface rounded border-2 border-purple-300 overflow-hidden">
           <div className="px-5 py-3 bg-purple-50 border-b border-purple-200 flex items-center justify-between">
             <span className="text-sm font-semibold text-purple-800 flex items-center gap-2">
               <Sparkles size={14} /> Tạo lại kế hoạch AI
             </span>
-            <button onClick={cancelRegen} className="text-gray-400 hover:text-gray-600">
+            <button onClick={cancelRegen} className="text-app-dim hover:text-app-muted">
               <X size={16} />
             </button>
           </div>
           <div className="p-5 space-y-3">
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 block">Mô tả mục tiêu (mission)</label>
+              <label className="text-xs font-medium text-app-muted mb-1 block">Mô tả mục tiêu (mission)</label>
               <textarea
                 value={regenMission}
                 onChange={e => { setRegenMission(e.target.value); setRegenPlan(null); setRegenRows([]) }}
                 rows={4}
                 placeholder="VD: Tìm 4-6 nhóm VPS mỗi ngày, tương tác tự nhiên..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                className="w-full border border-app-border rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               />
             </div>
 
@@ -167,7 +167,7 @@ export default function PlanSection({ campaign }) {
                 className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all ${
                   regenMission.trim() && !regenMut.isPending
                     ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700'
-                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-app-elevated text-app-dim cursor-not-allowed'
                 }`}
               >
                 {regenMut.isPending
@@ -190,7 +190,7 @@ export default function PlanSection({ campaign }) {
                   <button
                     onClick={() => confirmRegenMut.mutate()}
                     disabled={confirmRegenMut.isPending}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-4 py-2 bg-hermes text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
                   >
                     {confirmRegenMut.isPending
                       ? <><Loader2 size={14} className="animate-spin" /> Đang lưu...</>
@@ -211,7 +211,7 @@ export default function PlanSection({ campaign }) {
         </p>
       </div>
 
-      <div className="bg-white rounded-xl border-2 border-purple-200 overflow-hidden">
+      <div className="bg-app-surface rounded border-2 border-purple-200 overflow-hidden">
         <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center justify-between">
           <span className="text-sm font-semibold text-purple-800 flex items-center gap-2">
             <Sparkles size={14} /> Kế hoạch hiện tại
@@ -223,11 +223,11 @@ export default function PlanSection({ campaign }) {
 
         <EditablePlanList rows={rows} onChange={handleChange} />
 
-        <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-end gap-2">
+        <div className="px-5 py-3 border-t border-app-border flex items-center justify-end gap-2">
           <button
             disabled={!dirty || saveMut.isPending}
             onClick={resetMut}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs text-app-muted hover:text-app-primary disabled:opacity-30 disabled:cursor-not-allowed"
           >
             <RotateCcw size={12} /> Hoàn tác
           </button>
@@ -236,8 +236,8 @@ export default function PlanSection({ campaign }) {
             onClick={() => saveMut.mutate()}
             className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
               dirty
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                ? 'bg-info text-white hover:opacity-90'
+                : 'bg-app-elevated text-app-dim cursor-not-allowed'
             }`}
           >
             {saveMut.isPending

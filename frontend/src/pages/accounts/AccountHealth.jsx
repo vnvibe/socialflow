@@ -6,17 +6,17 @@ import { vi } from 'date-fns/locale'
 import api from '../../lib/api'
 
 const STATUS_CONFIG = {
-  healthy:    { label: 'Khỏe', color: 'bg-green-100 text-green-700' },
+  healthy:    { label: 'Khỏe', color: 'bg-green-100 text-hermes' },
   checkpoint: { label: 'Checkpoint', color: 'bg-red-100 text-red-700' },
   expired:    { label: 'Hết hạn', color: 'bg-orange-100 text-orange-700' },
-  disabled:   { label: 'Tắt', color: 'bg-gray-100 text-gray-500' },
+  disabled:   { label: 'Tắt', color: 'bg-app-elevated text-app-muted' },
   at_risk:    { label: 'Nguy cơ', color: 'bg-red-100 text-red-700' },
-  unknown:    { label: 'Chưa kiểm', color: 'bg-gray-100 text-gray-400' },
+  unknown:    { label: 'Chưa kiểm', color: 'bg-app-elevated text-app-dim' },
 }
 
 const RISK_CONFIG = {
-  normal:   { label: 'Bình thường', color: 'bg-green-100 text-green-700', dot: 'bg-green-500' },
-  watch:    { label: 'Theo dõi', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  normal:   { label: 'Bình thường', color: 'bg-green-100 text-hermes', dot: 'bg-hermes' },
+  watch:    { label: 'Theo dõi', color: 'bg-blue-100 text-info', dot: 'bg-info' },
   warning:  { label: 'Cảnh báo', color: 'bg-yellow-100 text-yellow-700', dot: 'bg-yellow-500' },
   critical: { label: 'Nghiêm trọng', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 }
@@ -42,14 +42,14 @@ const SIGNAL_COLORS = {
 function BudgetBar({ label, used, max }) {
   if (!max) return null
   const pct = Math.min((used / max) * 100, 100)
-  const color = pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-yellow-500' : 'bg-green-500'
+  const color = pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-yellow-500' : 'bg-hermes'
   return (
     <div className="flex items-center gap-2" title={`${label}: ${used}/${max}`}>
-      <span className="text-[10px] text-gray-400 w-8">{label}</span>
-      <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+      <span className="text-[10px] text-app-dim w-8">{label}</span>
+      <div className="flex-1 h-1.5 bg-app-elevated rounded-full overflow-hidden">
         <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-[10px] text-gray-500 w-10 text-right">{used}/{max}</span>
+      <span className="text-[10px] text-app-muted w-10 text-right">{used}/{max}</span>
     </div>
   )
 }
@@ -78,17 +78,17 @@ export default function AccountHealth() {
     enabled: !!expandedAccount,
   })
 
-  if (isLoading) return <div className="text-center py-8 text-gray-500">Đang tải...</div>
+  if (isLoading) return <div className="text-center py-8 text-app-muted">Đang tải...</div>
 
   return (
     <div>
       <div className="flex items-center gap-3 mb-6">
-        <Activity size={24} className="text-blue-600" />
-        <h1 className="text-2xl font-bold text-gray-900">Sức khỏe Nick</h1>
+        <Activity size={24} className="text-info" />
+        <h1 className="text-2xl font-bold text-app-primary">Sức khỏe Nick</h1>
       </div>
 
       {accounts.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">Không có nick nào</div>
+        <div className="text-center py-12 text-app-dim">Không có nick nào</div>
       ) : (
         <div className="grid gap-4">
           {accounts.map(a => {
@@ -101,7 +101,7 @@ export default function AccountHealth() {
             const isExpanded = expandedAccount === a.id
 
             return (
-              <div key={a.id} className={`bg-white rounded-xl border p-4 ${isCritical ? 'border-red-300 bg-red-50/30' : hasIssue ? 'border-red-200' : 'border-gray-200'}`}>
+              <div key={a.id} className={`bg-app-surface rounded border p-4 ${isCritical ? 'border-red-300 bg-red-50/30' : hasIssue ? 'border-red-200' : 'border-app-border'}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${status.color}`}>
@@ -109,7 +109,7 @@ export default function AccountHealth() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-gray-900">{a.username || a.fb_user_id}</span>
+                        <span className="font-semibold text-app-primary">{a.username || a.fb_user_id}</span>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${status.color}`}>
                           {status.label}
                         </span>
@@ -122,7 +122,7 @@ export default function AccountHealth() {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 text-[10px] text-gray-400 mt-0.5">
+                      <div className="flex items-center gap-3 text-[10px] text-app-dim mt-0.5">
                         <span>{a.nick_age_days || 0} ngày tuổi</span>
                         {a.proxy_label && (
                           <span className="flex items-center gap-0.5"><Wifi size={8} /> {a.proxy_label}</span>
@@ -145,14 +145,14 @@ export default function AccountHealth() {
                     {a.last_error_type && (
                       <span className="text-[10px] text-red-400">{a.last_error_type}</span>
                     )}
-                    <div className="text-gray-400">
+                    <div className="text-app-dim">
                       <span>{a.posts_today || 0}/{a.max_daily_posts || 10} bài</span>
                     </div>
                     {/* Expand signals button */}
                     {(risk?.total_signals > 0 || a.failure_count_24h > 0) && (
                       <button
                         onClick={() => setExpandedAccount(isExpanded ? null : a.id)}
-                        className="p-1 text-gray-400 hover:text-gray-600"
+                        className="p-1 text-app-dim hover:text-app-muted"
                       >
                         {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                       </button>
@@ -174,27 +174,27 @@ export default function AccountHealth() {
 
                 {/* Expanded: Health signals list */}
                 {isExpanded && (
-                  <div className="mt-3 border-t border-gray-100 pt-3">
-                    <p className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
+                  <div className="mt-3 border-t border-app-border pt-3">
+                    <p className="text-xs font-medium text-app-muted mb-2 flex items-center gap-1">
                       <Radio size={12} /> Tín hiệu cảnh báo gần đây
                     </p>
                     {signalsLoading ? (
-                      <div className="text-xs text-gray-400 py-2">Đang tải...</div>
+                      <div className="text-xs text-app-dim py-2">Đang tải...</div>
                     ) : signals.length === 0 ? (
-                      <div className="text-xs text-gray-400 py-2">Không có tín hiệu cảnh báo</div>
+                      <div className="text-xs text-app-dim py-2">Không có tín hiệu cảnh báo</div>
                     ) : (
                       <div className="space-y-1.5 max-h-48 overflow-y-auto">
                         {signals.slice(0, 20).map(s => {
-                          const signalColor = SIGNAL_COLORS[s.signal_type] || 'bg-gray-100 text-gray-600'
+                          const signalColor = SIGNAL_COLORS[s.signal_type] || 'bg-app-elevated text-app-muted'
                           return (
                             <div key={s.id} className="flex items-center gap-2 text-xs">
                               <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium ${signalColor}`}>
                                 {SIGNAL_LABELS[s.signal_type] || s.signal_type}
                               </span>
-                              <span className="text-gray-500 flex-1 truncate">
+                              <span className="text-app-muted flex-1 truncate">
                                 {s.signal_detail?.url?.substring(0, 50) || s.signal_detail?.duration_ms ? `${s.signal_detail.duration_ms}ms` : JSON.stringify(s.signal_detail || {}).substring(0, 60)}
                               </span>
-                              <span className="text-[10px] text-gray-400 shrink-0">
+                              <span className="text-[10px] text-app-dim shrink-0">
                                 {s.detected_at ? formatDistanceToNow(new Date(s.detected_at), { locale: vi, addSuffix: true }) : ''}
                               </span>
                             </div>

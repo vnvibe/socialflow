@@ -71,7 +71,7 @@ export default function ProactiveAlerts() {
             if (accountId) nav(`/agents?repair=${accountId}`)
             else nav('/agents')
           }}
-          className="max-w-md rounded-xl shadow-xl cursor-pointer"
+          className="max-w-md rounded  cursor-pointer"
           style={{
             background: '#fef2f2',
             border: '2px solid #dc2626',

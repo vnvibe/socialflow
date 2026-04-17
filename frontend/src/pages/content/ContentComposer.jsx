@@ -304,10 +304,10 @@ export default function ContentComposer() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/content')} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-            <ArrowLeft size={20} className="text-gray-500" />
+          <button onClick={() => navigate('/content')} className="p-1.5 rounded-lg hover:bg-app-elevated transition-colors">
+            <ArrowLeft size={20} className="text-app-muted" />
           </button>
-          <h1 className="text-2xl font-bold text-gray-900">{editId ? 'Chỉnh sửa nội dung' : 'Tạo nội dung mới'}</h1>
+          <h1 className="text-2xl font-bold text-app-primary">{editId ? 'Chỉnh sửa nội dung' : 'Tạo nội dung mới'}</h1>
         </div>
         {editId && (
           <button
@@ -323,7 +323,7 @@ export default function ContentComposer() {
         <button
           onClick={() => saveMutation.mutate(form)}
           disabled={saveMutation.isPending || isLocked}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
         >
           <Save size={18} />
           {saveMutation.isPending ? 'Đang lưu...' : 'Lưu'}
@@ -331,7 +331,7 @@ export default function ContentComposer() {
       </div>
 
       {isLocked && (
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-xl flex items-start gap-3 text-sm mb-6">
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded flex items-start gap-3 text-sm mb-6">
           <AlertCircle size={18} className="text-yellow-600 shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">Nội dung này đang bị khóa</p>
@@ -344,9 +344,9 @@ export default function ContentComposer() {
         {/* Left: Form */}
         <div className="lg:col-span-2 space-y-4">
           {/* Media Selector */}
-          <div className="bg-white rounded-xl shadow p-4">
+          <div className="bg-app-surface rounded shadow p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">Ảnh / Video</h3>
+              <h3 className="font-semibold text-app-primary">Ảnh / Video</h3>
               <button
                 onClick={() => setShowAiImage(!showAiImage)}
                 disabled={isLocked}
@@ -361,21 +361,21 @@ export default function ContentComposer() {
             </div>
 
             {selectedMedia ? (
-              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                <div className="w-16 h-16 bg-gray-200 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
+              <div className="flex items-center gap-3 p-3 bg-app-base rounded-lg">
+                <div className="w-16 h-16 bg-app-hover rounded-lg overflow-hidden flex items-center justify-center shrink-0">
                   {(selectedMedia.thumbnail_url || selectedMedia.url || selectedMedia.original_path) ? (
                     <img src={selectedMedia.thumbnail_url || selectedMedia.url || selectedMedia.original_path} alt="" className="w-full h-full object-cover" />
                   ) : selectedMedia.type === 'video' ? (
-                    <Film size={24} className="text-gray-400" />
+                    <Film size={24} className="text-app-dim" />
                   ) : (
-                    <Image size={24} className="text-gray-400" />
+                    <Image size={24} className="text-app-dim" />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{selectedMedia.title || selectedMedia.original_filename || 'Ảnh'}</p>
-                  <p className="text-xs text-gray-500">{selectedMedia.type === 'video' ? 'Video' : selectedMedia.type === 'image' ? 'Ảnh' : selectedMedia.source_type === 'generated' ? 'AI Generated' : 'Media'}</p>
+                  <p className="text-xs text-app-muted">{selectedMedia.type === 'video' ? 'Video' : selectedMedia.type === 'image' ? 'Ảnh' : selectedMedia.source_type === 'generated' ? 'AI Generated' : 'Media'}</p>
                 </div>
-                <button onClick={() => setForm(prev => ({ ...prev, media_id: '' }))} disabled={isLocked} className="text-gray-400 hover:text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={() => setForm(prev => ({ ...prev, media_id: '' }))} disabled={isLocked} className="text-app-dim hover:text-app-muted disabled:opacity-50 disabled:cursor-not-allowed">
                   <X size={18} />
                 </button>
               </div>
@@ -388,12 +388,12 @@ export default function ContentComposer() {
                     value={mediaSearch}
                     onChange={e => setMediaSearch(e.target.value)}
                     disabled={isLocked}
-                    className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-500 bg-gray-50 bg-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 border border-app-border rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-500 bg-app-base bg-opacity-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
-                  <div className="flex bg-gray-100 p-1 rounded-lg shrink-0">
-                    <button onClick={() => setMediaFilter('all')} disabled={isLocked} className={`text-xs px-2 py-1 rounded transition-colors ${mediaFilter === 'all' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>Tất cả</button>
-                    <button onClick={() => setMediaFilter('ai')} disabled={isLocked} className={`text-xs px-2 py-1 rounded transition-colors ${mediaFilter === 'ai' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>AI & Mẫu</button>
-                    <button onClick={() => setMediaFilter('uploaded')} disabled={isLocked} className={`text-xs px-2 py-1 rounded transition-colors ${mediaFilter === 'uploaded' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>Tải lên</button>
+                  <div className="flex bg-app-elevated p-1 rounded-lg shrink-0">
+                    <button onClick={() => setMediaFilter('all')} disabled={isLocked} className={`text-xs px-2 py-1 rounded transition-colors ${mediaFilter === 'all' ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>Tất cả</button>
+                    <button onClick={() => setMediaFilter('ai')} disabled={isLocked} className={`text-xs px-2 py-1 rounded transition-colors ${mediaFilter === 'ai' ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>AI & Mẫu</button>
+                    <button onClick={() => setMediaFilter('uploaded')} disabled={isLocked} className={`text-xs px-2 py-1 rounded transition-colors ${mediaFilter === 'uploaded' ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>Tải lên</button>
                   </div>
                 </div>
 
@@ -406,21 +406,21 @@ export default function ContentComposer() {
                         key={m.id}
                         onClick={() => setForm(prev => ({ ...prev, media_id: m.id }))}
                         disabled={isLocked}
-                        className={`aspect-square bg-gray-100 rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all relative disabled:opacity-50 disabled:cursor-not-allowed ${form.media_id === m.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                        className={`aspect-square bg-app-elevated rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all relative disabled:opacity-50 disabled:cursor-not-allowed ${form.media_id === m.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
                       >
                         {(m.thumbnail_url || m.url || m.original_path) ? (
                           <img src={m.thumbnail_url || m.url || m.original_path} alt="" className="w-full h-full object-cover" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
-                            {m.type === 'video' ? <Film size={20} className="text-gray-400" /> : <Image size={20} className="text-gray-400" />}
+                            {m.type === 'video' ? <Film size={20} className="text-app-dim" /> : <Image size={20} className="text-app-dim" />}
                           </div>
                         )}
                         <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1 py-0.5 truncate">{m.title || m.original_filename}</span>
                       </button>
                     ))}
                   {mediaList.length === 0 && (
-                    <p className="col-span-4 text-sm text-gray-400 text-center py-4">
-                      Chưa có tìm thấy ảnh/video nào. <a href="/media" className="text-blue-500 hover:underline">Tải lên tại Thư viện</a>
+                    <p className="col-span-4 text-sm text-app-dim text-center py-4">
+                      Chưa có tìm thấy ảnh/video nào. <a href="/media" className="text-info hover:underline">Tải lên tại Thư viện</a>
                     </p>
                   )}
                 </div>
@@ -432,7 +432,7 @@ export default function ContentComposer() {
               <div className="mt-3 border border-purple-200 rounded-lg p-3 bg-purple-50/50 space-y-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-medium text-gray-700">Mô tả ảnh (prompt)</label>
+                    <label className="text-xs font-medium text-app-primary">Mô tả ảnh (prompt)</label>
                     <button
                       onClick={() => autoPromptMutation.mutate()}
                       disabled={autoPromptMutation.isPending || !form.caption || isLocked}
@@ -454,7 +454,7 @@ export default function ContentComposer() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-gray-500 mb-1 block">Model</label>
+                    <label className="text-xs text-app-muted mb-1 block">Model</label>
                     <select
                       value={aiImageModel}
                       onChange={e => setAiImageModel(e.target.value)}
@@ -465,7 +465,7 @@ export default function ContentComposer() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 mb-1 block">Kích thước</label>
+                    <label className="text-xs text-app-muted mb-1 block">Kích thước</label>
                     <select
                       value={aiImageSize}
                       onChange={e => setAiImageSize(e.target.value)}
@@ -493,11 +493,11 @@ export default function ContentComposer() {
           </div>
 
           {/* AI Style Presets */}
-          <div className="bg-white rounded-xl shadow p-4">
-            <h3 className="font-semibold text-gray-900 mb-3">Phong cách AI</h3>
+          <div className="bg-app-surface rounded shadow p-4">
+            <h3 className="font-semibold text-app-primary mb-3">Phong cách AI</h3>
             <div className="space-y-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5">Phong cách</label>
+                <label className="block text-xs text-app-muted mb-1.5">Phong cách</label>
                 <div className="flex flex-wrap gap-1.5">
                   {stylePresets.map(s => (
                     <button
@@ -507,7 +507,7 @@ export default function ContentComposer() {
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                         aiStyle === s.value
                           ? 'bg-purple-600 text-white'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          : 'bg-app-elevated text-app-muted hover:bg-app-hover'
                       } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       {s.emoji} {s.label}
@@ -517,7 +517,7 @@ export default function ContentComposer() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Lĩnh vực</label>
+                  <label className="block text-xs text-app-muted mb-1">Lĩnh vực</label>
                   <select value={aiNiche} onChange={e => setAiNiche(e.target.value)}
                     disabled={isLocked}
                     className="w-full border rounded-lg px-3 py-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
@@ -525,16 +525,16 @@ export default function ContentComposer() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Ngôn ngữ</label>
+                  <label className="block text-xs text-app-muted mb-1">Ngôn ngữ</label>
                   <div className="flex gap-1">
                     <button onClick={() => setAiLang('vi')}
                       disabled={isLocked}
-                      className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium ${aiLang === 'vi' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium ${aiLang === 'vi' ? 'bg-info text-white' : 'bg-app-elevated text-app-muted'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
                       Tiếng Việt
                     </button>
                     <button onClick={() => setAiLang('en')}
                       disabled={isLocked}
-                      className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium ${aiLang === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium ${aiLang === 'en' ? 'bg-info text-white' : 'bg-app-elevated text-app-muted'} ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
                       Tiếng Anh
                     </button>
                   </div>
@@ -544,11 +544,11 @@ export default function ContentComposer() {
           </div>
 
           {/* Caption */}
-          <div className="bg-white rounded-xl shadow p-4">
+          <div className="bg-app-surface rounded shadow p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">Nội dung bài viết</h3>
+              <h3 className="font-semibold text-app-primary">Nội dung bài viết</h3>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">{form.caption.length} ký tự</span>
+                <span className="text-xs text-app-dim">{form.caption.length} ký tự</span>
                 {form.caption.length > 0 && (
                   <button
                     onClick={() => improveAiMutation.mutate()}
@@ -580,9 +580,9 @@ export default function ContentComposer() {
           </div>
 
           {/* Hashtags */}
-          <div className="bg-white rounded-xl shadow p-4">
+          <div className="bg-app-surface rounded shadow p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-900">Hashtag</h3>
+              <h3 className="font-semibold text-app-primary">Hashtag</h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setForm(prev => ({ ...prev, hashtags: savedContent?.hashtags?.join(', ') || '' }))}
@@ -610,13 +610,13 @@ export default function ContentComposer() {
                     key={tag}
                     onClick={() => setForm(prev => ({ ...prev, hashtags: prev.hashtags + (prev.hashtags ? ' ' : '') + tag }))}
                     disabled={isLocked}
-                    className="text-[11px] px-2 py-0.5 rounded-full bg-white border border-purple-200 text-purple-700 hover:bg-purple-100 hover:border-purple-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="text-[11px] px-2 py-0.5 rounded-full bg-app-surface border border-purple-200 text-purple-700 hover:bg-purple-100 hover:border-purple-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {tag}
                   </button>
                 ))}
                 {aiSuggestedHashtags.filter(tag => !form.hashtags.includes(tag.replace(/^#/, ''))).length === 0 && (
-                  <span className="text-xs text-gray-500 italic">Đã thêm tất cả gợi ý.</span>
+                  <span className="text-xs text-app-muted italic">Đã thêm tất cả gợi ý.</span>
                 )}
               </div>
             )}
@@ -632,11 +632,11 @@ export default function ContentComposer() {
           </div>
 
           {/* Settings */}
-          <div className="bg-white rounded-xl shadow p-4">
-            <h3 className="font-semibold text-gray-900 mb-3">Cài đặt</h3>
+          <div className="bg-app-surface rounded shadow p-4">
+            <h3 className="font-semibold text-app-primary mb-3">Cài đặt</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Quyền riêng tư</label>
+                <label className="block text-sm text-app-muted mb-1">Quyền riêng tư</label>
                 <select
                   value={form.privacy}
                   onChange={e => setForm(prev => ({ ...prev, privacy: e.target.value }))}
@@ -647,7 +647,7 @@ export default function ContentComposer() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Biến thể</label>
+                <label className="block text-sm text-app-muted mb-1">Biến thể</label>
                 <select
                   value={form.spin_mode}
                   onChange={e => setForm(prev => ({ ...prev, spin_mode: e.target.value }))}
@@ -658,7 +658,7 @@ export default function ContentComposer() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Kiểu bài</label>
+                <label className="block text-sm text-app-muted mb-1">Kiểu bài</label>
                 <select
                   value={form.post_type}
                   onChange={e => setForm(prev => ({ ...prev, post_type: e.target.value }))}
@@ -678,16 +678,16 @@ export default function ContentComposer() {
         <div className="space-y-4">
           {/* Publish Status — always visible when editing */}
           {editId && (
-            <div className="bg-white rounded-xl shadow p-4">
+            <div className="bg-app-surface rounded shadow p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <Send size={15} className="text-blue-500" />
+                <h3 className="font-semibold text-app-primary flex items-center gap-2">
+                  <Send size={15} className="text-info" />
                   Trạng thái đăng
                 </h3>
                 <button
                   onClick={() => setShowPublishModal(true)}
                   disabled={isLocked}
-                  className="text-xs px-3 py-1 rounded-lg bg-green-50 text-green-600 hover:bg-green-100 font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="text-xs px-3 py-1 rounded-lg bg-green-50 text-hermes hover:bg-green-100 font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Send size={11} /> Đăng bài
                 </button>
@@ -705,29 +705,29 @@ export default function ContentComposer() {
                         isDone ? 'bg-green-50 border-green-200' : isFailed ? 'bg-red-50 border-red-200' : isPending ? 'bg-yellow-50 border-yellow-200' : 'bg-blue-50 border-blue-200'
                       }`}>
                         {/* Status icon */}
-                        {isDone && <CheckCircle size={14} className="text-green-500 flex-shrink-0" />}
+                        {isDone && <CheckCircle size={14} className="text-hermes flex-shrink-0" />}
                         {isFailed && <AlertCircle size={14} className="text-red-500 flex-shrink-0" />}
                         {isPending && <Clock size={14} className="text-yellow-500 flex-shrink-0" />}
-                        {isRunning && <Loader2 size={14} className="text-blue-500 animate-spin flex-shrink-0" />}
+                        {isRunning && <Loader2 size={14} className="text-info animate-spin flex-shrink-0" />}
 
                         {/* Info */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-medium text-gray-700 truncate max-w-[220px]" title={`${job.account_name || 'User'} ➔ ${job.target_name || 'Target'}`}>
+                            <span className="font-medium text-app-primary truncate max-w-[220px]" title={`${job.account_name || 'User'} ➔ ${job.target_name || 'Target'}`}>
                               {job.type === 'post_profile' ? (
                                 job.account_name || 'Cá nhân'
                               ) : (
                                 <>
-                                  <span className="text-gray-400 font-normal">Từ: {job.account_name || 'Tài khoản'} ➔ </span>
+                                  <span className="text-app-dim font-normal">Từ: {job.account_name || 'Tài khoản'} ➔ </span>
                                   {job.target_name || 'Nơi đăng'}
                                 </>
                               )}
                             </span>
-                            <span className="text-gray-400 text-[10px]">({job.type_label})</span>
+                            <span className="text-app-dim text-[10px]">({job.type_label})</span>
                             {(isPending || isFailed) && (
                               <button 
                                 onClick={() => setEditingJob(job)} 
-                                className="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-1 rounded transition-colors"
+                                className="text-info hover:text-info bg-blue-50 hover:bg-blue-100 p-1 rounded transition-colors"
                                 title="Đổi nơi đăng"
                               >
                                 <Edit2 size={12} />
@@ -738,7 +738,7 @@ export default function ContentComposer() {
                             <p className="text-red-500 mt-0.5 truncate" title={job.error_message}>{job.error_message}</p>
                           )}
                           {isDone && job.finished_at && (
-                            <p className="text-gray-400 mt-0.5">{new Date(job.finished_at).toLocaleString('vi-VN')}</p>
+                            <p className="text-app-dim mt-0.5">{new Date(job.finished_at).toLocaleString('vi-VN')}</p>
                           )}
                           {(isPending || isRunning) && (
                             <div className="mt-2 text-right">
@@ -756,7 +756,7 @@ export default function ContentComposer() {
                         {/* Actions */}
                         {isDone && job.post_url && (
                           <a href={job.post_url} target="_blank" rel="noopener noreferrer"
-                            className="flex items-center gap-1 px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 flex-shrink-0 font-medium"
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-green-100 text-hermes hover:bg-green-200 flex-shrink-0 font-medium"
                           >
                             <ExternalLink size={10} /> Xem
                           </a>
@@ -775,53 +775,53 @@ export default function ContentComposer() {
                   })}
                 </div>
               ) : (
-                <p className="text-sm text-gray-400 text-center py-3">Chưa đăng bài nào</p>
+                <p className="text-sm text-app-dim text-center py-3">Chưa đăng bài nào</p>
               )}
             </div>
           )}
 
           {/* Preview */}
-          <div className="bg-white rounded-xl shadow p-4 sticky top-4">
+          <div className="bg-app-surface rounded shadow p-4 sticky top-4">
             <div className="flex items-center gap-2 mb-3">
-              <Eye size={16} className="text-gray-500" />
-              <h3 className="font-semibold text-gray-900">Xem trước</h3>
+              <Eye size={16} className="text-app-muted" />
+              <h3 className="font-semibold text-app-primary">Xem trước</h3>
             </div>
             <div className="border rounded-lg overflow-hidden">
               <div className="flex items-center gap-3 p-3 border-b">
-                <div className="w-10 h-10 bg-gray-200 rounded-full" />
+                <div className="w-10 h-10 bg-app-hover rounded-full" />
                 <div>
                   <p className="text-sm font-semibold">Trang của bạn</p>
-                  <p className="text-xs text-gray-400">Vừa xong &middot; {form.privacy === 'PUBLIC' ? 'Công khai' : form.privacy === 'FRIENDS' ? 'Bạn bè' : 'Chỉ mình tôi'}</p>
+                  <p className="text-xs text-app-dim">Vừa xong &middot; {form.privacy === 'PUBLIC' ? 'Công khai' : form.privacy === 'FRIENDS' ? 'Bạn bè' : 'Chỉ mình tôi'}</p>
                 </div>
               </div>
               <div className="p-3">
-                <p className="text-sm whitespace-pre-wrap">{form.caption || <span className="text-gray-400 italic">Nội dung sẽ hiện ở đây...</span>}</p>
+                <p className="text-sm whitespace-pre-wrap">{form.caption || <span className="text-app-dim italic">Nội dung sẽ hiện ở đây...</span>}</p>
                 {form.hashtags && (
-                  <p className="text-sm text-blue-600 mt-2">
+                  <p className="text-sm text-info mt-2">
                     {form.hashtags.split(/[,\s]+/).filter(Boolean).map(t => `#${t.replace(/^#/, '')}`).join(' ')}
                   </p>
                 )}
               </div>
               {selectedMedia && (
-                <div className="bg-gray-100 aspect-video">
+                <div className="bg-app-elevated aspect-video">
                   {(selectedMedia.thumbnail_url || selectedMedia.url || selectedMedia.original_path) ? (
                     <img src={selectedMedia.thumbnail_url || selectedMedia.url || selectedMedia.original_path} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-400">
+                    <div className="w-full h-full flex items-center justify-center text-app-dim">
                       {selectedMedia.type === 'video' ? <Film size={48} /> : <Image size={48} />}
                     </div>
                   )}
                 </div>
               )}
-              <div className="flex border-t p-2 text-xs text-gray-500 justify-around">
+              <div className="flex border-t p-2 text-xs text-app-muted justify-around">
                 <span>Thích</span>
                 <span>Bình luận</span>
                 <span>Chia sẻ</span>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5">
-              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{form.post_type === 'post' ? 'Bài viết' : form.post_type === 'reel' ? 'Reel' : 'Story'}</span>
-              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Biến thể: {form.spin_mode === 'none' ? 'Không' : form.spin_mode === 'basic' ? 'Cơ bản' : 'AI'}</span>
+              <span className="text-xs bg-app-elevated text-app-muted px-2 py-0.5 rounded-full">{form.post_type === 'post' ? 'Bài viết' : form.post_type === 'reel' ? 'Reel' : 'Story'}</span>
+              <span className="text-xs bg-app-elevated text-app-muted px-2 py-0.5 rounded-full">Biến thể: {form.spin_mode === 'none' ? 'Không' : form.spin_mode === 'basic' ? 'Cơ bản' : 'AI'}</span>
             </div>
           </div>
         </div>
@@ -830,20 +830,20 @@ export default function ContentComposer() {
       {/* Post-save dialog */}
       {showPostSave && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 text-center">
-            <CheckCircle size={48} className="mx-auto mb-3 text-green-500" />
-            <h3 className="font-semibold text-gray-900 text-lg mb-1">Nội dung đã được lưu!</h3>
-            <p className="text-sm text-gray-500 mb-6">Bạn muốn đăng bài ngay hay quay lại danh sách?</p>
+          <div className="bg-app-surface rounded w-full max-w-sm  p-6 text-center">
+            <CheckCircle size={48} className="mx-auto mb-3 text-hermes" />
+            <h3 className="font-semibold text-app-primary text-lg mb-1">Nội dung đã được lưu!</h3>
+            <p className="text-sm text-app-muted mb-6">Bạn muốn đăng bài ngay hay quay lại danh sách?</p>
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => { setShowPostSave(false); setShowPublishModal(true) }}
-                className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-info text-white rounded-lg hover:opacity-90 font-medium"
               >
                 <Send size={16} /> Đăng bài ngay
               </button>
               <button
                 onClick={() => navigate('/content')}
-                className="w-full px-4 py-2.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50"
+                className="w-full px-4 py-2.5 border border-app-border text-app-muted rounded-lg hover:bg-app-base"
               >
                 Về danh sách
               </button>

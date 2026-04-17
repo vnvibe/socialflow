@@ -128,7 +128,7 @@ export default function FacebookSettings() {
   }
 
   if (loadingSettings) {
-    return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>
+    return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-info" /></div>
   }
 
   return (
@@ -137,24 +137,24 @@ export default function FacebookSettings() {
       <div>
         <div className="flex justify-between items-center mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Facebook Graph API</h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <h2 className="text-lg font-semibold text-app-primary">Facebook Graph API</h2>
+            <p className="text-sm text-app-muted mt-1">
               Access Token dùng để lấy số liệu analytics (reach, engagement, insights...)
             </p>
           </div>
           <button
             onClick={handleSave}
             disabled={saveMutation.isPending}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
           >
             <Save size={18} />
             {saveMutation.isPending ? 'Saving...' : 'Lưu'}
           </button>
         </div>
 
-        <div className="bg-white rounded-xl shadow p-6 space-y-4">
+        <div className="bg-app-surface rounded shadow p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-app-primary mb-1">
               User Access Token
             </label>
             <div className="flex gap-2">
@@ -168,7 +168,7 @@ export default function FacebookSettings() {
                 />
                 <button
                   onClick={() => setShowToken(!showToken)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-app-dim hover:text-app-muted"
                 >
                   {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -176,12 +176,12 @@ export default function FacebookSettings() {
               <button
                 onClick={handleTest}
                 disabled={testMutation.isPending}
-                className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-app-base disabled:opacity-50"
               >
                 {testMutation.isPending ? (
                   <Loader2 size={16} className="animate-spin" />
                 ) : testMutation.isSuccess && testMutation.data?.success ? (
-                  <CheckCircle size={16} className="text-green-500" />
+                  <CheckCircle size={16} className="text-hermes" />
                 ) : testMutation.isError ? (
                   <AlertCircle size={16} className="text-red-500" />
                 ) : null}
@@ -193,7 +193,7 @@ export default function FacebookSettings() {
           {/* App Credentials for long-lived token exchange */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">App ID</label>
+              <label className="block text-sm font-medium text-app-primary mb-1">App ID</label>
               <input
                 type="text"
                 value={appId}
@@ -203,7 +203,7 @@ export default function FacebookSettings() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">App Secret</label>
+              <label className="block text-sm font-medium text-app-primary mb-1">App Secret</label>
               <div className="relative">
                 <input
                   type={showAppSecret ? 'text' : 'password'}
@@ -214,7 +214,7 @@ export default function FacebookSettings() {
                 />
                 <button
                   onClick={() => setShowAppSecret(!showAppSecret)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-app-dim hover:text-app-muted"
                 >
                   {showAppSecret ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -226,7 +226,7 @@ export default function FacebookSettings() {
             <button
               onClick={() => exchangeMutation.mutate()}
               disabled={exchangeMutation.isPending}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 bg-hermes text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
             >
               {exchangeMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               Đổi sang Long-lived Token (60 ngày)
@@ -234,7 +234,7 @@ export default function FacebookSettings() {
           )}
 
           {exchangeMutation.isSuccess && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-hermes">
               <CheckCircle size={16} className="inline mr-1" />
               {exchangeMutation.data.message}
               {exchangeMutation.data.expires_at && (
@@ -246,11 +246,11 @@ export default function FacebookSettings() {
           {/* Token test result */}
           {testMutation.isSuccess && testMutation.data?.success && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
-              <div className="flex items-center gap-2 text-green-700 font-medium">
+              <div className="flex items-center gap-2 text-hermes font-medium">
                 <CheckCircle size={16} />
                 Token hợp lệ
               </div>
-              <div className="mt-2 text-green-600 space-y-1">
+              <div className="mt-2 text-hermes space-y-1">
                 <p>User: <strong>{testMutation.data.user.name}</strong> (ID: {testMutation.data.user.id})</p>
                 {testMutation.data.token_info && (
                   <>
@@ -269,12 +269,12 @@ export default function FacebookSettings() {
           )}
 
           {/* Info box */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-info">
             <div className="flex items-start gap-2">
               <BarChart3 size={16} className="mt-0.5 shrink-0" />
               <div>
                 <p className="font-medium">Graph API dùng cho cả analytics lẫn đăng bài</p>
-                <p className="mt-1 text-blue-600">
+                <p className="mt-1 text-info">
                   Khi fanpage có token, hệ thống sẽ ưu tiên đăng qua Graph API (nhanh gấp 10 lần so với trình duyệt).
                   Token cũng dùng để lấy số liệu: reach, impressions, engagement, follower count...
                 </p>
@@ -284,16 +284,16 @@ export default function FacebookSettings() {
 
           {/* Instructions */}
           <div className="pt-2 border-t">
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-app-dim">
               Lấy Access Token từ{' '}
-              <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+              <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" className="text-info hover:underline">
                 Graph API Explorer
               </a>
               {' '} — permissions cần:{' '}
-              <code className="bg-gray-100 px-1 rounded">pages_show_list</code>,{' '}
-              <code className="bg-gray-100 px-1 rounded">pages_read_engagement</code>,{' '}
-              <code className="bg-gray-100 px-1 rounded">pages_manage_posts</code>,{' '}
-              <code className="bg-gray-100 px-1 rounded">read_insights</code>
+              <code className="bg-app-elevated px-1 rounded">pages_show_list</code>,{' '}
+              <code className="bg-app-elevated px-1 rounded">pages_read_engagement</code>,{' '}
+              <code className="bg-app-elevated px-1 rounded">pages_manage_posts</code>,{' '}
+              <code className="bg-app-elevated px-1 rounded">read_insights</code>
             </p>
           </div>
         </div>
@@ -303,15 +303,15 @@ export default function FacebookSettings() {
       <div>
         <div className="flex justify-between items-center mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Kiểm tra quyền truy cập</h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <h2 className="text-lg font-semibold text-app-primary">Kiểm tra quyền truy cập</h2>
+            <p className="text-sm text-app-muted mt-1">
               Xem token có quyền truy cập những fanpages nào
             </p>
           </div>
           <button
             onClick={() => fetchPagesMutation.mutate()}
             disabled={fetchPagesMutation.isPending || !accessToken}
-            className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-app-base disabled:opacity-50"
           >
             {fetchPagesMutation.isPending ? (
               <Loader2 size={16} className="animate-spin" />
@@ -323,14 +323,14 @@ export default function FacebookSettings() {
         </div>
 
         {fetchPagesMutation.data?.pages?.length > 0 && (
-          <div className="bg-white rounded-xl shadow overflow-hidden">
-            <div className="p-4 border-b bg-gray-50 flex items-center justify-between gap-4 flex-wrap">
+          <div className="bg-app-surface rounded shadow overflow-hidden">
+            <div className="p-4 border-b bg-app-base flex items-center justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-700">Liên kết với tài khoản:</span>
+                <span className="text-sm font-medium text-app-primary">Liên kết với tài khoản:</span>
                 <select
                   value={importAccountId}
                   onChange={e => setImportAccountId(e.target.value)}
-                  className="text-sm border-gray-300 rounded-lg px-3 py-1.5 min-w-[200px]"
+                  className="text-sm border-app-border rounded-lg px-3 py-1.5 min-w-[200px]"
                 >
                   <option value="">-- Chọn tài khoản --</option>
                   {accounts.map(a => (
@@ -341,7 +341,7 @@ export default function FacebookSettings() {
               <button
                 onClick={() => importPagesMutation.mutate()}
                 disabled={importPagesMutation.isPending || !importAccountId || fetchPagesMutation.data.pages.length === 0}
-                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-colors"
                 title="Lưu các trang này vào dữ liệu hệ thống (Bao gồm Token Graph API)"
               >
                 {importPagesMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <DownloadCloud size={16} />}
@@ -350,7 +350,7 @@ export default function FacebookSettings() {
             </div>
 
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
+              <thead className="bg-app-base text-app-muted">
                 <tr>
                   <th className="px-4 py-3 text-left">Fanpage</th>
                   <th className="px-4 py-3 text-left">Category</th>
@@ -361,31 +361,31 @@ export default function FacebookSettings() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {fetchPagesMutation.data.pages.map(page => (
-                  <tr key={page.fb_page_id} className="hover:bg-gray-50">
+                  <tr key={page.fb_page_id} className="hover:bg-app-base">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {page.picture_url ? (
                           <img src={page.picture_url} alt="" className="w-8 h-8 rounded-full" />
                         ) : (
                           <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                            <Users size={14} className="text-blue-600" />
+                            <Users size={14} className="text-info" />
                           </div>
                         )}
                         <div>
-                          <p className="font-medium text-gray-900">{page.name}</p>
-                          <p className="text-xs text-gray-400">ID: {page.fb_page_id}</p>
+                          <p className="font-medium text-app-primary">{page.name}</p>
+                          <p className="text-xs text-app-dim">ID: {page.fb_page_id}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{page.category || '-'}</td>
-                    <td className="px-4 py-3 text-right text-gray-500">
+                    <td className="px-4 py-3 text-app-muted">{page.category || '-'}</td>
+                    <td className="px-4 py-3 text-right text-app-muted">
                       {page.fan_count?.toLocaleString() || '-'}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {page.has_page_token ? (
-                        <CheckCircle size={16} className="text-green-500 mx-auto" />
+                        <CheckCircle size={16} className="text-hermes mx-auto" />
                       ) : (
-                        <AlertCircle size={16} className="text-gray-300 mx-auto" />
+                        <AlertCircle size={16} className="text-app-dim mx-auto" />
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -393,7 +393,7 @@ export default function FacebookSettings() {
                         href={page.link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-blue-500 hover:text-blue-700"
+                        className="text-info hover:text-info"
                       >
                         <ExternalLink size={16} className="mx-auto" />
                       </a>
@@ -402,7 +402,7 @@ export default function FacebookSettings() {
                 ))}
               </tbody>
             </table>
-            <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-400">
+            <div className="px-4 py-2 bg-app-base border-t text-xs text-app-dim">
               {fetchPagesMutation.data.total} fanpages có thể lấy insights
             </div>
           </div>

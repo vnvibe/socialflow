@@ -157,7 +157,7 @@ export default function AccountList() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Accounts</h1>
+        <h1 className="text-2xl font-bold text-app-primary">Accounts</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={handleFetchAll}
@@ -169,14 +169,14 @@ export default function AccountList() {
           </button>
           <button
             onClick={() => setShowBulkModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-app-border text-app-primary hover:bg-app-base transition-colors"
           >
             <Upload className="w-4 h-4" />
             Bulk Import
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 transition-colors"
           >
             <Plus className="w-4 h-4" />
             Add Account
@@ -186,7 +186,7 @@ export default function AccountList() {
 
       {/* Fetch All Progress Banner */}
       {totalFetchCount > 0 && (
-        <div className={`rounded-xl border p-4 ${
+        <div className={`rounded border p-4 ${
           activeFetchCount > 0 ? 'bg-blue-50 border-blue-200' :
           failedFetchCount > 0 && doneFetchCount === 0 ? 'bg-red-50 border-red-200' :
           'bg-emerald-50 border-emerald-200'
@@ -194,14 +194,14 @@ export default function AccountList() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {activeFetchCount > 0 ? (
-                <Loader className="w-5 h-5 text-blue-500 animate-spin" />
+                <Loader className="w-5 h-5 text-info animate-spin" />
               ) : failedFetchCount > 0 && doneFetchCount === 0 ? (
                 <XCircle className="w-5 h-5 text-red-500" />
               ) : (
                 <CheckCircle2 className="w-5 h-5 text-emerald-500" />
               )}
               <div>
-                <p className="text-sm font-medium text-gray-900">
+                <p className="text-sm font-medium text-app-primary">
                   {activeFetchCount > 0
                     ? `Fetching pages & groups... (${doneFetchCount + failedFetchCount}/${totalFetchCount} done)`
                     : `Fetch complete — ${doneFetchCount} success, ${failedFetchCount} failed`
@@ -210,7 +210,7 @@ export default function AccountList() {
                 {activeFetchCount > 0 && (
                   <div className="w-48 h-1.5 bg-blue-100 rounded-full mt-1.5 overflow-hidden">
                     <div
-                      className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                      className="h-full bg-info rounded-full transition-all duration-500"
                       style={{ width: `${Math.round(((doneFetchCount + failedFetchCount) / totalFetchCount) * 100)}%` }}
                     />
                   </div>
@@ -218,7 +218,7 @@ export default function AccountList() {
               </div>
             </div>
             {activeFetchCount === 0 && (
-              <button onClick={dismissFetchAll} className="p-1 rounded-lg hover:bg-white/50 text-gray-500">
+              <button onClick={dismissFetchAll} className="p-1 rounded-lg hover:bg-app-surface/50 text-app-muted">
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -227,48 +227,48 @@ export default function AccountList() {
       )}
 
       <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-app-dim" />
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search accounts..."
-          className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          className="w-full pl-10 pr-4 py-2 rounded-lg border border-app-border text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
       </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center h-64">
-          <Loader className="w-6 h-6 animate-spin text-blue-500" />
+          <Loader className="w-6 h-6 animate-spin text-info" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
-          <p className="text-gray-500 text-sm">No accounts found</p>
+        <div className="text-center py-12 bg-app-surface rounded border border-app-border">
+          <p className="text-app-muted text-sm">No accounts found</p>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-app-surface rounded border border-app-border overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Username</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">FB User ID</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Browser</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Proxy</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Posts Today</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
+                <tr className="border-b border-app-border bg-app-base">
+                  <th className="text-left px-4 py-3 font-medium text-app-muted">Username</th>
+                  <th className="text-left px-4 py-3 font-medium text-app-muted">FB User ID</th>
+                  <th className="text-left px-4 py-3 font-medium text-app-muted">Browser</th>
+                  <th className="text-left px-4 py-3 font-medium text-app-muted">Proxy</th>
+                  <th className="text-left px-4 py-3 font-medium text-app-muted">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-app-muted">Posts Today</th>
+                  <th className="text-right px-4 py-3 font-medium text-app-muted">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((account) => (
-                  <tr key={account.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">
+                  <tr key={account.id} className="hover:bg-app-base">
+                    <td className="px-4 py-3 font-medium text-app-primary">
                       <div className="flex items-center gap-2">
                         {account.avatar_url ? (
                           <img src={account.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover" />
                         ) : (
-                          <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                          <div className="w-7 h-7 rounded-full bg-app-hover flex items-center justify-center text-xs text-app-muted">
                             {(account.username || '?')[0].toUpperCase()}
                           </div>
                         )}
@@ -277,7 +277,7 @@ export default function AccountList() {
                           const fs = getFetchStatus(account.id)
                           if (!fs) return null
                           if (['pending', 'claimed', 'running'].includes(fs.status))
-                            return <RefreshCw className="w-3.5 h-3.5 text-blue-500 animate-spin" />
+                            return <RefreshCw className="w-3.5 h-3.5 text-info animate-spin" />
                           if (fs.status === 'done')
                             return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                           if (fs.status === 'failed')
@@ -286,8 +286,8 @@ export default function AccountList() {
                         })()}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{account.fb_user_id}</td>
-                    <td className="px-4 py-3 text-gray-500">{account.browser_type || 'chromium'}</td>
+                    <td className="px-4 py-3 text-app-muted">{account.fb_user_id}</td>
+                    <td className="px-4 py-3 text-app-muted">{account.browser_type || 'chromium'}</td>
                     <td className="px-4 py-3">
                       <ProxyBadge proxy={account.proxies} />
                     </td>
@@ -304,7 +304,7 @@ export default function AccountList() {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">
+                    <td className="px-4 py-3 text-app-muted">
                       {account.posts_today ?? 0}/{account.max_daily_posts ?? 10}
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -312,7 +312,7 @@ export default function AccountList() {
                         <button
                           onClick={() => requireAgent(() => healthCheckMutation.mutate(account.id))}
                           disabled={healthCheckMutation.isPending || account.status === 'checking'}
-                          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-app-border text-app-muted hover:bg-app-base disabled:opacity-50 transition-colors"
                         >
                           {account.status === 'checking' ? (
                             <Loader className="w-3.5 h-3.5 animate-spin" />
@@ -323,7 +323,7 @@ export default function AccountList() {
                         </button>
                         <button
                           onClick={() => setEditAccount(account)}
-                          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-app-border text-app-muted hover:bg-app-base transition-colors"
                         >
                           <Pencil className="w-3.5 h-3.5" />
                           Edit
@@ -338,7 +338,7 @@ export default function AccountList() {
                         </button>
                         <Link
                           to={`/accounts/${account.id}`}
-                          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-app-border text-app-muted hover:bg-app-base transition-colors"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           View
@@ -428,12 +428,12 @@ function ProxyInput({ proxyId, setProxyId, newProxy, setNewProxy, proxies = [] }
 
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1.5">Proxy</label>
+      <label className="block text-sm font-medium text-app-primary mb-1.5">Proxy</label>
       <div className="flex items-center gap-2 mb-2">
         <button
           type="button"
           onClick={() => { setMode('none'); setProxyId(''); setNewProxy('') }}
-          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'none' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'none' ? 'bg-app-base text-white border-gray-900' : 'border-app-border text-app-muted hover:bg-app-base'}`}
         >
           No Proxy
         </button>
@@ -441,7 +441,7 @@ function ProxyInput({ proxyId, setProxyId, newProxy, setNewProxy, proxies = [] }
           <button
             type="button"
             onClick={() => { setMode('select'); setNewProxy('') }}
-            className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'select' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'select' ? 'bg-app-base text-white border-gray-900' : 'border-app-border text-app-muted hover:bg-app-base'}`}
           >
             Select Existing
           </button>
@@ -449,7 +449,7 @@ function ProxyInput({ proxyId, setProxyId, newProxy, setNewProxy, proxies = [] }
         <button
           type="button"
           onClick={() => { setMode('new'); setProxyId('') }}
-          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'new' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${mode === 'new' ? 'bg-info text-white border-blue-600' : 'border-app-border text-app-muted hover:bg-app-base'}`}
         >
           + Add New
         </button>
@@ -459,7 +459,7 @@ function ProxyInput({ proxyId, setProxyId, newProxy, setNewProxy, proxies = [] }
         <select
           value={proxyId}
           onChange={(e) => setProxyId(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
           <option value="">Choose proxy...</option>
           {proxies.map((p) => (
@@ -477,7 +477,7 @@ function ProxyInput({ proxyId, setProxyId, newProxy, setNewProxy, proxies = [] }
           value={newProxy}
           onChange={(e) => setNewProxy(e.target.value)}
           placeholder="host:port:username:password"
-          className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+          className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
         />
       )}
     </div>
@@ -538,32 +538,32 @@ function AddAccountModal({ onClose, onSuccess }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-app-surface rounded  w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Add Account</h2>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-500">
+          <h2 className="text-lg font-semibold text-app-primary">Add Account</h2>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-app-elevated text-app-muted">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Cookie String</label>
+            <label className="block text-sm font-medium text-app-primary mb-1.5">Cookie String</label>
             <textarea
               value={cookieString}
               onChange={(e) => setCookieString(e.target.value)}
               rows={5}
               placeholder={'Paste cookie here...\nSupports: JSON array (Cookie Editor), plain string (c_user=xxx; xs=xxx; ...)'}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
+              className="w-full rounded-lg border border-app-border px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Browser Type</label>
+            <label className="block text-sm font-medium text-app-primary mb-1.5">Browser Type</label>
             <select
               value={browserType}
               onChange={(e) => setBrowserType(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="chromium">Chromium</option>
               <option value="camoufox">Camoufox</option>
@@ -579,28 +579,28 @@ function AddAccountModal({ onClose, onSuccess }) {
           />
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Ngày tạo tài khoản FB (optional)</label>
+            <label className="block text-sm font-medium text-app-primary mb-1.5">Ngày tạo tài khoản FB (optional)</label>
             <input
               type="date"
               value={fbCreatedAt}
               onChange={(e) => setFbCreatedAt(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <p className="text-xs text-gray-400 mt-1">Tuổi thật của nick FB, dùng để tính warm-up chính xác hơn</p>
+            <p className="text-xs text-app-dim mt-1">Tuổi thật của nick FB, dùng để tính warm-up chính xác hơn</p>
           </div>
 
           <div className="flex items-center gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-app-border text-app-primary hover:bg-app-base transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400 transition-colors"
             >
               {loading && <Loader className="w-4 h-4 animate-spin" />}
               {loading ? 'Adding...' : 'Add Account'}
@@ -674,31 +674,31 @@ function EditAccountModal({ account, onClose, onSuccess }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-app-surface rounded  w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Edit Account</h2>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-500">
+          <h2 className="text-lg font-semibold text-app-primary">Edit Account</h2>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-app-elevated text-app-muted">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Username</label>
+            <label className="block text-sm font-medium text-app-primary mb-1.5">Username</label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Browser Type</label>
+            <label className="block text-sm font-medium text-app-primary mb-1.5">Browser Type</label>
             <select
               value={browserType}
               onChange={(e) => setBrowserType(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="chromium">Chromium</option>
               <option value="camoufox">Camoufox</option>
@@ -714,35 +714,35 @@ function EditAccountModal({ account, onClose, onSuccess }) {
           />
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Update Cookie (optional)</label>
+            <label className="block text-sm font-medium text-app-primary mb-1.5">Update Cookie (optional)</label>
             <textarea
               value={cookieString}
               onChange={(e) => setCookieString(e.target.value)}
               rows={3}
               placeholder="Leave empty to keep current cookie"
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
+              className="w-full rounded-lg border border-app-border px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
+            <label className="block text-sm font-medium text-app-primary mb-1.5">Notes</label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
+              className="w-full rounded-lg border border-app-border px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Ngày tạo tài khoản FB</label>
+            <label className="block text-sm font-medium text-app-primary mb-1.5">Ngày tạo tài khoản FB</label>
             <input
               type="date"
               value={fbCreatedAt}
               onChange={(e) => setFbCreatedAt(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full rounded-lg border border-app-border px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <p className="text-xs text-gray-400 mt-1">Tuổi thật của nick FB, dùng để tính warm-up chính xác hơn</p>
+            <p className="text-xs text-app-dim mt-1">Tuổi thật của nick FB, dùng để tính warm-up chính xác hơn</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -751,23 +751,23 @@ function EditAccountModal({ account, onClose, onSuccess }) {
               id="isActive"
               checked={isActive}
               onChange={(e) => setIsActive(e.target.checked)}
-              className="rounded border-gray-300"
+              className="rounded border-app-border"
             />
-            <label htmlFor="isActive" className="text-sm text-gray-700">Active</label>
+            <label htmlFor="isActive" className="text-sm text-app-primary">Active</label>
           </div>
 
           <div className="flex items-center gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-app-border text-app-primary hover:bg-app-base transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400 transition-colors"
             >
               {loading && <Loader className="w-4 h-4 animate-spin" />}
               {loading ? 'Saving...' : 'Save Changes'}
@@ -820,17 +820,17 @@ function BulkImportModal({ onClose, onSuccess }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6">
+      <div className="bg-app-surface rounded  w-full max-w-lg mx-4 p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Bulk Import</h2>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-500">
+          <h2 className="text-lg font-semibold text-app-primary">Bulk Import</h2>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-app-elevated text-app-muted">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            <label className="block text-sm font-medium text-app-primary mb-1.5">
               Cookie Strings (one per line)
             </label>
             <textarea
@@ -838,9 +838,9 @@ function BulkImportModal({ onClose, onSuccess }) {
               onChange={(e) => setCookies(e.target.value)}
               rows={8}
               placeholder={'Paste cookie strings here, one per line...\ncookie_string_1\ncookie_string_2'}
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
+              className="w-full rounded-lg border border-app-border px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-app-muted mt-1">
               {cookies.split('\n').filter((l) => l.trim()).length} cookie(s) entered
             </p>
           </div>
@@ -849,14 +849,14 @@ function BulkImportModal({ onClose, onSuccess }) {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-app-border text-app-primary hover:bg-app-base transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg bg-info text-white hover:opacity-90 disabled:bg-blue-400 transition-colors"
             >
               {loading && <Loader className="w-4 h-4 animate-spin" />}
               {loading ? 'Importing...' : 'Import All'}

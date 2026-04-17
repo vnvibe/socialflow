@@ -2,7 +2,7 @@ import { ThumbsUp, MessageCircle, Share2, Globe } from 'lucide-react'
 
 export default function PostPreview({ username, avatar, caption, media }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 max-w-lg overflow-hidden">
+    <div className="bg-app-surface rounded border border-app-border max-w-lg overflow-hidden">
       {/* Post header */}
       <div className="flex items-center gap-3 px-4 pt-4 pb-2">
         {avatar ? (
@@ -17,10 +17,10 @@ export default function PostPreview({ username, avatar, caption, media }) {
           </div>
         )}
         <div>
-          <p className="text-sm font-semibold text-gray-900">
+          <p className="text-sm font-semibold text-app-primary">
             {username || 'Username'}
           </p>
-          <p className="text-xs text-gray-500 flex items-center gap-1">
+          <p className="text-xs text-app-muted flex items-center gap-1">
             Just now &middot;{' '}
             <Globe className="w-3 h-3" />
           </p>
@@ -30,7 +30,7 @@ export default function PostPreview({ username, avatar, caption, media }) {
       {/* Caption */}
       {caption && (
         <div className="px-4 py-2">
-          <p className="text-sm text-gray-800 whitespace-pre-wrap">{caption}</p>
+          <p className="text-sm text-app-primary whitespace-pre-wrap">{caption}</p>
         </div>
       )}
 
@@ -75,17 +75,17 @@ export default function PostPreview({ username, avatar, caption, media }) {
       )}
 
       {/* Engagement bar */}
-      <div className="px-4 py-2 border-t border-gray-100 mt-2">
+      <div className="px-4 py-2 border-t border-app-border mt-2">
         <div className="flex items-center justify-between">
-          <button className="flex items-center gap-2 text-gray-500 hover:text-blue-600 transition-colors py-2 px-3 rounded-lg hover:bg-gray-50 text-sm">
+          <button className="flex items-center gap-2 text-app-muted hover:text-blue-600 transition-colors py-2 px-3 rounded-lg hover:bg-app-base text-sm">
             <ThumbsUp className="w-4 h-4" />
             Like
           </button>
-          <button className="flex items-center gap-2 text-gray-500 hover:text-blue-600 transition-colors py-2 px-3 rounded-lg hover:bg-gray-50 text-sm">
+          <button className="flex items-center gap-2 text-app-muted hover:text-blue-600 transition-colors py-2 px-3 rounded-lg hover:bg-app-base text-sm">
             <MessageCircle className="w-4 h-4" />
             Comment
           </button>
-          <button className="flex items-center gap-2 text-gray-500 hover:text-blue-600 transition-colors py-2 px-3 rounded-lg hover:bg-gray-50 text-sm">
+          <button className="flex items-center gap-2 text-app-muted hover:text-blue-600 transition-colors py-2 px-3 rounded-lg hover:bg-app-base text-sm">
             <Share2 className="w-4 h-4" />
             Share
           </button>

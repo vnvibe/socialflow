@@ -15,11 +15,11 @@ const statusTabs = [
 
 const statusConfig = {
   pending: { icon: Clock, label: 'Chờ xử lý', cls: 'bg-yellow-100 text-yellow-700' },
-  claimed: { icon: Loader2, label: 'Đang xử lý', cls: 'bg-blue-100 text-blue-700' },
-  running: { icon: Loader2, label: 'Đang chạy', cls: 'bg-blue-100 text-blue-700' },
-  done: { icon: CheckCircle, label: 'Hoàn thành', cls: 'bg-green-100 text-green-700' },
+  claimed: { icon: Loader2, label: 'Đang xử lý', cls: 'bg-blue-100 text-info' },
+  running: { icon: Loader2, label: 'Đang chạy', cls: 'bg-blue-100 text-info' },
+  done: { icon: CheckCircle, label: 'Hoàn thành', cls: 'bg-green-100 text-hermes' },
   failed: { icon: AlertCircle, label: 'Thất bại', cls: 'bg-red-100 text-red-700' },
-  cancelled: { icon: Ban, label: 'Đã huỷ', cls: 'bg-gray-100 text-gray-600' }
+  cancelled: { icon: Ban, label: 'Đã huỷ', cls: 'bg-app-elevated text-app-muted' }
 }
 
 const typeLabels = {
@@ -87,62 +87,62 @@ export default function PublishQueue() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Hàng đợi đăng bài</h1>
+        <h1 className="text-2xl font-bold text-app-primary">Hàng đợi đăng bài</h1>
         <div className="flex gap-2">
-          <Link to="/content/new" className="flex items-center gap-2 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">
+          <Link to="/content/new" className="flex items-center gap-2 border border-app-border px-4 py-2 rounded-lg hover:bg-app-base text-sm">
             <PenSquare size={16} /> Tạo nội dung mới
           </Link>
-          <Link to="/campaigns" className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+          <Link to="/campaigns" className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90 text-sm">
             <Megaphone size={16} /> Chiến dịch
           </Link>
         </div>
       </div>
 
       {/* Status Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex gap-1 mb-6 bg-app-elevated rounded-lg p-1 w-fit">
         {statusTabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === tab.key ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
+              activeTab === tab.key ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'
             }`}
           >
             {tab.label}
             {tabCounts[tab.key] > 0 && (
-              <span className="ml-1.5 text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{tabCounts[tab.key]}</span>
+              <span className="ml-1.5 text-xs bg-app-hover text-app-muted px-1.5 py-0.5 rounded-full">{tabCounts[tab.key]}</span>
             )}
           </button>
         ))}
       </div>
 
-      <div className="bg-white rounded-xl shadow overflow-hidden">
+      <div className="bg-app-surface rounded shadow overflow-hidden">
         <table className="w-full">
-          <thead className="bg-gray-50">
+          <thead className="bg-app-base">
             <tr>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Loại</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Nơi đăng</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Tài khoản</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Nội dung</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Lịch đăng</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Trạng thái</th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Thao tác</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Loại</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Nơi đăng</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Tài khoản</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Nội dung</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Lịch đăng</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Trạng thái</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-app-muted">Thao tác</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {filtered.map(job => (
-              <tr key={job.id} className="hover:bg-gray-50">
+              <tr key={job.id} className="hover:bg-app-base">
                 <td className="px-4 py-3">
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                  <span className="text-xs bg-app-elevated text-app-muted px-2 py-0.5 rounded-full">
                     {typeLabels[job.job_type || job.type] || job.job_type || job.type || '—'}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm">
                   {job.target_name || job.fanpage?.name || job.group?.name || '—'}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-600">{job.account?.username || '—'}</td>
-                <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate">{job.content?.caption || job.caption || '—'}</td>
-                <td className="px-4 py-3 text-sm text-gray-500">
+                <td className="px-4 py-3 text-sm text-app-muted">{job.account?.username || '—'}</td>
+                <td className="px-4 py-3 text-sm text-app-muted max-w-xs truncate">{job.content?.caption || job.caption || '—'}</td>
+                <td className="px-4 py-3 text-sm text-app-muted">
                   {job.scheduled_at ? new Date(job.scheduled_at).toLocaleString() : '—'}
                 </td>
                 <td className="px-4 py-3">
@@ -153,7 +153,7 @@ export default function PublishQueue() {
                     <button
                       onClick={() => cancelMutation.mutate(job.id)}
                       disabled={pendingAction.id === job.id}
-                      className="text-gray-400 hover:text-red-600 inline-flex items-center gap-1 text-sm"
+                      className="text-app-dim hover:text-red-600 inline-flex items-center gap-1 text-sm"
                       title="Huỷ bài đăng"
                     >
                       {pendingAction.id === job.id && pendingAction.type === 'cancel' ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />} Huỷ
@@ -163,7 +163,7 @@ export default function PublishQueue() {
                     <button
                       onClick={() => retryMutation.mutate(job.id)}
                       disabled={pendingAction.id === job.id}
-                      className="text-gray-400 hover:text-blue-600 inline-flex items-center gap-1 text-sm"
+                      className="text-app-dim hover:text-info inline-flex items-center gap-1 text-sm"
                       title="Thử lại"
                     >
                       {pendingAction.id === job.id && pendingAction.type === 'retry' ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />} Thử lại
@@ -178,14 +178,14 @@ export default function PublishQueue() {
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-12 text-center">
-                  <Send size={40} className="mx-auto mb-3 text-gray-300" />
-                  <p className="text-gray-500 mb-2">Chưa có bài đăng nào trong hàng đợi</p>
-                  <p className="text-sm text-gray-400 mb-4">Tạo nội dung hoặc chiến dịch để bắt đầu đăng bài tự động</p>
+                  <Send size={40} className="mx-auto mb-3 text-app-dim" />
+                  <p className="text-app-muted mb-2">Chưa có bài đăng nào trong hàng đợi</p>
+                  <p className="text-sm text-app-dim mb-4">Tạo nội dung hoặc chiến dịch để bắt đầu đăng bài tự động</p>
                   <div className="flex items-center justify-center gap-3">
-                    <Link to="/content/new" className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                    <Link to="/content/new" className="inline-flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90 text-sm">
                       <Plus size={16} /> Tạo nội dung
                     </Link>
-                    <Link to="/campaigns" className="inline-flex items-center gap-2 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">
+                    <Link to="/campaigns" className="inline-flex items-center gap-2 border border-app-border px-4 py-2 rounded-lg hover:bg-app-base text-sm">
                       <Megaphone size={16} /> Tạo chiến dịch
                     </Link>
                   </div>

@@ -49,7 +49,7 @@ function HealthRing({ score, size = 48 }) {
 function ProgressBar({ value, max, color = 'bg-purple-500' }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
   return (
-    <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+    <div className="flex-1 bg-app-hover rounded-full h-1.5">
       <div className={`${color} h-1.5 rounded-full transition-all duration-300`} style={{ width: `${pct}%` }} />
     </div>
   )
@@ -57,11 +57,11 @@ function ProgressBar({ value, max, color = 'bg-purple-500' }) {
 
 const NICK_ACTION_CFG = {
   react: { label: 'React', color: 'bg-pink-100 text-pink-700' },
-  comment: { label: 'Comment', color: 'bg-blue-100 text-blue-700' },
+  comment: { label: 'Comment', color: 'bg-blue-100 text-info' },
   story_view: { label: 'Story', color: 'bg-purple-100 text-purple-700' },
-  feed_browse: { label: 'Browse', color: 'bg-gray-100 text-gray-600' },
-  session_start: { label: 'Bắt đầu', color: 'bg-green-100 text-green-700' },
-  session_end: { label: 'Kết thúc', color: 'bg-green-100 text-green-700' },
+  feed_browse: { label: 'Browse', color: 'bg-app-elevated text-app-muted' },
+  session_start: { label: 'Bắt đầu', color: 'bg-green-100 text-hermes' },
+  session_end: { label: 'Kết thúc', color: 'bg-green-100 text-hermes' },
   error: { label: 'Lỗi', color: 'bg-red-100 text-red-700' },
   like: { label: 'Like', color: 'bg-pink-100 text-pink-700' },
 }
@@ -73,15 +73,15 @@ function NickActivityLog({ accountId }) {
     enabled: !!accountId,
   })
 
-  if (isLoading) return <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400 text-center py-3">Đang tải...</div>
-  if (!logs.length) return <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400 text-center py-3">Chưa có hoạt động</div>
+  if (isLoading) return <div className="mt-3 pt-3 border-t border-app-border text-xs text-app-dim text-center py-3">Đang tải...</div>
+  if (!logs.length) return <div className="mt-3 pt-3 border-t border-app-border text-xs text-app-dim text-center py-3">Chưa có hoạt động</div>
 
   return (
-    <div className="mt-3 pt-3 border-t border-gray-100">
-      <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-2">Nhật ký gần đây</p>
+    <div className="mt-3 pt-3 border-t border-app-border">
+      <p className="text-[10px] font-medium text-app-dim uppercase tracking-wider mb-2">Nhật ký gần đây</p>
       <div className="space-y-1 max-h-40 overflow-y-auto">
         {logs.map((log, i) => {
-          const cfg = NICK_ACTION_CFG[log.action_type] || { label: log.action_type, color: 'bg-gray-100 text-gray-600' }
+          const cfg = NICK_ACTION_CFG[log.action_type] || { label: log.action_type, color: 'bg-app-elevated text-app-muted' }
           const isFailed = log.result_status === 'failed'
           const d = log.details || {}
           return (
@@ -89,10 +89,10 @@ function NickActivityLog({ accountId }) {
               <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium ${isFailed ? 'bg-red-100 text-red-700' : cfg.color}`}>
                 {cfg.label}
               </span>
-              <span className="flex-1 text-gray-500 truncate">
+              <span className="flex-1 text-app-muted truncate">
                 {d.comment_text || d.category || d.error || log.target_name || ''}
               </span>
-              <span className="text-[10px] text-gray-400 shrink-0">
+              <span className="text-[10px] text-app-dim shrink-0">
                 {log.created_at ? formatDistanceToNow(new Date(log.created_at), { locale: vi, addSuffix: true }) : ''}
               </span>
             </div>
@@ -116,34 +116,34 @@ function NurtureCard({ profile, jobStatus, onRun, onStop, onToggle, onSettings, 
   const inCampaign = profile.campaign_count > 0
 
   return (
-    <div className={`bg-white rounded-xl border p-4 hover:shadow-md transition-all ${
-      isRunning ? 'border-green-300 ring-1 ring-green-200' : isPending ? 'border-yellow-300' : 'border-gray-200'
+    <div className={`bg-app-surface rounded border p-4 hover: transition-all ${
+      isRunning ? 'border-green-300 ring-1 ring-green-200' : isPending ? 'border-yellow-300' : 'border-app-border'
     }`}>
       <div className="flex items-start gap-3 mb-3">
         {/* Avatar */}
         <div className="relative shrink-0">
           {avatar ? (
-            <img src={avatar} alt="" className="w-11 h-11 rounded-full object-cover border border-gray-200"
+            <img src={avatar} alt="" className="w-11 h-11 rounded-full object-cover border border-app-border"
               onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }} />
           ) : null}
           <div className={`w-11 h-11 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 items-center justify-center text-white font-bold text-sm ${avatar ? 'hidden' : 'flex'}`}>
             {(acc.username || '?')[0].toUpperCase()}
           </div>
           <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
-            isRunning ? 'bg-green-500 animate-pulse' : profile.enabled && isHealthy ? 'bg-green-500' : 'bg-gray-300'
+            isRunning ? 'bg-hermes animate-pulse' : profile.enabled && isHealthy ? 'bg-hermes' : 'bg-app-hover'
           }`} />
         </div>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-gray-900 truncate">{acc.username || 'Unknown'}</p>
+            <p className="text-sm font-semibold text-app-primary truncate">{acc.username || 'Unknown'}</p>
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full bg-gradient-to-r ${phase.color} text-white font-medium`}>
               {phase.label}
             </span>
             {/* Job status badge */}
             {isRunning && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium flex items-center gap-1">
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-hermes font-medium flex items-center gap-1">
                 <Loader size={8} className="animate-spin" /> Dang chay
               </span>
             )}
@@ -154,12 +154,12 @@ function NurtureCard({ profile, jobStatus, onRun, onStop, onToggle, onSettings, 
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[10px] text-gray-500">{profile.age_days || 0}d</span>
-            <span className="text-[10px] text-gray-300">·</span>
-            <span className="text-[10px] text-gray-500">{PERSONA_LABELS[profile.persona] || profile.persona}</span>
+            <span className="text-[10px] text-app-muted">{profile.age_days || 0}d</span>
+            <span className="text-[10px] text-app-dim">·</span>
+            <span className="text-[10px] text-app-muted">{PERSONA_LABELS[profile.persona] || profile.persona}</span>
             {inCampaign && (
               <>
-                <span className="text-[10px] text-gray-300">·</span>
+                <span className="text-[10px] text-app-dim">·</span>
                 <span className="text-[10px] text-orange-500 font-medium" title="Nick nay cung dang chay AI Pilot campaign">AI Pilot</span>
               </>
             )}
@@ -174,21 +174,21 @@ function NurtureCard({ profile, jobStatus, onRun, onStop, onToggle, onSettings, 
       <div className="space-y-1.5 mb-3">
         <div className="flex items-center gap-2 text-[10px]">
           <Heart size={10} className="text-pink-400 shrink-0" />
-          <span className="w-8 text-gray-500">React</span>
+          <span className="w-8 text-app-muted">React</span>
           <ProgressBar value={profile.today_reacts} max={profile.daily_reacts} color="bg-pink-500" />
-          <span className="w-10 text-right text-gray-400">{profile.today_reacts}/{profile.daily_reacts}</span>
+          <span className="w-10 text-right text-app-dim">{profile.today_reacts}/{profile.daily_reacts}</span>
         </div>
         <div className="flex items-center gap-2 text-[10px]">
           <MessageCircle size={10} className="text-blue-400 shrink-0" />
-          <span className="w-8 text-gray-500">Cmt</span>
-          <ProgressBar value={profile.today_comments} max={profile.daily_comments} color="bg-blue-500" />
-          <span className="w-10 text-right text-gray-400">{profile.today_comments}/{profile.daily_comments}</span>
+          <span className="w-8 text-app-muted">Cmt</span>
+          <ProgressBar value={profile.today_comments} max={profile.daily_comments} color="bg-info" />
+          <span className="w-10 text-right text-app-dim">{profile.today_comments}/{profile.daily_comments}</span>
         </div>
         <div className="flex items-center gap-2 text-[10px]">
           <Eye size={10} className="text-purple-400 shrink-0" />
-          <span className="w-8 text-gray-500">Story</span>
+          <span className="w-8 text-app-muted">Story</span>
           <ProgressBar value={profile.today_stories} max={profile.daily_story_views} color="bg-purple-500" />
-          <span className="w-10 text-right text-gray-400">{profile.today_stories}/{profile.daily_story_views}</span>
+          <span className="w-10 text-right text-app-dim">{profile.today_stories}/{profile.daily_story_views}</span>
         </div>
       </div>
 
@@ -198,11 +198,11 @@ function NurtureCard({ profile, jobStatus, onRun, onStop, onToggle, onSettings, 
           {/* Enable toggle */}
           <button
             onClick={() => onToggle(profile.id, !profile.enabled)}
-            className={`relative w-8 h-4 rounded-full transition-colors ${profile.enabled ? 'bg-purple-600' : 'bg-gray-300'}`}
+            className={`relative w-8 h-4 rounded-full transition-colors ${profile.enabled ? 'bg-purple-600' : 'bg-app-hover'}`}
           >
-            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${profile.enabled ? 'left-4' : 'left-0.5'}`} />
+            <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-app-surface shadow transition-transform ${profile.enabled ? 'left-4' : 'left-0.5'}`} />
           </button>
-          <span className="text-[10px] text-gray-500 ml-1">
+          <span className="text-[10px] text-app-muted ml-1">
             {profile.last_session_at ? formatDistanceToNow(new Date(profile.last_session_at), { addSuffix: true, locale: vi }) : 'Chua chay'}
           </span>
         </div>
@@ -214,20 +214,20 @@ function NurtureCard({ profile, jobStatus, onRun, onStop, onToggle, onSettings, 
             </button>
           ) : (
             <button onClick={() => onRun(profile.id)}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors" title="Chay ngay">
+              className="flex items-center gap-1 px-2 py-1 text-xs text-hermes bg-green-50 rounded-lg hover:bg-green-100 transition-colors" title="Chay ngay">
               <Play size={12} /> Chay
             </button>
           )}
           <button onClick={() => onSettings(profile)}
-            className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors" title="Cai dat">
+            className="p-1.5 text-app-dim hover:bg-app-elevated rounded-lg transition-colors" title="Cai dat">
             <Settings size={14} />
           </button>
           <button onClick={() => onDelete(profile.id)}
-            className="p-1.5 text-gray-500 hover:text-red-400 rounded-lg transition-colors" title="Xoa">
+            className="p-1.5 text-app-muted hover:text-red-400 rounded-lg transition-colors" title="Xoa">
             <Trash2 size={12} />
           </button>
           <button onClick={onToggleExpand}
-            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg transition-colors" title="Nhật ký">
+            className="p-1.5 text-app-dim hover:text-app-muted rounded-lg transition-colors" title="Nhật ký">
             {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
         </div>
@@ -344,7 +344,7 @@ export default function NickNurture() {
     react: { icon: Heart, color: 'text-pink-400' },
     comment: { icon: MessageCircle, color: 'text-blue-400' },
     story_view: { icon: Eye, color: 'text-purple-400' },
-    feed_browse: { icon: Activity, color: 'text-gray-400' },
+    feed_browse: { icon: Activity, color: 'text-app-dim' },
     session_start: { icon: Play, color: 'text-green-400' },
     session_end: { icon: CheckCircle, color: 'text-green-400' },
     error: { icon: XCircle, color: 'text-red-400' },
@@ -355,9 +355,9 @@ export default function NickNurture() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Sprout size={24} className="text-green-600" />
-          <h1 className="text-2xl font-bold text-gray-900">Nuoi Nick</h1>
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+          <Sprout size={24} className="text-hermes" />
+          <h1 className="text-2xl font-bold text-app-primary">Nuoi Nick</h1>
+          <span className="text-xs text-app-muted bg-app-elevated px-2 py-0.5 rounded-full">
             {profiles.filter(p => p.enabled).length}/{profiles.length} active
           </span>
         </div>
@@ -365,17 +365,17 @@ export default function NickNurture() {
           {profiles.length > 0 && (
             <>
               <button onClick={() => bulkEnableMut.mutate()}
-                className="px-3 py-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors">
+                className="px-3 py-1.5 text-xs text-hermes bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors">
                 Bat tat ca
               </button>
               <button onClick={() => bulkDisableMut.mutate()}
-                className="px-3 py-1.5 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors">
+                className="px-3 py-1.5 text-xs text-app-muted bg-app-base border border-app-border rounded-lg hover:bg-app-elevated transition-colors">
                 Tat tat ca
               </button>
             </>
           )}
           <button onClick={() => setShowAddPicker(!showAddPicker)}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+            className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-colors">
             <Plus size={14} /> Them nick
           </button>
         </div>
@@ -383,15 +383,15 @@ export default function NickNurture() {
 
       {/* Add Picker */}
       {showAddPicker && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-          <p className="text-xs text-gray-500 mb-2">Chon nick de bat dau nuoi:</p>
+        <div className="bg-app-surface rounded border border-app-border p-4 mb-4">
+          <p className="text-xs text-app-muted mb-2">Chon nick de bat dau nuoi:</p>
           {availableAccounts.length === 0 ? (
-            <p className="text-xs text-gray-500 italic">Tat ca nick da duoc them hoac khong co nick active.</p>
+            <p className="text-xs text-app-muted italic">Tat ca nick da duoc them hoac khong co nick active.</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {availableAccounts.map(a => (
                 <button key={a.id} onClick={() => { createMut.mutate(a.id); setShowAddPicker(false) }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 text-gray-600 border border-gray-200 rounded-lg text-xs hover:bg-gray-100 transition-colors">
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-app-base text-app-muted border border-app-border rounded-lg text-xs hover:bg-app-elevated transition-colors">
                   <Plus size={10} /> {a.username || a.fb_user_id}
                 </button>
               ))}
@@ -401,11 +401,11 @@ export default function NickNurture() {
       )}
 
       {/* Info banner: Nuôi Nick vs AI Pilot */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-start gap-2">
-        <AlertTriangle size={14} className="text-blue-500 mt-0.5 shrink-0" />
-        <div className="text-xs text-blue-700">
+      <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-4 flex items-start gap-2">
+        <AlertTriangle size={14} className="text-info mt-0.5 shrink-0" />
+        <div className="text-xs text-info">
           <p className="font-medium mb-0.5">Nuoi Nick ≠ AI Pilot</p>
-          <p className="text-blue-600">
+          <p className="text-info">
             <strong>Nuoi Nick</strong>: Luot feed ca nhan, like/comment bai <strong>ban be</strong>, xem story — gia lap nguoi dung that.
             {' '}<strong>AI Pilot</strong>: Tuong tac trong <strong>group</strong> theo chien dich (like, comment, ket ban, dang bai).
             {' '}Hai he thong doc lap, co the chay song song tren cung 1 nick.
@@ -416,44 +416,44 @@ export default function NickNurture() {
       {/* Stats Summary */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="bg-app-surface rounded border border-app-border p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider">Sessions</p>
-                <p className="text-xl font-bold text-gray-900 mt-0.5">{stats.today_sessions || 0}</p>
+                <p className="text-[10px] text-app-dim uppercase tracking-wider">Sessions</p>
+                <p className="text-xl font-bold text-app-primary mt-0.5">{stats.today_sessions || 0}</p>
               </div>
               <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
-                <Activity size={14} className="text-green-600" />
+                <Activity size={14} className="text-hermes" />
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="bg-app-surface rounded border border-app-border p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider">Reacts</p>
-                <p className="text-xl font-bold text-gray-900 mt-0.5">{stats.today_reacts || 0}</p>
+                <p className="text-[10px] text-app-dim uppercase tracking-wider">Reacts</p>
+                <p className="text-xl font-bold text-app-primary mt-0.5">{stats.today_reacts || 0}</p>
               </div>
               <div className="w-8 h-8 rounded-lg bg-pink-50 flex items-center justify-center">
                 <Heart size={14} className="text-pink-600" />
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="bg-app-surface rounded border border-app-border p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider">Comments</p>
-                <p className="text-xl font-bold text-gray-900 mt-0.5">{stats.today_comments || 0}</p>
+                <p className="text-[10px] text-app-dim uppercase tracking-wider">Comments</p>
+                <p className="text-xl font-bold text-app-primary mt-0.5">{stats.today_comments || 0}</p>
               </div>
               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                <MessageCircle size={14} className="text-blue-600" />
+                <MessageCircle size={14} className="text-info" />
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="bg-app-surface rounded border border-app-border p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider">Avg Health</p>
-                <p className="text-xl font-bold text-gray-900 mt-0.5">{stats.avg_health || 0}%</p>
+                <p className="text-[10px] text-app-dim uppercase tracking-wider">Avg Health</p>
+                <p className="text-xl font-bold text-app-primary mt-0.5">{stats.avg_health || 0}%</p>
               </div>
               <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center">
                 <Shield size={14} className="text-purple-600" />
@@ -469,9 +469,9 @@ export default function NickNurture() {
           <Loader size={24} className="animate-spin text-purple-400" />
         </div>
       ) : profiles.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
-          <Sprout size={48} className="mx-auto text-gray-300 mb-3" />
-          <p className="text-gray-500 mb-2">Chua co nick nao duoc nuoi</p>
+        <div className="text-center py-16 bg-app-surface rounded border border-app-border">
+          <Sprout size={48} className="mx-auto text-app-dim mb-3" />
+          <p className="text-app-muted mb-2">Chua co nick nao duoc nuoi</p>
           <button onClick={() => setShowAddPicker(true)}
             className="text-purple-400 hover:underline text-sm">Them nick dau tien</button>
         </div>
@@ -495,16 +495,16 @@ export default function NickNurture() {
       )}
 
       {/* Detailed Activity Log */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <Activity size={14} className="text-gray-500" /> Nhat ky hoat dong
+      <div className="bg-app-surface rounded border border-app-border overflow-hidden">
+        <div className="px-4 py-3 border-b border-app-border flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-app-primary flex items-center gap-2">
+            <Activity size={14} className="text-app-muted" /> Nhat ky hoat dong
           </h3>
-          <span className="text-xs text-gray-400">{activity.length} entries</span>
+          <span className="text-xs text-app-dim">{activity.length} entries</span>
         </div>
 
         {activity.length === 0 ? (
-          <div className="text-center py-12 text-gray-400 text-sm">Chua co hoat dong nao</div>
+          <div className="text-center py-12 text-app-dim text-sm">Chua co hoat dong nao</div>
         ) : (
           <div className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
             {activity.map((a, i) => {
@@ -517,15 +517,15 @@ export default function NickNurture() {
               const d = a.details || {}
 
               return (
-                <div key={a.id || i} className={`px-4 py-3 hover:bg-gray-50 transition-colors ${isSession ? 'bg-gray-50/50' : ''}`}>
+                <div key={a.id || i} className={`px-4 py-3 hover:bg-app-base transition-colors ${isSession ? 'bg-app-base/50' : ''}`}>
                   {/* Main row */}
                   <div className="flex items-center gap-2.5">
                     {/* Icon */}
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                      isFailed ? 'bg-red-50' : isSession ? 'bg-gray-100' :
+                      isFailed ? 'bg-red-50' : isSession ? 'bg-app-elevated' :
                       a.action_type === 'react' ? 'bg-pink-50' :
                       a.action_type === 'comment' ? 'bg-blue-50' :
-                      a.action_type === 'story_view' ? 'bg-purple-50' : 'bg-gray-50'
+                      a.action_type === 'story_view' ? 'bg-purple-50' : 'bg-app-base'
                     }`}>
                       <Icon size={13} className={isFailed ? 'text-red-500' : cfg.color} />
                     </div>
@@ -533,16 +533,16 @@ export default function NickNurture() {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium text-gray-900">{accName}</span>
-                        <span className="text-gray-300">·</span>
+                        <span className="text-sm font-medium text-app-primary">{accName}</span>
+                        <span className="text-app-dim">·</span>
                         <span className={`text-xs font-medium ${
                           a.action_type === 'react' ? 'text-pink-600' :
-                          a.action_type === 'comment' ? 'text-blue-600' :
+                          a.action_type === 'comment' ? 'text-info' :
                           a.action_type === 'story_view' ? 'text-purple-600' :
-                          a.action_type === 'session_start' ? 'text-green-600' :
-                          a.action_type === 'session_end' ? 'text-gray-500' :
+                          a.action_type === 'session_start' ? 'text-hermes' :
+                          a.action_type === 'session_end' ? 'text-app-muted' :
                           a.action_type === 'error' ? 'text-red-600' :
-                          'text-gray-500'
+                          'text-app-muted'
                         }`}>
                           {a.action_type === 'react' ? 'Liked bai ban be' :
                            a.action_type === 'comment' ? 'Comment bai ban be' :
@@ -563,7 +563,7 @@ export default function NickNurture() {
                     </div>
 
                     {/* Timestamp */}
-                    <span className="text-[11px] text-gray-400 shrink-0">
+                    <span className="text-[11px] text-app-dim shrink-0">
                       {a.created_at ? formatDistanceToNow(new Date(a.created_at), { addSuffix: true, locale: vi }) : ''}
                     </span>
                   </div>
@@ -574,8 +574,8 @@ export default function NickNurture() {
                       {/* Comment text */}
                       {d.comment_text && (
                         <div className="flex items-start gap-1.5">
-                          <MessageCircle size={10} className="text-gray-400 mt-0.5 shrink-0" />
-                          <p className="text-xs text-gray-600">
+                          <MessageCircle size={10} className="text-app-dim mt-0.5 shrink-0" />
+                          <p className="text-xs text-app-muted">
                             "{d.comment_text}"
                             {d.category && (
                               <span className="ml-1.5 text-purple-500 text-[10px] font-medium">#{d.category}</span>
@@ -586,12 +586,12 @@ export default function NickNurture() {
 
                       {/* Post text preview */}
                       {d.post_text && !d.comment_text && (
-                        <p className="text-[11px] text-gray-400 truncate">Bai viet: "{d.post_text}"</p>
+                        <p className="text-[11px] text-app-dim truncate">Bai viet: "{d.post_text}"</p>
                       )}
 
                       {/* Session summary */}
                       {a.action_type === 'session_end' && (
-                        <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                        <div className="flex items-center gap-3 text-[11px] text-app-muted">
                           {d.reacts !== undefined && <span>👍 {d.reacts} reacts</span>}
                           {d.comments !== undefined && <span>💬 {d.comments} comments</span>}
                           {d.stories !== undefined && <span>👁 {d.stories} stories</span>}
@@ -601,7 +601,7 @@ export default function NickNurture() {
 
                       {/* Session start info */}
                       {a.action_type === 'session_start' && (
-                        <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                        <div className="flex items-center gap-3 text-[11px] text-app-muted">
                           {d.persona && <span>🎭 {d.persona}</span>}
                           {d.age_days !== undefined && <span>📅 {d.age_days} ngay tuoi</span>}
                         </div>
@@ -609,7 +609,7 @@ export default function NickNurture() {
 
                       {/* Feed browse details */}
                       {a.action_type === 'feed_browse' && d.scrolls && (
-                        <p className="text-[11px] text-gray-400">Scroll {d.scrolls} lan</p>
+                        <p className="text-[11px] text-app-dim">Scroll {d.scrolls} lan</p>
                       )}
 
                       {/* Error details */}

@@ -115,19 +115,19 @@ export default function JobEditTargetModal({ job, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-app-surface rounded w-full max-w-lg  max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+        <div className="flex items-center justify-between p-4 border-b border-app-border">
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-gray-900">Thay đổi Nơi đăng</h3>
+            <h3 className="font-semibold text-app-primary">Thay đổi Nơi đăng</h3>
             {job && (
-              <p className="text-xs text-gray-500 mt-0.5 truncate">
+              <p className="text-xs text-app-muted mt-0.5 truncate">
                 Đang chuyển đổi cho tiến trình đang: {job.status === 'failed' ? 'Lỗi' : 'Chờ chạy'}
               </p>
             )}
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-            <X className="w-5 h-5 text-gray-500" />
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-app-elevated transition-colors">
+            <X className="w-5 h-5 text-app-muted" />
           </button>
         </div>
 
@@ -135,7 +135,7 @@ export default function JobEditTargetModal({ job, onClose }) {
         <div className="p-4 space-y-4">
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-gray-700">
+              <label className="text-sm font-medium text-app-primary">
                 Chọn lại nơi xuất bản
               </label>
             </div>
@@ -143,22 +143,22 @@ export default function JobEditTargetModal({ job, onClose }) {
             {/* Search + filter */}
             <div className="flex items-center gap-2 mb-2">
               <div className="flex-1 relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-app-dim" />
                 <input
                   type="text"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Tìm trang/nhóm..."
-                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
-              <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5 whitespace-nowrap overflow-x-auto min-w-0">
+              <div className="flex gap-0.5 bg-app-elevated rounded-lg p-0.5 whitespace-nowrap overflow-x-auto min-w-0">
                 {filterTabs.map(tab => (
                   <button
                     key={tab.key}
                     onClick={() => setFilterType(tab.key)}
                     className={`px-2 py-1 text-xs rounded-md font-medium transition-colors ${
-                      filterType === tab.key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                      filterType === tab.key ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'
                     }`}
                   >
                     {tab.label}
@@ -169,12 +169,12 @@ export default function JobEditTargetModal({ job, onClose }) {
 
             {/* Target list */}
             {hasTargets ? (
-              <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-lg divide-y bg-white">
+              <div className="max-h-52 overflow-y-auto border border-app-border rounded-lg divide-y bg-app-surface">
                 {filteredTargets.map(target => (
                   <label
                     key={`${target.type}-${target.id}`}
                     className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${
-                      isSelected(target) ? 'bg-blue-50' : 'hover:bg-gray-50'
+                      isSelected(target) ? 'bg-blue-50' : 'hover:bg-app-base'
                     }`}
                   >
                     <input
@@ -182,7 +182,7 @@ export default function JobEditTargetModal({ job, onClose }) {
                       name="job_target"
                       checked={isSelected(target)}
                       onChange={() => setSelectedTarget(target)}
-                      className="rounded-full border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="rounded-full border-app-border text-blue-600 focus:ring-blue-500"
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
@@ -192,11 +192,11 @@ export default function JobEditTargetModal({ job, onClose }) {
                           ? <UsersRound className="w-3.5 h-3.5 text-purple-500 shrink-0" />
                           : <UsersRound className="w-3.5 h-3.5 text-orange-500 shrink-0" />
                         }
-                        <span className="text-sm font-medium text-gray-800 truncate">{target.name}</span>
+                        <span className="text-sm font-medium text-app-primary truncate">{target.name}</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                        <span className="text-xs text-gray-400">Từ: {target.accountName}</span>
-                        {target.info && target.type !== 'profile' && <span className="text-xs text-gray-400">&middot; {target.info}</span>}
+                        <span className="text-xs text-app-dim">Từ: {target.accountName}</span>
+                        {target.info && target.type !== 'profile' && <span className="text-xs text-app-dim">&middot; {target.info}</span>}
                       </div>
                     </div>
                     <span className={`text-[10px] whitespace-nowrap shrink-0 px-1.5 py-0.5 rounded-full ${
@@ -207,29 +207,29 @@ export default function JobEditTargetModal({ job, onClose }) {
                   </label>
                 ))}
                 {filteredTargets.length === 0 && (
-                  <p className="text-xs text-gray-400 text-center py-6">Không tìm thấy kết quả</p>
+                  <p className="text-xs text-app-dim text-center py-6">Không tìm thấy kết quả</p>
                 )}
               </div>
             ) : (
-              <div className="text-center py-6 border border-gray-200 rounded-lg bg-gray-50">
-                <p className="text-sm text-gray-500">Chưa có trang/nhóm nào</p>
+              <div className="text-center py-6 border border-app-border rounded-lg bg-app-base">
+                <p className="text-sm text-app-muted">Chưa có trang/nhóm nào</p>
               </div>
             )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 rounded-b-2xl">
+        <div className="p-4 border-t border-app-border flex justify-end gap-2 bg-app-base rounded-b-2xl">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-app-primary bg-app-surface border border-app-border rounded-lg hover:bg-app-base transition-colors"
           >
             Hủy
           </button>
           <button
             onClick={() => updateTargetMutation.mutate()}
             disabled={!selectedTarget || updateTargetMutation.isPending}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-info rounded-lg hover:opacity-90 disabled:opacity-50 transition-colors"
           >
             <Save size={16} />
             {updateTargetMutation.isPending ? 'Đang cập nhật...' : 'Cập nhật Nơi đăng'}

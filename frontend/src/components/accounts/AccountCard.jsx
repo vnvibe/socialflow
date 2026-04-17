@@ -30,19 +30,19 @@ export default function AccountCard({ account }) {
   return (
     <Link
       to={`/accounts/${id}`}
-      className="block bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow"
+      className="block bg-app-surface rounded border border-app-border p-5 hover: transition-shadow"
     >
       <div className="flex items-start justify-between mb-3">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900">{username}</h3>
-          <p className="text-xs text-gray-500 mt-0.5">ID: {fb_user_id}</p>
+          <h3 className="text-sm font-semibold text-app-primary">{username}</h3>
+          <p className="text-xs text-app-muted mt-0.5">ID: {fb_user_id}</p>
         </div>
         <HealthBadge status={status} />
       </div>
 
       <div className="space-y-2 text-sm">
-        <div className="flex items-center gap-2 text-gray-600">
-          <Monitor className="w-4 h-4 text-gray-400" />
+        <div className="flex items-center gap-2 text-app-muted">
+          <Monitor className="w-4 h-4 text-app-dim" />
           <span>{browser_type || 'N/A'}</span>
         </div>
 
@@ -50,11 +50,11 @@ export default function AccountCard({ account }) {
           <ProxyBadge proxy={proxy} />
         </div>
 
-        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-          <span className="text-xs text-gray-500">
+        <div className="flex items-center justify-between pt-2 border-t border-app-border">
+          <span className="text-xs text-app-muted">
             Posts: {posts_today ?? 0}/{max_daily_posts ?? '?'}
           </span>
-          <span className="flex items-center gap-1 text-xs text-gray-400">
+          <span className="flex items-center gap-1 text-xs text-app-dim">
             <Clock className="w-3 h-3" />
             {formatDate(last_used_at)}
           </span>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Send, Mail, Lock, Loader } from 'lucide-react'
+import { Loader } from 'lucide-react'
 import toast from 'react-hot-toast'
 import useAuthStore from '../../store/auth.store'
 
@@ -8,112 +8,82 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-
   const login = useAuthStore((s) => s.login)
   const navigate = useNavigate()
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!email || !password) {
-      toast.error('Please enter email and password')
-      return
-    }
-
+    if (!email || !password) { toast.error('Vui lòng nhập email và mật khẩu'); return }
     setLoading(true)
     try {
       await login(email, password)
-      toast.success('Welcome back!')
+      toast.success('Welcome back')
       navigate('/dashboard')
     } catch (err) {
-      toast.error(err.message || 'Login failed. Please try again.')
-    } finally {
-      setLoading(false)
-    }
+      toast.error(err.message || 'Đăng nhập thất bại')
+    } finally { setLoading(false) }
   }
 
+  const inputCls = "w-full px-3 py-2 text-sm focus:outline-none font-mono-ui"
+  const inputStyle = { background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 4 }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--bg-base)' }}>
+      <div className="w-full max-w-sm">
         {/* Logo */}
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
-            <Send className="w-5 h-5 text-white" />
+        <div className="flex items-center justify-center gap-2 mb-8">
+          <div
+            className="w-9 h-9 flex items-center justify-center font-mono-ui font-bold text-sm"
+            style={{ background: 'var(--hermes-dim)', color: 'var(--hermes)', borderRadius: 4 }}
+          >
+            SF
           </div>
-          <span className="text-2xl font-bold text-gray-900 tracking-tight">
-            SocialFlow
-          </span>
+          <span className="text-xl font-semibold text-app-primary tracking-tight">SocialFlow</span>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h1 className="text-xl font-semibold text-gray-900 mb-1">
-            Sign in
-          </h1>
-          <p className="text-sm text-gray-500 mb-6">
-            Enter your credentials to continue
-          </p>
+        <div className="p-8" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 4 }}>
+          <div className="text-[10px] uppercase tracking-wider text-app-muted font-mono-ui mb-1">Đăng nhập</div>
+          <p className="text-sm text-app-muted mb-6">Tiếp tục vào hệ thống</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email */}
             <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700 mb-1.5"
-              >
+              <label htmlFor="email" className="block text-[10px] uppercase tracking-wider text-app-muted font-mono-ui mb-1.5">
                 Email
               </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  autoComplete="email"
-                />
-              </div>
+              <input
+                id="email" type="email" autoComplete="email"
+                value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className={inputCls} style={inputStyle}
+              />
             </div>
 
-            {/* Password */}
             <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700 mb-1.5"
-              >
-                Password
+              <label htmlFor="password" className="block text-[10px] uppercase tracking-wider text-app-muted font-mono-ui mb-1.5">
+                Mật khẩu
               </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  autoComplete="current-password"
-                />
-              </div>
+              <input
+                id="password" type="password" autoComplete="current-password"
+                value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className={inputCls} style={inputStyle}
+              />
             </div>
 
-            {/* Submit */}
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-2.5 rounded-lg transition-colors text-sm"
+              type="submit" disabled={loading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-semibold disabled:opacity-50"
+              style={{ background: 'var(--hermes)', color: '#000', borderRadius: 4 }}
             >
-              {loading ? (
-                <Loader className="w-4 h-4 animate-spin" />
-              ) : null}
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading && <Loader className="w-4 h-4 animate-spin" />}
+              {loading ? 'Đang đăng nhập…' : 'Đăng nhập'}
             </button>
           </form>
 
-          <p className="text-sm text-gray-500 text-center mt-4">
+          <p className="text-sm text-app-muted text-center mt-6">
             Chưa có tài khoản?{' '}
-            <Link to="/register" className="text-blue-600 hover:text-blue-700 font-medium">
+            <Link to="/register" className="text-hermes hover:opacity-80 font-medium">
               Đăng ký
             </Link>
           </p>

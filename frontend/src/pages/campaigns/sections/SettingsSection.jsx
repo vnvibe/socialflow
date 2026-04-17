@@ -157,41 +157,41 @@ export default function SettingsSection({ campaignId, campaign }) {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <h2 className="text-lg font-bold text-gray-900">Cai dat chien dich</h2>
+      <h2 className="text-lg font-bold text-app-primary">Cai dat chien dich</h2>
 
       {/* Basic Info */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-600">Thong tin co ban</h3>
+      <div className="bg-app-surface rounded border border-app-border p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-app-muted">Thong tin co ban</h3>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Ten chien dich</label>
+          <label className="block text-xs text-app-muted mb-1">Ten chien dich</label>
           <input
             type="text" value={name} onChange={e => setName(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
+            className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
           />
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Chu de / Topic</label>
+          <label className="block text-xs text-app-muted mb-1">Chu de / Topic</label>
           <input
             type="text" value={topic} onChange={e => setTopic(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
+            className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
           />
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Yeu cau (mission)</label>
+          <label className="block text-xs text-app-muted mb-1">Yeu cau (mission)</label>
           <textarea
             value={requirement} onChange={e => setRequirement(e.target.value)}
             rows={4}
-            className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
+            className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
           />
         </div>
       </div>
 
       {/* Schedule */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-600 flex items-center gap-2">
+      <div className="bg-app-surface rounded border border-app-border p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-app-muted flex items-center gap-2">
           <Clock size={16} /> Lich chay
         </h3>
 
@@ -203,7 +203,7 @@ export default function SettingsSection({ campaignId, campaign }) {
               className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                 cronExpr === p.cron
                   ? 'border-purple-200 bg-purple-100 text-purple-700'
-                  : 'border-gray-200 text-gray-500 hover:bg-gray-100'
+                  : 'border-app-border text-app-muted hover:bg-app-elevated'
               }`}
               title={p.desc}
             >
@@ -213,53 +213,53 @@ export default function SettingsSection({ campaignId, campaign }) {
         </div>
 
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Cron expression</label>
+          <label className="block text-xs text-app-muted mb-1">Cron expression</label>
           <input
             type="text" value={cronExpr} onChange={e => setCronExpr(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm font-mono"
+            className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm font-mono"
             placeholder="0 9,18 * * *"
           />
         </div>
       </div>
 
       {/* Stagger Settings */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-600">Cai dat nang cao</h3>
+      <div className="bg-app-surface rounded border border-app-border p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-app-muted">Cai dat nang cao</h3>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Nick stagger (giay)</label>
+            <label className="block text-xs text-app-muted mb-1">Nick stagger (giay)</label>
             <input
               type="number" value={nickStagger} onChange={e => setNickStagger(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
+              className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Role stagger (phut)</label>
+            <label className="block text-xs text-app-muted mb-1">Role stagger (phut)</label>
             <input
               type="number" value={roleStagger} onChange={e => setRoleStagger(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
+              className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 px-3 py-2 text-sm"
             />
           </div>
         </div>
 
         {/* Phase 16: Wave scheduling toggle */}
-        <div className="pt-3 border-t border-gray-100">
+        <div className="pt-3 border-t border-app-border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-gray-700">Phân chia theo đợt sóng (Wave)</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">Chia nicks thành từng đợt, mỗi đợt chạy trong khung giờ riêng</p>
+              <p className="text-xs font-medium text-app-primary">Phân chia theo đợt sóng (Wave)</p>
+              <p className="text-[10px] text-app-dim mt-0.5">Chia nicks thành từng đợt, mỗi đợt chạy trong khung giờ riêng</p>
             </div>
             <button
               type="button"
               onClick={() => setWaveEnabled(!waveEnabled)}
-              className={`relative w-10 h-5 rounded-full transition-colors ${waveEnabled ? 'bg-blue-600' : 'bg-gray-200'}`}
+              className={`relative w-10 h-5 rounded-full transition-colors ${waveEnabled ? 'bg-info' : 'bg-app-hover'}`}
             >
-              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${waveEnabled ? 'left-5' : 'left-0.5'}`} />
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-app-surface shadow transition-transform ${waveEnabled ? 'left-5' : 'left-0.5'}`} />
             </button>
           </div>
           {waveEnabled && (
-            <div className="mt-3 bg-gray-50 rounded-lg p-3">
+            <div className="mt-3 bg-app-base rounded-lg p-3">
               <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
                 {[
                   { label: '6h-9h', pct: '40%', color: 'bg-blue-200 text-blue-800' },
@@ -273,7 +273,7 @@ export default function SettingsSection({ campaignId, campaign }) {
                   </div>
                 ))}
               </div>
-              <p className="text-[10px] text-gray-500 mt-2 text-center">
+              <p className="text-[10px] text-app-muted mt-2 text-center">
                 Mỗi wave chọn % nicks khác nhau. Nicks khỏe hơn, tuổi cao hơn được ưu tiên.
               </p>
             </div>
@@ -282,13 +282,13 @@ export default function SettingsSection({ campaignId, campaign }) {
       </div>
 
       {/* Accounts picker */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-600 flex items-center gap-2">
+      <div className="bg-app-surface rounded border border-app-border p-5 space-y-3">
+        <h3 className="text-sm font-semibold text-app-muted flex items-center gap-2">
           <Users size={16} /> Tài khoản thực hiện
-          <span className="text-xs font-normal text-gray-500">({selectedAccountIds.length} đã chọn)</span>
+          <span className="text-xs font-normal text-app-muted">({selectedAccountIds.length} đã chọn)</span>
         </h3>
         {accounts.length === 0 ? (
-          <p className="text-xs text-gray-500 italic">Chưa có tài khoản nào.</p>
+          <p className="text-xs text-app-muted italic">Chưa có tài khoản nào.</p>
         ) : (
           <div className="space-y-2">
             <div className="flex flex-wrap gap-1.5">
@@ -304,7 +304,7 @@ export default function SettingsSection({ campaignId, campaign }) {
                         : [...selectedAccountIds, a.id])
                     }}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      sel ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                      sel ? 'bg-info text-white ' : 'bg-app-base text-app-muted hover:bg-app-elevated border border-app-border'
                     }`}
                   >
                     {sel && <Check size={10} />}
@@ -317,9 +317,9 @@ export default function SettingsSection({ campaignId, campaign }) {
               <button type="button" onClick={() => setSelectedAccountIds(accounts.map(a => a.id))}
                 className="text-[10px] text-blue-600 hover:underline">Chọn tất cả</button>
               <button type="button" onClick={() => setSelectedAccountIds([])}
-                className="text-[10px] text-gray-500 hover:underline">Bỏ chọn</button>
+                className="text-[10px] text-app-muted hover:underline">Bỏ chọn</button>
             </div>
-            <p className="text-[10px] text-gray-500 italic">
+            <p className="text-[10px] text-app-muted italic">
               Thêm/bớt nick sẽ áp dụng cho tất cả roles của campaign và có hiệu lực ở lần chạy tiếp theo.
             </p>
           </div>
@@ -327,45 +327,45 @@ export default function SettingsSection({ campaignId, campaign }) {
       </div>
 
       {/* Soft Advertising */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+      <div className="bg-app-surface rounded border border-app-border p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-600 flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-app-muted flex items-center gap-2">
             <Megaphone size={16} /> Quang cao nhe (Soft Ads)
           </h3>
           <button
             onClick={() => setAdEnabled(!adEnabled)}
-            className={`relative w-10 h-5 rounded-full transition-colors ${adEnabled ? 'bg-purple-600' : 'bg-gray-200'}`}
+            className={`relative w-10 h-5 rounded-full transition-colors ${adEnabled ? 'bg-purple-600' : 'bg-app-hover'}`}
           >
-            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${adEnabled ? 'left-5' : 'left-0.5'}`} />
+            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-app-surface shadow transition-transform ${adEnabled ? 'left-5' : 'left-0.5'}`} />
           </button>
         </div>
 
         {adEnabled && (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Tên thương hiệu *</label>
+              <label className="block text-xs text-app-muted mb-1">Tên thương hiệu *</label>
               <input type="text" value={brandName} onChange={e => setBrandName(e.target.value)}
                 placeholder="VD: OpenClaw"
-                className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm" />
+                className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm" />
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Mô tả sản phẩm *</label>
+              <label className="block text-xs text-app-muted mb-1">Mô tả sản phẩm *</label>
               <textarea value={brandDescription} onChange={e => setBrandDescription(e.target.value)} rows={2}
                 placeholder="VD: AI Agent tự động hóa công việc — phù hợp cho người dùng VPS / cần host nhẹ"
-                className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm resize-none" />
+                className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm resize-none" />
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Comment mẫu (tham khảo tone)</label>
+              <label className="block text-xs text-app-muted mb-1">Comment mẫu (tham khảo tone)</label>
               <textarea value={exampleComment} onChange={e => setExampleComment(e.target.value)} rows={2}
                 placeholder='VD: "Mình đang dùng OpenClaw thấy ổn, giá hợp lý lại không lag"'
-                className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm resize-none" />
-              <p className="text-[10px] text-gray-400 mt-1">AI sẽ tham khảo tone này khi viết comment có mention thương hiệu</p>
+                className="w-full border border-app-border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 px-3 py-2 text-sm resize-none" />
+              <p className="text-[10px] text-app-dim mt-1">AI sẽ tham khảo tone này khi viết comment có mention thương hiệu</p>
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-2">Giọng điệu</label>
+              <label className="block text-xs text-app-muted mb-2">Giọng điệu</label>
               <div className="flex gap-2">
                 {[
                   { value: 'casual', label: 'Thân thiện' },
@@ -376,7 +376,7 @@ export default function SettingsSection({ campaignId, campaign }) {
                     className={`flex-1 px-3 py-2 rounded-lg border text-center text-xs transition-colors ${
                       brandVoice === v.value
                         ? 'bg-orange-50 border-orange-300 text-orange-700 font-medium'
-                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                        : 'bg-app-surface border-app-border text-app-muted hover:bg-app-base'
                     }`}>
                     {v.label}
                   </button>
@@ -384,7 +384,7 @@ export default function SettingsSection({ campaignId, campaign }) {
               </div>
             </div>
 
-            <p className="text-[11px] text-gray-500">
+            <p className="text-[11px] text-app-muted">
               AI tự nhận biết cơ hội dựa trên ngữ cảnh bài viết — không cần keyword. Khi gặp người hỏi/tìm/than phiền về vấn đề thương hiệu giải quyết được, AI sẽ comment tự nhiên.
             </p>
           </div>
@@ -402,7 +402,7 @@ export default function SettingsSection({ campaignId, campaign }) {
         <button
           onClick={handleSave}
           disabled={updateMut.isPending}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+          className="flex items-center gap-1.5 px-4 py-2 text-sm bg-info text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50"
         >
           <Save size={14} /> {updateMut.isPending ? 'Dang luu...' : 'Luu thay doi'}
         </button>

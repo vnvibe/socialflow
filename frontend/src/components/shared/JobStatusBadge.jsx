@@ -17,7 +17,7 @@ const statusConfig = {
     pulse: true,
   },
   done: {
-    color: 'bg-green-100 text-green-700',
+    color: 'bg-green-100 text-hermes',
     icon: CheckCircle,
     pulse: false,
   },
@@ -27,7 +27,7 @@ const statusConfig = {
     pulse: false,
   },
   cancelled: {
-    color: 'bg-gray-100 text-gray-500',
+    color: 'bg-app-elevated text-app-muted',
     icon: Ban,
     pulse: false,
   },

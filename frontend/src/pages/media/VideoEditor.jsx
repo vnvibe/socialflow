@@ -17,8 +17,8 @@ const positionOptions = [
 
 const statusConfig = {
   pending: { icon: null, label: 'Pending', cls: 'bg-yellow-100 text-yellow-700' },
-  processing: { icon: Loader2, label: 'Processing...', cls: 'bg-blue-100 text-blue-700' },
-  done: { icon: CheckCircle, label: 'Done', cls: 'bg-green-100 text-green-700' },
+  processing: { icon: Loader2, label: 'Processing...', cls: 'bg-blue-100 text-info' },
+  done: { icon: CheckCircle, label: 'Done', cls: 'bg-green-100 text-hermes' },
   error: { icon: AlertCircle, label: 'Error', cls: 'bg-red-100 text-red-700' }
 }
 
@@ -78,7 +78,7 @@ export default function VideoEditor() {
 
   if (isLoading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
 
-  if (!media) return <div className="text-center py-12 text-gray-400">Media not found</div>
+  if (!media) return <div className="text-center py-12 text-app-dim">Media not found</div>
 
   const videoUrl = media.processed_path || media.original_path
   const status = statusConfig[media.processing_status] || statusConfig.pending
@@ -87,8 +87,8 @@ export default function VideoEditor() {
   return (
     <div>
       <div className="flex items-center gap-4 mb-6">
-        <Link to="/media" className="text-gray-500 hover:text-gray-700"><ArrowLeft size={20} /></Link>
-        <h1 className="text-2xl font-bold text-gray-900">Video Editor</h1>
+        <Link to="/media" className="text-app-muted hover:text-app-primary"><ArrowLeft size={20} /></Link>
+        <h1 className="text-2xl font-bold text-app-primary">Video Editor</h1>
         <span className={`inline-flex items-center gap-1 text-sm px-3 py-1 rounded-full ${status.cls}`}>
           {StatusIcon && <StatusIcon size={14} className={media.processing_status === 'processing' ? 'animate-spin' : ''} />}
           {status.label}
@@ -98,11 +98,11 @@ export default function VideoEditor() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Video Preview */}
         <div className="lg:col-span-2">
-          <div className="bg-black rounded-xl overflow-hidden">
+          <div className="bg-black rounded overflow-hidden">
             {videoUrl ? (
               <video controls className="w-full aspect-video" src={videoUrl} />
             ) : (
-              <div className="w-full aspect-video flex items-center justify-center text-gray-500">
+              <div className="w-full aspect-video flex items-center justify-center text-app-muted">
                 <div className="text-center">
                   <Play size={48} className="mx-auto mb-2" />
                   <p>No video available</p>
@@ -110,9 +110,9 @@ export default function VideoEditor() {
               </div>
             )}
           </div>
-          <div className="mt-4 bg-white rounded-xl shadow p-4">
-            <h3 className="font-semibold text-gray-900">{media.title || media.original_filename || 'Untitled'}</h3>
-            <div className="flex gap-4 mt-2 text-sm text-gray-500">
+          <div className="mt-4 bg-app-surface rounded shadow p-4">
+            <h3 className="font-semibold text-app-primary">{media.title || media.original_filename || 'Untitled'}</h3>
+            <div className="flex gap-4 mt-2 text-sm text-app-muted">
               {media.duration && <span>Duration: {Math.floor(media.duration / 60)}:{Math.floor(media.duration % 60).toString().padStart(2, '0')}</span>}
               {media.file_size && <span>Size: {(media.file_size / 1024 / 1024).toFixed(1)} MB</span>}
               {media.resolution && <span>Resolution: {media.resolution}</span>}
@@ -123,11 +123,11 @@ export default function VideoEditor() {
         {/* Config Panel */}
         <div className="space-y-4">
           {/* Watermark */}
-          <div className="bg-white rounded-xl shadow p-4">
-            <h3 className="font-semibold text-gray-900 mb-3">Watermark</h3>
+          <div className="bg-app-surface rounded shadow p-4">
+            <h3 className="font-semibold text-app-primary mb-3">Watermark</h3>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Text</label>
+                <label className="block text-sm text-app-muted mb-1">Text</label>
                 <input
                   value={config.watermark_text}
                   onChange={e => setConfig({ ...config, watermark_text: e.target.value })}
@@ -136,7 +136,7 @@ export default function VideoEditor() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Position</label>
+                <label className="block text-sm text-app-muted mb-1">Position</label>
                 <select
                   value={config.watermark_position}
                   onChange={e => setConfig({ ...config, watermark_position: e.target.value })}
@@ -146,7 +146,7 @@ export default function VideoEditor() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">Opacity: {Math.round(config.watermark_opacity * 100)}%</label>
+                <label className="block text-sm text-app-muted mb-1">Opacity: {Math.round(config.watermark_opacity * 100)}%</label>
                 <input
                   type="range"
                   min="0"
@@ -161,8 +161,8 @@ export default function VideoEditor() {
           </div>
 
           {/* Music */}
-          <div className="bg-white rounded-xl shadow p-4">
-            <h3 className="font-semibold text-gray-900 mb-3">Background Music</h3>
+          <div className="bg-app-surface rounded shadow p-4">
+            <h3 className="font-semibold text-app-primary mb-3">Background Music</h3>
             <select
               value={config.music_id}
               onChange={e => setConfig({ ...config, music_id: e.target.value })}
@@ -176,11 +176,11 @@ export default function VideoEditor() {
           </div>
 
           {/* Subtitle */}
-          <div className="bg-white rounded-xl shadow p-4">
-            <h3 className="font-semibold text-gray-900 mb-3">Subtitle</h3>
+          <div className="bg-app-surface rounded shadow p-4">
+            <h3 className="font-semibold text-app-primary mb-3">Subtitle</h3>
             <label className="flex items-center gap-3 cursor-pointer">
-              <div className={`relative w-11 h-6 rounded-full transition-colors ${config.subtitle_enabled ? 'bg-blue-600' : 'bg-gray-300'}`}>
-                <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${config.subtitle_enabled ? 'translate-x-5' : ''}`} />
+              <div className={`relative w-11 h-6 rounded-full transition-colors ${config.subtitle_enabled ? 'bg-info' : 'bg-app-hover'}`}>
+                <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-app-surface rounded-full shadow transition-transform ${config.subtitle_enabled ? 'translate-x-5' : ''}`} />
               </div>
               <input
                 type="checkbox"
@@ -188,7 +188,7 @@ export default function VideoEditor() {
                 onChange={e => setConfig({ ...config, subtitle_enabled: e.target.checked })}
                 className="sr-only"
               />
-              <span className="text-sm text-gray-700">{config.subtitle_enabled ? 'Enabled' : 'Disabled'}</span>
+              <span className="text-sm text-app-primary">{config.subtitle_enabled ? 'Enabled' : 'Disabled'}</span>
             </label>
           </div>
 
@@ -197,7 +197,7 @@ export default function VideoEditor() {
             <button
               onClick={() => saveMutation.mutate(config)}
               disabled={saveMutation.isPending}
-              className="w-full flex items-center justify-center gap-2 border border-gray-300 px-4 py-2.5 rounded-lg hover:bg-gray-50"
+              className="w-full flex items-center justify-center gap-2 border border-app-border px-4 py-2.5 rounded-lg hover:bg-app-base"
             >
               <Save size={16} />
               {saveMutation.isPending ? 'Saving...' : 'Save Config'}
@@ -205,7 +205,7 @@ export default function VideoEditor() {
             <button
               onClick={() => processMutation.mutate()}
               disabled={processMutation.isPending || media.processing_status === 'processing'}
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 bg-info text-white px-4 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50"
             >
               {media.processing_status === 'processing' ? (
                 <><Loader2 size={16} className="animate-spin" /> Processing...</>

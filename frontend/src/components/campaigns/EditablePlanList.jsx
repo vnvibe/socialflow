@@ -107,7 +107,7 @@ export default function EditablePlanList({ rows, onChange, readonly = false }) {
   }
 
   if (!rows?.length) {
-    return <div className="px-5 py-4 text-sm text-gray-400 italic">Chưa có kế hoạch</div>
+    return <div className="px-5 py-4 text-sm text-app-dim italic">Chưa có kế hoạch</div>
   }
 
   return (
@@ -121,11 +121,11 @@ export default function EditablePlanList({ rows, onChange, readonly = false }) {
           <div
             key={row.key}
             className={`flex items-center gap-3 px-3 py-2 rounded-lg ${
-              overLimit ? 'bg-red-50 border border-red-200' : 'bg-gray-50'
+              overLimit ? 'bg-red-50 border border-red-200' : 'bg-app-base'
             }`}
           >
             <span className="text-lg shrink-0">{row.icon}</span>
-            <span className="text-sm font-medium text-gray-900 flex-1">{row.label}</span>
+            <span className="text-sm font-medium text-app-primary flex-1">{row.label}</span>
 
             {/* +/- counter */}
             <div className="flex items-center gap-1 shrink-0">
@@ -133,7 +133,7 @@ export default function EditablePlanList({ rows, onChange, readonly = false }) {
                 type="button"
                 disabled={readonly || row.count <= 0}
                 onClick={() => updateRow(row.key, row.count - 1)}
-                className="w-7 h-7 rounded bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="w-7 h-7 rounded bg-app-surface border border-app-border flex items-center justify-center hover:bg-app-elevated disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <Minus size={12} />
               </button>
@@ -146,20 +146,20 @@ export default function EditablePlanList({ rows, onChange, readonly = false }) {
                 className={`w-12 text-center text-sm font-bold rounded border ${
                   overLimit
                     ? 'border-red-300 text-red-700'
-                    : 'border-gray-200 text-blue-700'
-                } focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-gray-50 disabled:text-gray-500`}
+                    : 'border-app-border text-blue-700'
+                } focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-app-base disabled:text-app-muted`}
               />
               <button
                 type="button"
                 disabled={readonly}
                 onClick={() => updateRow(row.key, row.count + 1)}
-                className="w-7 h-7 rounded bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="w-7 h-7 rounded bg-app-surface border border-app-border flex items-center justify-center hover:bg-app-elevated disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <Plus size={12} />
               </button>
             </div>
 
-            <span className="text-[11px] text-gray-500 w-24 shrink-0">{row.unit}</span>
+            <span className="text-[11px] text-app-muted w-24 shrink-0">{row.unit}</span>
 
             {overLimit && (
               <span className="flex items-center gap-1 text-[11px] text-red-600 shrink-0" title={`AI đề xuất ${row.ai_suggested}, giới hạn an toàn ${limit}`}>
@@ -174,7 +174,7 @@ export default function EditablePlanList({ rows, onChange, readonly = false }) {
           </div>
         )
       })}
-      <p className="text-[10px] text-gray-400 mt-2 italic">
+      <p className="text-[10px] text-app-dim mt-2 italic">
         Cảnh báo đỏ = vượt giới hạn an toàn. Bạn vẫn có thể chỉnh, nhưng nick có thể bị FB hạn chế.
       </p>
     </div>

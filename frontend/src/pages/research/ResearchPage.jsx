@@ -85,23 +85,23 @@ export default function ResearchPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Nghiên cứu</h1>
+      <h1 className="text-2xl font-bold text-app-primary mb-6">Nghiên cứu</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Input + History */}
         <div className="space-y-4">
           {/* Research form */}
-          <div className="bg-white rounded-xl shadow p-5">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Thu thập dữ liệu</h2>
+          <div className="bg-app-surface rounded shadow p-5">
+            <h2 className="text-sm font-semibold text-app-primary mb-3">Thu thập dữ liệu</h2>
 
             {/* Source tabs */}
-            <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 mb-4">
+            <div className="flex gap-1 bg-app-elevated rounded-lg p-0.5 mb-4">
               {sourceTypes.map(s => (
                 <button
                   key={s.key}
                   onClick={() => setSource(s.key)}
                   className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-medium transition-colors ${
-                    source === s.key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                    source === s.key ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'
                   }`}
                 >
                   <s.icon size={14} />
@@ -113,7 +113,7 @@ export default function ResearchPage() {
             <form onSubmit={handleSubmit} className="space-y-3">
               {source === 'facebook' && (
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Loại nguồn</label>
+                  <label className="block text-xs font-medium text-app-muted mb-1">Loại nguồn</label>
                   <select
                     value={fbType}
                     onChange={e => setFbType(e.target.value)}
@@ -127,7 +127,7 @@ export default function ResearchPage() {
               )}
 
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">URL</label>
+                <label className="block text-xs font-medium text-app-muted mb-1">URL</label>
                 <input
                   type="url"
                   value={url}
@@ -140,7 +140,7 @@ export default function ResearchPage() {
 
               {source === 'facebook' && (
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Số bài tối đa</label>
+                  <label className="block text-xs font-medium text-app-muted mb-1">Số bài tối đa</label>
                   <input
                     type="number"
                     value={maxPosts}
@@ -155,7 +155,7 @@ export default function ResearchPage() {
               <button
                 type="submit"
                 disabled={researchMutation.isPending}
-                className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+                className="w-full flex items-center justify-center gap-2 bg-info text-white py-2.5 rounded-lg text-sm font-medium hover:opacity-90 disabled:bg-blue-400 transition-colors"
               >
                 {researchMutation.isPending ? (
                   <>
@@ -171,7 +171,7 @@ export default function ResearchPage() {
               </button>
 
               {researchMutation.isPending && (
-                <p className="text-xs text-gray-400 text-center">
+                <p className="text-xs text-app-dim text-center">
                   Apify đang chạy, có thể mất 1-5 phút...
                 </p>
               )}
@@ -179,35 +179,35 @@ export default function ResearchPage() {
           </div>
 
           {/* History */}
-          <div className="bg-white rounded-xl shadow">
+          <div className="bg-app-surface rounded shadow">
             <div className="px-4 py-3 border-b">
-              <h2 className="text-sm font-semibold text-gray-700">Lịch sử nghiên cứu</h2>
+              <h2 className="text-sm font-semibold text-app-primary">Lịch sử nghiên cứu</h2>
             </div>
             <div className="max-h-[400px] overflow-y-auto divide-y">
               {historyLoading ? (
                 <div className="flex justify-center py-8">
-                  <Loader2 size={20} className="animate-spin text-gray-400" />
+                  <Loader2 size={20} className="animate-spin text-app-dim" />
                 </div>
               ) : history.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-8">Chưa có nghiên cứu nào</p>
+                <p className="text-xs text-app-dim text-center py-8">Chưa có nghiên cứu nào</p>
               ) : (
                 history.map(item => (
                   <div
                     key={item.id}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-app-base cursor-pointer transition-colors"
                     onClick={() => loadResultMutation.mutate(item.id)}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                      item.source === 'facebook' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'
+                      item.source === 'facebook' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-hermes'
                     }`}>
                       {item.source === 'facebook' ? <Facebook size={14} /> : <Globe size={14} />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-800 truncate">{item.source_url}</p>
+                      <p className="text-sm text-app-primary truncate">{item.source_url}</p>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-gray-400">{item.result_count} kết quả</span>
-                        <span className="text-xs text-gray-300">&middot;</span>
-                        <span className="text-xs text-gray-400 flex items-center gap-1">
+                        <span className="text-xs text-app-dim">{item.result_count} kết quả</span>
+                        <span className="text-xs text-app-dim">&middot;</span>
+                        <span className="text-xs text-app-dim flex items-center gap-1">
                           <Clock size={10} />
                           {new Date(item.created_at).toLocaleDateString('vi-VN')}
                         </span>
@@ -218,7 +218,7 @@ export default function ResearchPage() {
                         e.stopPropagation()
                         if (confirm('Xoá nghiên cứu này?')) deleteMutation.mutate(item.id)
                       }}
-                      className="p-1.5 text-gray-400 hover:text-red-500 rounded-md hover:bg-red-50"
+                      className="p-1.5 text-app-dim hover:text-red-500 rounded-md hover:bg-red-50"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -231,25 +231,25 @@ export default function ResearchPage() {
 
         {/* Right: Results */}
         <div className="lg:col-span-2">
-          <div className="bg-white rounded-xl shadow">
+          <div className="bg-app-surface rounded shadow">
             <div className="px-5 py-4 border-b flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-700">
+              <h2 className="text-sm font-semibold text-app-primary">
                 Kết quả
                 {activeResult && (
-                  <span className="ml-2 text-xs font-normal text-gray-400">({activeResult.count} mục)</span>
+                  <span className="ml-2 text-xs font-normal text-app-dim">({activeResult.count} mục)</span>
                 )}
               </h2>
             </div>
 
             <div className="max-h-[calc(100vh-220px)] overflow-y-auto">
               {!activeResult ? (
-                <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-                  <Search size={40} className="mb-3 text-gray-300" />
+                <div className="flex flex-col items-center justify-center py-16 text-app-dim">
+                  <Search size={40} className="mb-3 text-app-dim" />
                   <p className="text-sm">Nhập URL và bấm "Bắt đầu nghiên cứu"</p>
                   <p className="text-xs mt-1">Hoặc chọn từ lịch sử bên trái</p>
                 </div>
               ) : activeResult.results?.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-12">Không tìm thấy dữ liệu</p>
+                <p className="text-sm text-app-dim text-center py-12">Không tìm thấy dữ liệu</p>
               ) : source === 'facebook' ? (
                 /* Facebook results */
                 <div className="divide-y">
@@ -262,21 +262,21 @@ export default function ResearchPage() {
                             {(post.author || '?')[0]}
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-gray-800">{post.author || 'Ẩn danh'}</p>
+                            <p className="text-sm font-medium text-app-primary">{post.author || 'Ẩn danh'}</p>
                             {post.date && (
-                              <p className="text-xs text-gray-400">{new Date(post.date).toLocaleString('vi-VN')}</p>
+                              <p className="text-xs text-app-dim">{new Date(post.date).toLocaleString('vi-VN')}</p>
                             )}
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
                           {post.url && (
-                            <a href={post.url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-blue-500 rounded-md hover:bg-blue-50">
+                            <a href={post.url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-app-dim hover:text-blue-500 rounded-md hover:bg-blue-50">
                               <ExternalLink size={14} />
                             </a>
                           )}
                           <button
                             onClick={() => copyText(post.text)}
-                            className="p-1.5 text-gray-400 hover:text-green-500 rounded-md hover:bg-green-50"
+                            className="p-1.5 text-app-dim hover:text-hermes rounded-md hover:bg-green-50"
                             title="Copy nội dung"
                           >
                             <Copy size={14} />
@@ -290,7 +290,7 @@ export default function ResearchPage() {
                           className="cursor-pointer"
                           onClick={() => toggleExpand(idx)}
                         >
-                          <p className={`text-sm text-gray-700 whitespace-pre-wrap ${!expandedItems[idx] && post.text.length > 200 ? 'line-clamp-3' : ''}`}>
+                          <p className={`text-sm text-app-primary whitespace-pre-wrap ${!expandedItems[idx] && post.text.length > 200 ? 'line-clamp-3' : ''}`}>
                             {post.text}
                           </p>
                           {post.text.length > 200 && (
@@ -309,7 +309,7 @@ export default function ResearchPage() {
                       )}
 
                       {/* Stats */}
-                      <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
+                      <div className="flex items-center gap-4 mt-3 text-xs text-app-muted">
                         <span className="flex items-center gap-1">
                           <ThumbsUp size={12} /> {(post.likes || 0).toLocaleString()}
                         </span>
@@ -330,21 +330,21 @@ export default function ResearchPage() {
                     <div key={idx} className="p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-medium text-gray-800">{page.title || page.url}</h3>
+                          <h3 className="text-sm font-medium text-app-primary">{page.title || page.url}</h3>
                           {page.description && (
-                            <p className="text-xs text-gray-500 mt-1">{page.description}</p>
+                            <p className="text-xs text-app-muted mt-1">{page.description}</p>
                           )}
                           {page.heading && (
                             <p className="text-xs text-blue-600 mt-1 font-medium">{page.heading}</p>
                           )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <a href={page.url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-blue-500 rounded-md hover:bg-blue-50">
+                          <a href={page.url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-app-dim hover:text-blue-500 rounded-md hover:bg-blue-50">
                             <ExternalLink size={14} />
                           </a>
                           <button
                             onClick={() => copyText(page.text)}
-                            className="p-1.5 text-gray-400 hover:text-green-500 rounded-md hover:bg-green-50"
+                            className="p-1.5 text-app-dim hover:text-hermes rounded-md hover:bg-green-50"
                             title="Copy nội dung"
                           >
                             <Copy size={14} />
@@ -357,7 +357,7 @@ export default function ResearchPage() {
                           className="mt-2 cursor-pointer"
                           onClick={() => toggleExpand(idx)}
                         >
-                          <p className={`text-xs text-gray-600 whitespace-pre-wrap ${!expandedItems[idx] ? 'line-clamp-4' : ''}`}>
+                          <p className={`text-xs text-app-muted whitespace-pre-wrap ${!expandedItems[idx] ? 'line-clamp-4' : ''}`}>
                             {page.text}
                           </p>
                           {page.text.length > 300 && (

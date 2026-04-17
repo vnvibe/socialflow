@@ -73,14 +73,14 @@ export default function ReportsSection({ campaignId }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-gray-900">Bao cao</h2>
-        <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-100">
+        <h2 className="text-lg font-bold text-app-primary">Bao cao</h2>
+        <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-app-muted border border-app-border rounded-lg hover:bg-app-elevated">
           <Download size={14} /> Export CSV
         </button>
       </div>
 
       {/* Date Filter */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex gap-1 bg-app-elevated rounded-lg p-1 w-fit">
         {[
           { key: 'today', label: 'Hom nay' },
           { key: '3days', label: '3 ngay' },
@@ -90,7 +90,7 @@ export default function ReportsSection({ campaignId }) {
         ].map(f => (
           <button key={f.key} onClick={() => setDateFilter(f.key)}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-              dateFilter === f.key ? 'bg-white text-gray-900 shadow-sm rounded-md' : 'text-gray-500 hover:text-gray-700 rounded-md transition-colors'
+              dateFilter === f.key ? 'bg-app-surface text-app-primary  rounded-md' : 'text-app-muted hover:text-app-primary rounded-md transition-colors'
             }`}>
             {f.label}
           </button>
@@ -104,7 +104,7 @@ export default function ReportsSection({ campaignId }) {
             key={t.key}
             onClick={() => setReportTab(t.key)}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
-              reportTab === t.key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-100'
+              reportTab === t.key ? 'bg-info text-white' : 'bg-app-elevated text-app-muted hover:bg-app-elevated'
             }`}
           >
             {t.label}
@@ -116,21 +116,21 @@ export default function ReportsSection({ campaignId }) {
       {reportTab === 'overview' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+            <div className="bg-app-surface rounded border border-app-border p-4 text-center">
               <p className="text-2xl font-bold">{summary.total_jobs || 0}</p>
-              <p className="text-xs text-gray-500">Total Jobs</p>
+              <p className="text-xs text-app-muted">Total Jobs</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-              <p className="text-2xl font-bold text-green-600">{summary.success_rate ? `${Math.round(summary.success_rate)}%` : '-'}</p>
-              <p className="text-xs text-gray-500">Success Rate</p>
+            <div className="bg-app-surface rounded border border-app-border p-4 text-center">
+              <p className="text-2xl font-bold text-hermes">{summary.success_rate ? `${Math.round(summary.success_rate)}%` : '-'}</p>
+              <p className="text-xs text-app-muted">Success Rate</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+            <div className="bg-app-surface rounded border border-app-border p-4 text-center">
               <p className="text-2xl font-bold text-blue-600">{summary.friends_sent || 0}</p>
-              <p className="text-xs text-gray-500">Friends Sent</p>
+              <p className="text-xs text-app-muted">Friends Sent</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+            <div className="bg-app-surface rounded border border-app-border p-4 text-center">
               <p className="text-2xl font-bold text-purple-600">{summary.accept_rate ? `${Math.round(summary.accept_rate)}%` : '-'}</p>
-              <p className="text-xs text-gray-500">Accept Rate</p>
+              <p className="text-xs text-app-muted">Accept Rate</p>
             </div>
           </div>
 
@@ -138,11 +138,11 @@ export default function ReportsSection({ campaignId }) {
           {Object.keys(actionSummary).length > 0 && (
             <div className="flex flex-wrap gap-2">
               {Object.entries(actionSummary).map(([action, data]) => (
-                <div key={action} className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-xs">
-                  <span className="font-semibold text-gray-600">{action}</span>
-                  <span className="text-green-600 ml-2">✓{data.success || 0}</span>
+                <div key={action} className="bg-app-elevated border border-app-border rounded-lg px-3 py-2 text-xs">
+                  <span className="font-semibold text-app-muted">{action}</span>
+                  <span className="text-hermes ml-2">✓{data.success || 0}</span>
                   {data.failed > 0 && <span className="text-red-500 ml-1">✗{data.failed}</span>}
-                  <span className="text-gray-500 ml-1">/{data.total || 0}</span>
+                  <span className="text-app-muted ml-1">/{data.total || 0}</span>
                 </div>
               ))}
             </div>
@@ -150,8 +150,8 @@ export default function ReportsSection({ campaignId }) {
 
           {/* Daily Chart */}
           {daily.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Hoat dong theo ngay</h3>
+            <div className="bg-app-surface rounded border border-app-border p-5">
+              <h3 className="text-sm font-semibold text-app-primary mb-3">Hoat dong theo ngay</h3>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={daily}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -171,15 +171,15 @@ export default function ReportsSection({ campaignId }) {
       {reportTab === 'nicks' && (
         <div className="space-y-3">
           {nickActions.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 text-sm">Chua co du lieu</div>
+            <div className="text-center py-12 text-app-muted text-sm">Chua co du lieu</div>
           ) : (
             nickActions.map((n, i) => (
-              <div key={i} className="bg-white rounded-xl border border-gray-200 p-4">
-                <h4 className="text-sm font-semibold text-gray-900 mb-2">{n.account_name || n.account_id?.slice(0, 8)}</h4>
+              <div key={i} className="bg-app-surface rounded border border-app-border p-4">
+                <h4 className="text-sm font-semibold text-app-primary mb-2">{n.account_name || n.account_id?.slice(0, 8)}</h4>
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(n.actions || {}).map(([action, data]) => (
-                    <span key={action} className="text-xs bg-gray-100 rounded px-2 py-1">
-                      {action}: <span className="text-green-600">{data.success || 0}</span>/{data.total || 0}
+                    <span key={action} className="text-xs bg-app-elevated rounded px-2 py-1">
+                      {action}: <span className="text-hermes">{data.success || 0}</span>/{data.total || 0}
                     </span>
                   ))}
                 </div>
@@ -191,18 +191,18 @@ export default function ReportsSection({ campaignId }) {
 
       {/* Comments */}
       {reportTab === 'comments' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-app-surface rounded border border-app-border overflow-hidden">
           {comments.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 text-sm">Chua co comment</div>
+            <div className="text-center py-12 text-app-muted text-sm">Chua co comment</div>
           ) : comments.map((c, i) => (
-            <div key={i} className="px-4 py-3 border-b border-gray-100">
+            <div key={i} className="px-4 py-3 border-b border-app-border">
               <div className="flex items-center gap-2 text-sm">
-                <span className="font-medium text-gray-900">{c.account_name || '?'}</span>
-                <span className="text-gray-500">→</span>
-                <span className="text-gray-500">{c.group_name || c.source_name || '?'}</span>
+                <span className="font-medium text-app-primary">{c.account_name || '?'}</span>
+                <span className="text-app-muted">→</span>
+                <span className="text-app-muted">{c.group_name || c.source_name || '?'}</span>
                 {c.ai_generated && <span className="text-xs text-purple-600">🤖 AI</span>}
               </div>
-              <p className="text-xs text-gray-600 mt-1">"{(c.comment_text || '').substring(0, 150)}"</p>
+              <p className="text-xs text-app-muted mt-1">"{(c.comment_text || '').substring(0, 150)}"</p>
               {c.post_url && (
                 <a href={c.post_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline mt-0.5 inline-block">
                   Xem bai viet
@@ -215,14 +215,14 @@ export default function ReportsSection({ campaignId }) {
 
       {/* Likes */}
       {reportTab === 'likes' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-app-surface rounded border border-app-border overflow-hidden">
           {likes.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 text-sm">Chua co like</div>
+            <div className="text-center py-12 text-app-muted text-sm">Chua co like</div>
           ) : likes.map((l, i) => (
-            <div key={i} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 text-sm">
-              <span className="text-gray-900">{l.account_name || '?'}</span>
-              <span className="text-gray-500">→</span>
-              <span className="text-gray-500 truncate">{l.group_name || l.target_name || '?'}</span>
+            <div key={i} className="flex items-center gap-3 px-4 py-2.5 border-b border-app-border text-sm">
+              <span className="text-app-primary">{l.account_name || '?'}</span>
+              <span className="text-app-muted">→</span>
+              <span className="text-app-muted truncate">{l.group_name || l.target_name || '?'}</span>
             </div>
           ))}
         </div>
@@ -230,13 +230,13 @@ export default function ReportsSection({ campaignId }) {
 
       {/* Groups Joined */}
       {reportTab === 'groups' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-app-surface rounded border border-app-border overflow-hidden">
           {groups.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 text-sm">Chua co nhom</div>
+            <div className="text-center py-12 text-app-muted text-sm">Chua co nhom</div>
           ) : groups.map((g, i) => (
-            <div key={i} className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 text-sm">
-              <span className="font-medium text-gray-900">{g.name || g.fb_group_id || '?'}</span>
-              <span className="text-xs text-gray-500">{g.member_count?.toLocaleString() || '?'} members</span>
+            <div key={i} className="flex items-center justify-between px-4 py-2.5 border-b border-app-border text-sm">
+              <span className="font-medium text-app-primary">{g.name || g.fb_group_id || '?'}</span>
+              <span className="text-xs text-app-muted">{g.member_count?.toLocaleString() || '?'} members</span>
             </div>
           ))}
         </div>
@@ -247,17 +247,17 @@ export default function ReportsSection({ campaignId }) {
         <div className="space-y-4">
           {/* Stats cards */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+            <div className="bg-app-surface rounded border border-app-border p-4 text-center">
               <p className="text-2xl font-bold text-orange-600">{adReport?.total_opportunities || 0}</p>
-              <p className="text-xs text-gray-500">Tong co hoi</p>
+              <p className="text-xs text-app-muted">Tong co hoi</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-              <p className="text-2xl font-bold text-green-600">{adReport?.total_acted || 0}</p>
-              <p className="text-xs text-gray-500">Da tuong tac</p>
+            <div className="bg-app-surface rounded border border-app-border p-4 text-center">
+              <p className="text-2xl font-bold text-hermes">{adReport?.total_acted || 0}</p>
+              <p className="text-xs text-app-muted">Da tuong tac</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+            <div className="bg-app-surface rounded border border-app-border p-4 text-center">
               <p className="text-2xl font-bold text-purple-600">{adReport?.success_rate || 0}%</p>
-              <p className="text-xs text-gray-500">Ti le thanh cong</p>
+              <p className="text-xs text-app-muted">Ti le thanh cong</p>
             </div>
           </div>
 
@@ -265,12 +265,12 @@ export default function ReportsSection({ campaignId }) {
           {adReport?.by_group?.length > 0 && (
             <div className="flex gap-2 flex-wrap">
               <button onClick={() => setAdGroupFilter('')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${!adGroupFilter ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${!adGroupFilter ? 'bg-orange-600 text-white' : 'bg-app-elevated text-app-muted'}`}>
                 Tat ca ({adReport.by_group.reduce((s, g) => s + g.opportunities, 0)})
               </button>
               {adReport.by_group.slice(0, 8).map(g => (
                 <button key={g.group_fb_id} onClick={() => setAdGroupFilter(g.group_fb_id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium ${adGroupFilter === g.group_fb_id ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium ${adGroupFilter === g.group_fb_id ? 'bg-orange-600 text-white' : 'bg-app-elevated text-app-muted hover:bg-app-hover'}`}>
                   {(g.group_name || '?').substring(0, 25)} ({g.acted}/{g.opportunities})
                 </button>
               ))}
@@ -278,12 +278,12 @@ export default function ReportsSection({ campaignId }) {
           )}
 
           {/* Recent table */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-app-surface rounded border border-app-border overflow-hidden">
             {(!adReport?.recent || adReport.recent.length === 0) ? (
-              <div className="text-center py-12 text-gray-500 text-sm">Chua co tuong tac quang cao nao</div>
+              <div className="text-center py-12 text-app-muted text-sm">Chua co tuong tac quang cao nao</div>
             ) : (
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-xs text-gray-500">
+                <thead className="bg-app-base text-xs text-app-muted">
                   <tr>
                     <th className="text-left px-3 py-2 font-medium">Group</th>
                     <th className="text-left px-3 py-2 font-medium">Bai viet</th>
@@ -296,15 +296,15 @@ export default function ReportsSection({ campaignId }) {
                   {adReport.recent
                     .filter(r => !adGroupFilter || r.group_name === (adReport.by_group.find(g => g.group_fb_id === adGroupFilter)?.group_name))
                     .map(r => (
-                    <tr key={r.id} className="border-t border-gray-100">
-                      <td className="px-3 py-2 text-xs text-gray-700">{(r.group_name || '?').substring(0, 30)}</td>
-                      <td className="px-3 py-2 text-xs text-gray-600 max-w-xs">
+                    <tr key={r.id} className="border-t border-app-border">
+                      <td className="px-3 py-2 text-xs text-app-primary">{(r.group_name || '?').substring(0, 30)}</td>
+                      <td className="px-3 py-2 text-xs text-app-muted max-w-xs">
                         <div className="truncate">{r.post_preview}</div>
                         {r.post_url && <a href={r.post_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-[10px]">Xem</a>}
                       </td>
-                      <td className="px-3 py-2 text-xs text-gray-700 max-w-xs"><div className="truncate">{r.comment_posted || '-'}</div></td>
-                      <td className="px-3 py-2 text-xs text-gray-600">{r.nick_name || '-'}</td>
-                      <td className="px-3 py-2 text-xs text-gray-500">{r.acted_at ? new Date(r.acted_at).toLocaleString('vi-VN') : '-'}</td>
+                      <td className="px-3 py-2 text-xs text-app-primary max-w-xs"><div className="truncate">{r.comment_posted || '-'}</div></td>
+                      <td className="px-3 py-2 text-xs text-app-muted">{r.nick_name || '-'}</td>
+                      <td className="px-3 py-2 text-xs text-app-muted">{r.acted_at ? new Date(r.acted_at).toLocaleString('vi-VN') : '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -316,16 +316,16 @@ export default function ReportsSection({ campaignId }) {
 
       {/* Errors */}
       {reportTab === 'errors' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-app-surface rounded border border-app-border overflow-hidden">
           {errors.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 text-sm">Khong co loi</div>
+            <div className="text-center py-12 text-app-muted text-sm">Khong co loi</div>
           ) : errors.map((e, i) => (
-            <div key={i} className="px-4 py-2.5 border-b border-gray-100">
+            <div key={i} className="px-4 py-2.5 border-b border-app-border">
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-red-500 font-medium">{e.type || e.action || 'Error'}</span>
-                <span className="text-gray-500">{e.account_name || '?'}</span>
+                <span className="text-app-muted">{e.account_name || '?'}</span>
               </div>
-              <p className="text-xs text-gray-500 mt-0.5">{e.error_message || e.details || '?'}</p>
+              <p className="text-xs text-app-muted mt-0.5">{e.error_message || e.details || '?'}</p>
             </div>
           ))}
         </div>

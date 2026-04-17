@@ -5,22 +5,22 @@ import api from '../../lib/api'
 
 const STATUS_COLORS = {
   pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  claimed: 'bg-blue-100 text-blue-700 border-blue-200',
-  running: 'bg-blue-100 text-blue-700 border-blue-200',
-  done: 'bg-green-100 text-green-700 border-green-200',
-  success: 'bg-green-100 text-green-700 border-green-200',
+  claimed: 'bg-blue-100 text-info border-blue-200',
+  running: 'bg-blue-100 text-info border-blue-200',
+  done: 'bg-green-100 text-hermes border-green-200',
+  success: 'bg-green-100 text-hermes border-green-200',
   failed: 'bg-red-100 text-red-700 border-red-200',
-  cancelled: 'bg-gray-100 text-gray-500 border-gray-200',
+  cancelled: 'bg-app-elevated text-app-muted border-app-border',
 }
 
 const STATUS_DOTS = {
   pending: 'bg-yellow-400',
   claimed: 'bg-blue-400',
-  running: 'bg-blue-500',
-  done: 'bg-green-500',
-  success: 'bg-green-500',
+  running: 'bg-info',
+  done: 'bg-hermes',
+  success: 'bg-hermes',
   failed: 'bg-red-500',
-  cancelled: 'bg-gray-400',
+  cancelled: 'bg-app-hover',
 }
 
 function getMonthDays(year, month) {
@@ -121,13 +121,13 @@ export default function CampaignCalendar() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Calendar</h1>
-          <p className="text-sm text-gray-500 mt-1">Post schedule and history overview</p>
+          <h1 className="text-2xl font-bold text-app-primary">Calendar</h1>
+          <p className="text-sm text-app-muted mt-1">Post schedule and history overview</p>
         </div>
         <div className="flex items-center gap-4">
           {/* Stats */}
           <div className="flex items-center gap-3 text-sm">
-            <span className="flex items-center gap-1 text-green-600">
+            <span className="flex items-center gap-1 text-hermes">
               <CheckCircle className="w-4 h-4" /> {stats.done}
             </span>
             <span className="flex items-center gap-1 text-yellow-600">
@@ -141,31 +141,31 @@ export default function CampaignCalendar() {
       </div>
 
       {/* Navigation */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="bg-app-surface rounded border border-app-border p-4">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
-            <ChevronLeft className="w-5 h-5 text-gray-600" />
+          <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-app-elevated transition-colors">
+            <ChevronLeft className="w-5 h-5 text-app-muted" />
           </button>
-          <h2 className="text-lg font-semibold text-gray-900">{monthName}</h2>
-          <button onClick={() => navigate(1)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
-            <ChevronRight className="w-5 h-5 text-gray-600" />
+          <h2 className="text-lg font-semibold text-app-primary">{monthName}</h2>
+          <button onClick={() => navigate(1)} className="p-2 rounded-lg hover:bg-app-elevated transition-colors">
+            <ChevronRight className="w-5 h-5 text-app-muted" />
           </button>
         </div>
 
         {/* Day headers */}
         <div className="grid grid-cols-7 mb-1">
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-            <div key={d} className="text-center text-xs font-medium text-gray-500 py-2">{d}</div>
+            <div key={d} className="text-center text-xs font-medium text-app-muted py-2">{d}</div>
           ))}
         </div>
 
         {/* Calendar grid */}
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
-            <Loader className="w-6 h-6 animate-spin text-blue-500" />
+            <Loader className="w-6 h-6 animate-spin text-info" />
           </div>
         ) : (
-          <div className="grid grid-cols-7 gap-px bg-gray-100 rounded-lg overflow-hidden">
+          <div className="grid grid-cols-7 gap-px bg-app-elevated rounded-lg overflow-hidden">
             {days.map((day, i) => {
               const dayEvents = getDayEvents(day.date)
               const isSelected = selectedDay &&
@@ -177,13 +177,13 @@ export default function CampaignCalendar() {
                   key={i}
                   onClick={() => setSelectedDay(day.date)}
                   className={`min-h-[80px] p-1.5 text-left transition-colors ${
-                    day.current ? 'bg-white' : 'bg-gray-50'
+                    day.current ? 'bg-app-surface' : 'bg-app-base'
                   } ${isSelected ? 'ring-2 ring-blue-500 ring-inset' : ''} hover:bg-blue-50`}
                 >
                   <span className={`text-xs font-medium ${
                     isToday(day.date)
-                      ? 'bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center'
-                      : day.current ? 'text-gray-700' : 'text-gray-400'
+                      ? 'bg-info text-white w-6 h-6 rounded-full flex items-center justify-center'
+                      : day.current ? 'text-app-primary' : 'text-app-dim'
                   }`}>
                     {day.day}
                   </span>
@@ -192,10 +192,10 @@ export default function CampaignCalendar() {
                   {dayEvents.length > 0 && (
                     <div className="mt-1 space-y-0.5">
                       {dayEvents.slice(0, 3).map((e, j) => (
-                        <div key={j} className={`h-1.5 rounded-full ${STATUS_DOTS[e.status] || 'bg-gray-300'}`} />
+                        <div key={j} className={`h-1.5 rounded-full ${STATUS_DOTS[e.status] || 'bg-app-hover'}`} />
                       ))}
                       {dayEvents.length > 3 && (
-                        <span className="text-[10px] text-gray-400">+{dayEvents.length - 3}</span>
+                        <span className="text-[10px] text-app-dim">+{dayEvents.length - 3}</span>
                       )}
                     </div>
                   )}
@@ -208,16 +208,16 @@ export default function CampaignCalendar() {
 
       {/* Selected day detail */}
       {selectedDay && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h3 className="font-semibold text-gray-900 mb-3">
+        <div className="bg-app-surface rounded border border-app-border p-4">
+          <h3 className="font-semibold text-app-primary mb-3">
             {selectedDay.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-            <span className="text-sm font-normal text-gray-500 ml-2">
+            <span className="text-sm font-normal text-app-muted ml-2">
               ({selectedDayEvents.length} event{selectedDayEvents.length !== 1 ? 's' : ''})
             </span>
           </h3>
 
           {selectedDayEvents.length === 0 ? (
-            <p className="text-sm text-gray-400 py-4 text-center">No events on this day</p>
+            <p className="text-sm text-app-dim py-4 text-center">No events on this day</p>
           ) : (
             <div className="space-y-2">
               {selectedDayEvents
@@ -225,18 +225,18 @@ export default function CampaignCalendar() {
                 .map((event) => (
                 <div
                   key={event.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border ${STATUS_COLORS[event.status] || 'bg-gray-50 border-gray-200'}`}
+                  className={`flex items-start gap-3 p-3 rounded-lg border ${STATUS_COLORS[event.status] || 'bg-app-base border-app-border'}`}
                 >
                   <div className="shrink-0 mt-0.5">
-                    {(event.status === 'done' || event.status === 'success') && <CheckCircle className="w-4 h-4 text-green-600" />}
+                    {(event.status === 'done' || event.status === 'success') && <CheckCircle className="w-4 h-4 text-hermes" />}
                     {event.status === 'failed' && <XCircle className="w-4 h-4 text-red-600" />}
                     {event.status === 'pending' && <Clock className="w-4 h-4 text-yellow-600" />}
-                    {(event.status === 'running' || event.status === 'claimed') && <Loader className="w-4 h-4 text-blue-600 animate-spin" />}
+                    {(event.status === 'running' || event.status === 'claimed') && <Loader className="w-4 h-4 text-info animate-spin" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{event.title}</span>
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs text-app-muted">
                         {new Date(event.start).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>

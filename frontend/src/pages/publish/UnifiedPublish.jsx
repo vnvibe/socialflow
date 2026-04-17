@@ -22,11 +22,11 @@ const stylePresets = [
 
 const statusConfig = {
   pending: { icon: Clock, label: 'Cho', cls: 'bg-yellow-100 text-yellow-700' },
-  claimed: { icon: Loader2, label: 'Dang xu ly', cls: 'bg-blue-100 text-blue-700' },
-  running: { icon: Loader2, label: 'Dang chay', cls: 'bg-blue-100 text-blue-700' },
-  done: { icon: CheckCircle, label: 'Xong', cls: 'bg-green-100 text-green-700' },
+  claimed: { icon: Loader2, label: 'Dang xu ly', cls: 'bg-blue-100 text-info' },
+  running: { icon: Loader2, label: 'Dang chay', cls: 'bg-blue-100 text-info' },
+  done: { icon: CheckCircle, label: 'Xong', cls: 'bg-green-100 text-hermes' },
   failed: { icon: AlertCircle, label: 'Loi', cls: 'bg-red-100 text-red-700' },
-  cancelled: { icon: Ban, label: 'Huy', cls: 'bg-gray-100 text-gray-600' },
+  cancelled: { icon: Ban, label: 'Huy', cls: 'bg-app-elevated text-app-muted' },
 }
 
 const typeLabels = {
@@ -495,19 +495,19 @@ Return ONLY the image prompt, nothing else.`
 
   return (
     <div className="max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-900 mb-5">Dang bai</h1>
+      <h1 className="text-2xl font-bold text-app-primary mb-5">Dang bai</h1>
 
       {/* ══════ SECTION 1: Account + Post Type ══════ */}
-      <div className="bg-white rounded-xl shadow p-4 mb-4">
+      <div className="bg-app-surface rounded shadow p-4 mb-4">
         <div className="flex flex-col sm:flex-row gap-4">
           {/* Account */}
           <div className="flex-1">
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">Tài khoản</label>
+            <label className="block text-xs font-medium text-app-muted mb-1.5">Tài khoản</label>
             <select
               value={selectedAccountId}
               onChange={e => handleAccountChange(e.target.value)}
               disabled={!!searchParams.get('accountId')}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 disabled:opacity-60 disabled:bg-gray-50 disabled:cursor-not-allowed"
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 disabled:opacity-60 disabled:bg-app-base disabled:cursor-not-allowed"
             >
               <option value="">-- Chọn tài khoản --</option>
               {accounts.map(a => (
@@ -521,14 +521,14 @@ Return ONLY the image prompt, nothing else.`
           {/* Post Type Tabs */}
           {selectedAccountId && (
             <div className="flex-1">
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Loai bai dang</label>
+              <label className="block text-xs font-medium text-app-muted mb-1.5">Loai bai dang</label>
               <div className="flex rounded-lg border overflow-hidden">
                 <button
                   onClick={() => handlePostTypeChange('page')}
                   className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
                     postType === 'page'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                      ? 'bg-info text-white'
+                      : 'bg-app-surface text-app-muted hover:bg-app-base'
                   }`}
                 >
                   <FileText size={16} /> Fanpage
@@ -537,8 +537,8 @@ Return ONLY the image prompt, nothing else.`
                   onClick={() => handlePostTypeChange('group')}
                   className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
                     postType === 'group'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                      ? 'bg-info text-white'
+                      : 'bg-app-surface text-app-muted hover:bg-app-base'
                   }`}
                 >
                   <Users size={16} /> Nhom
@@ -551,13 +551,13 @@ Return ONLY the image prompt, nothing else.`
 
       {/* ══════ SECTION 2: Target Selection ══════ */}
       {selectedAccountId && (
-        <div className="bg-white rounded-xl shadow p-4 mb-4">
+        <div className="bg-app-surface rounded shadow p-4 mb-4">
           {postType === 'page' ? (
             /* ─── Fanpage Mode ─── */
             <div>
               {/* Main Page */}
               <div className="mb-4">
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Trang chinh</label>
+                <label className="block text-xs font-medium text-app-muted mb-1.5">Trang chinh</label>
                 {fanpages.length > 0 ? (
                   <select
                     value={mainPageId}
@@ -572,18 +572,18 @@ Return ONLY the image prompt, nothing else.`
                     ))}
                   </select>
                 ) : (
-                  <p className="text-sm text-gray-400 py-2">Chua co fanpage. Hay quet tai khoan truoc.</p>
+                  <p className="text-sm text-app-dim py-2">Chua co fanpage. Hay quet tai khoan truoc.</p>
                 )}
                 {mainPage && (
                   <div className="mt-1.5 flex items-center gap-2">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      mainPage.posting_method === 'access_token' ? 'bg-green-100 text-green-700' :
+                      mainPage.posting_method === 'access_token' ? 'bg-green-100 text-hermes' :
                       mainPage.posting_method === 'cookie' ? 'bg-orange-100 text-orange-700' :
-                      'bg-gray-100 text-gray-600'
+                      'bg-app-elevated text-app-muted'
                     }`}>
                       {mainPage.posting_method === 'access_token' ? 'API Token' : mainPage.posting_method === 'cookie' ? 'Cookie' : 'Auto'}
                     </span>
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-app-dim">
                       {mainPage.posting_method === 'access_token' ? '⚡ Đăng trực tiếp qua API (tức thì)' : mainPage.posting_method === 'cookie' ? '🕐 Đăng qua Agent (chờ xử lý)' : 'Tự động chọn phương thức'}
                     </span>
                   </div>
@@ -599,12 +599,12 @@ Return ONLY the image prompt, nothing else.`
                         type="checkbox"
                         checked={ccEnabled}
                         onChange={() => setCcEnabled(!ccEnabled)}
-                        className="rounded text-blue-600"
+                        className="rounded text-info"
                       />
-                      <span className="text-sm font-medium text-gray-700">CC qua trang khac</span>
+                      <span className="text-sm font-medium text-app-primary">CC qua trang khac</span>
                     </label>
                     {ccEnabled && (
-                      <button onClick={selectAllCcPages} className="text-xs text-blue-600 hover:text-blue-800">
+                      <button onClick={selectAllCcPages} className="text-xs text-info hover:text-blue-800">
                         {ccPagesList.every(p => ccPages[p.id]?.selected) ? 'Bo chon' : 'Chon tat ca'}
                       </button>
                     )}
@@ -613,23 +613,23 @@ Return ONLY the image prompt, nothing else.`
                   {ccEnabled && (
                     <div className="border rounded-lg divide-y max-h-48 overflow-y-auto">
                       {ccPagesList.map(p => (
-                        <div key={p.id} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
+                        <div key={p.id} className="flex items-center gap-3 px-3 py-2 hover:bg-app-base">
                           <input
                             type="checkbox"
                             checked={ccPages[p.id]?.selected || false}
                             onChange={() => toggleCcPage(p.id)}
-                            className="rounded text-blue-600"
+                            className="rounded text-info"
                           />
                           <span className="flex-1 text-sm truncate">{p.name || p.fb_page_id}</span>
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
-                            p.posting_method === 'access_token' ? 'bg-green-100 text-green-600' :
+                            p.posting_method === 'access_token' ? 'bg-green-100 text-hermes' :
                             p.posting_method === 'cookie' ? 'bg-orange-100 text-orange-600' :
-                            'bg-gray-100 text-gray-500'
+                            'bg-app-elevated text-app-muted'
                           }`}>
                             {p.posting_method === 'access_token' ? 'API' : p.posting_method === 'cookie' ? 'Cookie' : 'Auto'}
                           </span>
                           <a href={p.url || `https://www.facebook.com/${p.fb_page_id}`} target="_blank" rel="noopener noreferrer"
-                            onClick={e => e.stopPropagation()} className="text-gray-400 hover:text-blue-500 shrink-0" title="Xem trang">
+                            onClick={e => e.stopPropagation()} className="text-app-dim hover:text-info shrink-0" title="Xem trang">
                             <ExternalLink size={12} />
                           </a>
                           {ccPages[p.id]?.selected && (
@@ -638,7 +638,7 @@ Return ONLY the image prompt, nothing else.`
                               className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors ${
                                 ccPages[p.id]?.rewrite
                                   ? 'bg-purple-100 text-purple-700'
-                                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                                  : 'bg-app-elevated text-app-muted hover:bg-app-hover'
                               }`}
                             >
                               <RefreshCw size={10} />
@@ -656,9 +656,9 @@ Return ONLY the image prompt, nothing else.`
             /* ─── Group Mode ─── */
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-medium text-gray-500">Chon nhom ({groups.length})</label>
+                <label className="block text-xs font-medium text-app-muted">Chon nhom ({groups.length})</label>
                 {groups.length > 0 && (
-                  <button onClick={selectAllGroups} className="text-xs text-blue-600 hover:text-blue-800">
+                  <button onClick={selectAllGroups} className="text-xs text-info hover:text-blue-800">
                     {groups.every(g => groupSelections[g.id]?.selected) ? 'Bo chon' : 'Chon tat ca'}
                   </button>
                 )}
@@ -667,20 +667,20 @@ Return ONLY the image prompt, nothing else.`
               {groups.length > 0 ? (
                 <div className="border rounded-lg divide-y max-h-56 overflow-y-auto">
                   {groups.map(g => (
-                    <div key={g.id} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
+                    <div key={g.id} className="flex items-center gap-3 px-3 py-2 hover:bg-app-base">
                       <input
                         type="checkbox"
                         checked={groupSelections[g.id]?.selected || false}
                         onChange={() => toggleGroup(g.id)}
-                        className="rounded text-blue-600"
+                        className="rounded text-info"
                       />
                       <span className="flex-1 text-sm truncate">{g.name || g.fb_group_id}</span>
                       <a href={g.url || `https://www.facebook.com/groups/${g.fb_group_id}`} target="_blank" rel="noopener noreferrer"
-                        onClick={e => e.stopPropagation()} className="text-gray-400 hover:text-blue-500 shrink-0" title="Xem nhom">
+                        onClick={e => e.stopPropagation()} className="text-app-dim hover:text-info shrink-0" title="Xem nhom">
                         <ExternalLink size={12} />
                       </a>
                       {g.member_count && (
-                        <span className="text-xs text-gray-400">{g.member_count.toLocaleString()}</span>
+                        <span className="text-xs text-app-dim">{g.member_count.toLocaleString()}</span>
                       )}
                       {groupSelections[g.id]?.selected && (
                         <button
@@ -688,7 +688,7 @@ Return ONLY the image prompt, nothing else.`
                           className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors ${
                             groupSelections[g.id]?.rewrite
                               ? 'bg-purple-100 text-purple-700'
-                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                              : 'bg-app-elevated text-app-muted hover:bg-app-hover'
                           }`}
                         >
                           <RefreshCw size={10} />
@@ -699,7 +699,7 @@ Return ONLY the image prompt, nothing else.`
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-gray-400 py-2">Chua co nhom. Hay quet tai khoan truoc.</p>
+                <p className="text-sm text-app-dim py-2">Chua co nhom. Hay quet tai khoan truoc.</p>
               )}
             </div>
           )}
@@ -711,10 +711,10 @@ Return ONLY the image prompt, nothing else.`
                 type="checkbox"
                 checked={includeProfile}
                 onChange={() => setIncludeProfile(!includeProfile)}
-                className="rounded text-blue-600"
+                className="rounded text-info"
               />
-              <span className="text-sm text-gray-600">Dang len trang ca nhan</span>
-              <span className="text-xs text-gray-400">({selectedAccount?.username || 'Profile'})</span>
+              <span className="text-sm text-app-muted">Dang len trang ca nhan</span>
+              <span className="text-xs text-app-dim">({selectedAccount?.username || 'Profile'})</span>
             </label>
           </div>
         </div>
@@ -725,18 +725,18 @@ Return ONLY the image prompt, nothing else.`
         {/* Content - 3 cols */}
         <div className="lg:col-span-3 space-y-4">
           {/* Input Brief — thong tin dau vao */}
-          <div className="bg-white rounded-xl shadow p-4">
+          <div className="bg-app-surface rounded shadow p-4">
             <div className="flex items-center gap-2 mb-2">
               <FileText size={14} className="text-purple-500" />
-              <h3 className="font-semibold text-gray-900 text-sm">Thong tin dau vao</h3>
+              <h3 className="font-semibold text-app-primary text-sm">Thong tin dau vao</h3>
             </div>
-            <p className="text-xs text-gray-500 mb-2">Nhap y tuong, brief, thong tin san pham hoac dan link. AI se viet bai chuyen nghiep tu day.</p>
+            <p className="text-xs text-app-muted mb-2">Nhap y tuong, brief, thong tin san pham hoac dan link. AI se viet bai chuyen nghiep tu day.</p>
             <textarea
               value={inputBrief}
               onChange={e => setInputBrief(e.target.value)}
               rows={3}
               placeholder="VD: Gioi thieu dich vu hosting gia re, SSD NVMe, uptime 99.9%, ho tro 24/7..."
-              className="w-full border rounded-lg px-3 py-2 resize-none text-sm bg-purple-50/50 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 placeholder:text-gray-400"
+              className="w-full border rounded-lg px-3 py-2 resize-none text-sm bg-purple-50/50 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 placeholder:text-app-dim"
             />
             <div className="flex items-center gap-2 mt-2">
               <input
@@ -750,7 +750,7 @@ Return ONLY the image prompt, nothing else.`
             <button
               onClick={() => captionAiMutation.mutate()}
               disabled={captionAiMutation.isPending || (!inputBrief.trim() && !caption.trim())}
-              className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:bg-gray-300 disabled:text-gray-500 transition-colors"
+              className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:bg-app-hover disabled:text-app-muted transition-colors"
             >
               {captionAiMutation.isPending ? <Loader size={14} className="animate-spin" /> : <Sparkles size={14} />}
               {captionAiMutation.isPending ? 'Dang viet...' : 'AI Viet bai'}
@@ -758,11 +758,11 @@ Return ONLY the image prompt, nothing else.`
           </div>
 
           {/* Caption */}
-          <div className="bg-white rounded-xl shadow p-4">
+          <div className="bg-app-surface rounded shadow p-4">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="font-semibold text-gray-900 text-sm">Noi dung bai viet</h3>
+              <h3 className="font-semibold text-app-primary text-sm">Noi dung bai viet</h3>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">{caption.length} ky tu</span>
+                <span className="text-xs text-app-dim">{caption.length} ky tu</span>
                 {caption.trim() && (
                   <button
                     onClick={() => captionAiMutation.mutate()}
@@ -789,7 +789,7 @@ Return ONLY the image prompt, nothing else.`
                   key={s.value}
                   onClick={() => setAiStyle(s.value)}
                   className={`px-2 py-0.5 rounded text-xs transition-colors ${
-                    aiStyle === s.value ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    aiStyle === s.value ? 'bg-purple-600 text-white' : 'bg-app-elevated text-app-muted hover:bg-app-hover'
                   }`}
                 >
                   {s.emoji} {s.label}
@@ -797,7 +797,7 @@ Return ONLY the image prompt, nothing else.`
               ))}
               <button
                 onClick={() => setAiLang(l => l === 'vi' ? 'en' : 'vi')}
-                className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500 hover:bg-gray-200"
+                className="px-2 py-0.5 rounded text-xs bg-app-elevated text-app-muted hover:bg-app-hover"
               >
                 {aiLang === 'vi' ? 'VI' : 'EN'}
               </button>
@@ -816,8 +816,8 @@ Return ONLY the image prompt, nothing else.`
 
         {/* Media - 2 cols */}
         <div className="lg:col-span-2">
-          <div className="bg-white rounded-xl shadow p-4">
-            <h3 className="font-semibold text-gray-900 text-sm mb-3">Anh / Video</h3>
+          <div className="bg-app-surface rounded shadow p-4">
+            <h3 className="font-semibold text-app-primary text-sm mb-3">Anh / Video</h3>
 
             {/* Media Mode */}
             <div className="space-y-2 mb-3">
@@ -827,9 +827,9 @@ Return ONLY the image prompt, nothing else.`
                   name="mediaMode"
                   checked={mediaMode === 'selected'}
                   onChange={() => setMediaMode('selected')}
-                  className="text-blue-600"
+                  className="text-info"
                 />
-                <Image size={14} className="text-gray-500" />
+                <Image size={14} className="text-app-muted" />
                 <span className="text-sm">Chon anh cu the</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
@@ -838,9 +838,9 @@ Return ONLY the image prompt, nothing else.`
                   name="mediaMode"
                   checked={mediaMode === 'random'}
                   onChange={() => setMediaMode('random')}
-                  className="text-blue-600"
+                  className="text-info"
                 />
-                <Shuffle size={14} className="text-gray-500" />
+                <Shuffle size={14} className="text-app-muted" />
                 <span className="text-sm">Random tu thu vien</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
@@ -849,9 +849,9 @@ Return ONLY the image prompt, nothing else.`
                   name="mediaMode"
                   checked={mediaMode === 'none'}
                   onChange={() => { setMediaMode('none'); setMediaId('') }}
-                  className="text-blue-600"
+                  className="text-info"
                 />
-                <ImageOff size={14} className="text-gray-500" />
+                <ImageOff size={14} className="text-app-muted" />
                 <span className="text-sm">Khong dung anh</span>
               </label>
             </div>
@@ -860,16 +860,16 @@ Return ONLY the image prompt, nothing else.`
             {mediaMode === 'selected' && (
               <>
                 {selectedMedia ? (
-                  <div className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg mb-3">
-                    <div className="w-12 h-12 bg-gray-200 rounded overflow-hidden flex items-center justify-center shrink-0">
+                  <div className="flex items-center gap-3 p-2 bg-app-base rounded-lg mb-3">
+                    <div className="w-12 h-12 bg-app-hover rounded overflow-hidden flex items-center justify-center shrink-0">
                       {(selectedMedia.thumbnail_url || selectedMedia.url || selectedMedia.original_path) ? (
                         <img src={selectedMedia.thumbnail_url || selectedMedia.url || selectedMedia.original_path} alt="" className="w-full h-full object-cover" />
-                      ) : <Film size={20} className="text-gray-400" />}
+                      ) : <Film size={20} className="text-app-dim" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{selectedMedia.title || selectedMedia.original_filename}</p>
                     </div>
-                    <button onClick={() => setMediaId('')} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+                    <button onClick={() => setMediaId('')} className="text-app-dim hover:text-app-muted"><X size={16} /></button>
                   </div>
                 ) : null}
                 
@@ -880,12 +880,12 @@ Return ONLY the image prompt, nothing else.`
                       placeholder="Tìm ảnh..."
                       value={mediaSearch}
                       onChange={e => setMediaSearch(e.target.value)}
-                      className="w-full border border-gray-200 rounded px-2 py-1 text-xs outline-none focus:border-blue-500 bg-gray-50"
+                      className="w-full border border-app-border rounded px-2 py-1 text-xs outline-none focus:border-blue-500 bg-app-base"
                     />
-                    <div className="flex bg-gray-100 p-0.5 rounded w-fit">
-                      <button onClick={() => setMediaFilter('all')} className={`text-[10px] px-2 py-1 rounded transition-colors ${mediaFilter === 'all' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>Tất cả</button>
-                      <button onClick={() => setMediaFilter('ai')} className={`text-[10px] px-2 py-1 rounded transition-colors ${mediaFilter === 'ai' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>AI</button>
-                      <button onClick={() => setMediaFilter('uploaded')} className={`text-[10px] px-2 py-1 rounded transition-colors ${mediaFilter === 'uploaded' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>Tải lên</button>
+                    <div className="flex bg-app-elevated p-0.5 rounded w-fit">
+                      <button onClick={() => setMediaFilter('all')} className={`text-[10px] px-2 py-1 rounded transition-colors ${mediaFilter === 'all' ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'}`}>Tất cả</button>
+                      <button onClick={() => setMediaFilter('ai')} className={`text-[10px] px-2 py-1 rounded transition-colors ${mediaFilter === 'ai' ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'}`}>AI</button>
+                      <button onClick={() => setMediaFilter('uploaded')} className={`text-[10px] px-2 py-1 rounded transition-colors ${mediaFilter === 'uploaded' ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'}`}>Tải lên</button>
                     </div>
                   </div>
 
@@ -897,18 +897,18 @@ Return ONLY the image prompt, nothing else.`
                         <button
                           key={m.id}
                           onClick={() => setMediaId(m.id)}
-                          className={`aspect-square bg-gray-100 rounded overflow-hidden hover:ring-2 hover:ring-blue-500 ${mediaId === m.id ? 'ring-2 ring-blue-500' : ''}`}
+                          className={`aspect-square bg-app-elevated rounded overflow-hidden hover:ring-2 hover:ring-blue-500 ${mediaId === m.id ? 'ring-2 ring-blue-500' : ''}`}
                         >
                           {(m.thumbnail_url || m.url || m.original_path) ? (
                             <img src={m.thumbnail_url || m.url || m.original_path} alt="" className="w-full h-full object-cover" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center">
-                              {m.type === 'video' ? <Film size={16} className="text-gray-400" /> : <Image size={16} className="text-gray-400" />}
+                              {m.type === 'video' ? <Film size={16} className="text-app-dim" /> : <Image size={16} className="text-app-dim" />}
                             </div>
                           )}
                         </button>
                       ))}
-                      {mediaList.length === 0 && <p className="col-span-4 text-xs text-gray-400 text-center py-3">Chưa có media</p>}
+                      {mediaList.length === 0 && <p className="col-span-4 text-xs text-app-dim text-center py-3">Chưa có media</p>}
                   </div>
                 </div>
               </>
@@ -921,7 +921,7 @@ Return ONLY the image prompt, nothing else.`
                   <button
                     onClick={() => setRandomSource('library')}
                     className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                      randomSource === 'library' ? 'bg-purple-50 border-purple-300 text-purple-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                      randomSource === 'library' ? 'bg-purple-50 border-purple-300 text-purple-700' : 'bg-app-base border-app-border text-app-muted hover:border-app-border'
                     }`}
                   >
                     <Image size={14} />
@@ -930,7 +930,7 @@ Return ONLY the image prompt, nothing else.`
                   <button
                     onClick={() => setRandomSource('local')}
                     className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
-                      randomSource === 'local' ? 'bg-purple-50 border-purple-300 text-purple-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                      randomSource === 'local' ? 'bg-purple-50 border-purple-300 text-purple-700' : 'bg-app-base border-app-border text-app-muted hover:border-app-border'
                     }`}
                   >
                     <Plus size={14} />
@@ -971,12 +971,12 @@ Return ONLY the image prompt, nothing else.`
                     {localMediaFiles.length > 0 && (
                       <div className="space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-500">{localMediaFiles.length} file đã chọn</span>
+                          <span className="text-xs text-app-muted">{localMediaFiles.length} file đã chọn</span>
                           <button onClick={() => setLocalMediaFiles([])} className="text-xs text-red-500 hover:text-red-600">Xóa hết</button>
                         </div>
                         <div className="grid grid-cols-5 gap-1.5 max-h-32 overflow-y-auto">
                           {localMediaFiles.map((f, i) => (
-                            <div key={i} className="relative aspect-square bg-gray-100 rounded overflow-hidden group">
+                            <div key={i} className="relative aspect-square bg-app-elevated rounded overflow-hidden group">
                               <img src={URL.createObjectURL(f)} alt="" className="w-full h-full object-cover" />
                               <button
                                 onClick={() => setLocalMediaFiles(prev => prev.filter((_, idx) => idx !== i))}
@@ -1009,7 +1009,7 @@ Return ONLY the image prompt, nothing else.`
                 <div className="mt-3 space-y-3 bg-yellow-50 rounded-lg p-3">
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-gray-600">Prompt anh</span>
+                      <span className="text-xs font-medium text-app-muted">Prompt anh</span>
                       <button
                         onClick={() => {
                           if (!caption.trim()) {
@@ -1019,7 +1019,7 @@ Return ONLY the image prompt, nothing else.`
                           aiPromptGenMutation.mutate(caption)
                         }}
                         disabled={aiPromptGenMutation.isPending || !caption.trim()}
-                        className="flex items-center gap-1 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 disabled:opacity-50"
+                        className="flex items-center gap-1 text-xs bg-blue-50 text-info px-2 py-0.5 rounded hover:bg-blue-100 disabled:opacity-50"
                       >
                         {aiPromptGenMutation.isPending ? (
                           <><Loader2 size={10} className="animate-spin" /> Dang tao...</>
@@ -1082,18 +1082,18 @@ Return ONLY the image prompt, nothing else.`
       </div>
 
       {/* ══════ SECTION 4: Schedule + Submit ══════ */}
-      <div className="bg-white rounded-xl shadow p-4 mb-4">
+      <div className="bg-app-surface rounded shadow p-4 mb-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
           {/* Schedule */}
           <div className="flex items-center gap-4 flex-1">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" name="schedule" checked={scheduleMode === 'now'} onChange={() => setScheduleMode('now')} className="text-blue-600" />
+              <input type="radio" name="schedule" checked={scheduleMode === 'now'} onChange={() => setScheduleMode('now')} className="text-info" />
               <Zap size={14} className="text-yellow-500" />
               <span className="text-sm">Dang ngay</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" name="schedule" checked={scheduleMode === 'scheduled'} onChange={() => setScheduleMode('scheduled')} className="text-blue-600" />
-              <CalendarClock size={14} className="text-blue-500" />
+              <input type="radio" name="schedule" checked={scheduleMode === 'scheduled'} onChange={() => setScheduleMode('scheduled')} className="text-info" />
+              <CalendarClock size={14} className="text-info" />
               <span className="text-sm">Hen gio</span>
             </label>
             {scheduleMode === 'scheduled' && (
@@ -1110,7 +1110,7 @@ Return ONLY the image prompt, nothing else.`
           <button
             onClick={handlePublish}
             disabled={publishMutation.isPending || targetCount === 0}
-            className="flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm shadow-lg shadow-blue-600/20 whitespace-nowrap"
+            className="flex items-center justify-center gap-2 bg-info text-white px-6 py-2.5 rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm  shadow-blue-600/20 whitespace-nowrap"
           >
             {publishMutation.isPending ? (
               <><Loader size={16} className="animate-spin" /> Dang tao...</>
@@ -1125,7 +1125,7 @@ Return ONLY the image prompt, nothing else.`
           <div className="mt-3 pt-3 border-t">
             <div className="flex flex-wrap gap-1.5">
               {buildTargets().map((t, i) => (
-                <span key={i} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full border border-blue-100">
+                <span key={i} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-info px-2 py-1 rounded-full border border-blue-100">
                   {t.type === 'page' ? '📄' : t.type === 'group' ? '👥' : '👤'}
                   {t.type === 'page'
                     ? fanpages.find(p => p.id === t.id)?.name || t.id
@@ -1145,23 +1145,23 @@ Return ONLY the image prompt, nothing else.`
       <div>
         <button
           onClick={() => setShowQueue(!showQueue)}
-          className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-3"
+          className="flex items-center gap-2 text-app-muted hover:text-app-primary mb-3"
         >
           {showQueue ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           <span className="font-semibold text-sm">Hang doi ({recentJobs.length})</span>
         </button>
 
         {showQueue && (
-          <div className="bg-white rounded-xl shadow overflow-hidden">
+          <div className="bg-app-surface rounded shadow overflow-hidden">
             <table className="w-full">
-              <thead className="bg-gray-50">
+              <thead className="bg-app-base">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Loai</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Noi dang</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Lich</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Trang thai</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">Link</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Thao tac</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-app-muted">Loai</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-app-muted">Noi dang</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-app-muted">Lich</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-app-muted">Trang thai</th>
+                  <th className="px-3 py-2 text-center text-xs font-medium text-app-muted">Link</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-app-muted">Thao tac</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -1169,16 +1169,16 @@ Return ONLY the image prompt, nothing else.`
                   const config = statusConfig[job.status] || statusConfig.pending
                   const Icon = config.icon
                   return (
-                    <tr key={job.id} className="hover:bg-gray-50">
+                    <tr key={job.id} className="hover:bg-app-base">
                       <td className="px-3 py-2">
-                        <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                        <span className="text-xs bg-app-elevated text-app-muted px-1.5 py-0.5 rounded">
                           {typeLabels[job.type || job.job_type] || job.type}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-xs text-gray-600 truncate max-w-[200px]">
+                      <td className="px-3 py-2 text-xs text-app-muted truncate max-w-[200px]">
                         {job.target_name || job.payload?.target_id || '-'}
                       </td>
-                      <td className="px-3 py-2 text-xs text-gray-500">
+                      <td className="px-3 py-2 text-xs text-app-muted">
                         {job.scheduled_at ? new Date(job.scheduled_at).toLocaleString('vi') : '-'}
                       </td>
                       <td className="px-3 py-2">
@@ -1193,23 +1193,23 @@ Return ONLY the image prompt, nothing else.`
                             href={job.result.post_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+                            className="inline-flex items-center gap-1 text-xs text-info hover:text-blue-800"
                             title="Xem bai dang tren Facebook"
                           >
                             <ExternalLink size={12} />
                           </a>
                         ) : (
-                          <span className="text-gray-300">-</span>
+                          <span className="text-app-dim">-</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {(job.status === 'pending' || job.status === 'claimed' || job.status === 'running') && (
-                          <button onClick={() => cancelMutation.mutate(job.id)} className="text-gray-400 hover:text-red-500 text-xs">
+                          <button onClick={() => cancelMutation.mutate(job.id)} className="text-app-dim hover:text-red-500 text-xs">
                             <XCircle size={14} />
                           </button>
                         )}
                         {job.status === 'failed' && (
-                          <button onClick={() => retryMutation.mutate(job.id)} className="text-gray-400 hover:text-blue-500 text-xs">
+                          <button onClick={() => retryMutation.mutate(job.id)} className="text-app-dim hover:text-info text-xs">
                             <RotateCcw size={14} />
                           </button>
                         )}
@@ -1219,7 +1219,7 @@ Return ONLY the image prompt, nothing else.`
                 })}
                 {recentJobs.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-8 text-center text-sm text-gray-400">
+                    <td colSpan={6} className="px-3 py-8 text-center text-sm text-app-dim">
                       Chua co bai dang nao trong hang doi
                     </td>
                   </tr>
@@ -1253,46 +1253,46 @@ function PublishHistory() {
     <div className="mt-4">
       <button
         onClick={() => setShow(!show)}
-        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-3"
+        className="flex items-center gap-2 text-app-muted hover:text-app-primary mb-3"
       >
         {show ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         <span className="font-semibold text-sm">Bai da dang ({posts.length})</span>
       </button>
 
       {show && (
-        <div className="bg-white rounded-xl shadow overflow-hidden">
+        <div className="bg-app-surface rounded shadow overflow-hidden">
           {isLoading ? (
-            <div className="p-8 text-center text-gray-400"><Loader size={20} className="animate-spin mx-auto" /></div>
+            <div className="p-8 text-center text-app-dim"><Loader size={20} className="animate-spin mx-auto" /></div>
           ) : posts.length === 0 ? (
-            <div className="p-8 text-center text-sm text-gray-400">Chua co bai nao duoc dang</div>
+            <div className="p-8 text-center text-sm text-app-dim">Chua co bai nao duoc dang</div>
           ) : (
             <table className="w-full">
-              <thead className="bg-gray-50">
+              <thead className="bg-app-base">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Noi dung</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Noi dang</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Thoi gian</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Trang thai</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">Link</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-app-muted">Noi dung</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-app-muted">Noi dang</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-app-muted">Thoi gian</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-app-muted">Trang thai</th>
+                  <th className="px-3 py-2 text-center text-xs font-medium text-app-muted">Link</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {posts.map(post => (
-                  <tr key={post.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 text-xs text-gray-700 max-w-[250px] truncate">
+                  <tr key={post.id} className="hover:bg-app-base">
+                    <td className="px-3 py-2 text-xs text-app-primary max-w-[250px] truncate">
                       {post.final_caption || post.caption || '-'}
                     </td>
-                    <td className="px-3 py-2 text-xs text-gray-600 truncate max-w-[150px]">
+                    <td className="px-3 py-2 text-xs text-app-muted truncate max-w-[150px]">
                       {post.target_name || '-'}
                     </td>
-                    <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+                    <td className="px-3 py-2 text-xs text-app-muted whitespace-nowrap">
                       {post.published_at ? new Date(post.published_at).toLocaleString('vi') : '-'}
                     </td>
                     <td className="px-3 py-2">
                       <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full ${
-                        post.status === 'success' ? 'bg-green-100 text-green-700' :
+                        post.status === 'success' ? 'bg-green-100 text-hermes' :
                         post.status === 'failed' ? 'bg-red-100 text-red-700' :
-                        'bg-gray-100 text-gray-600'
+                        'bg-app-elevated text-app-muted'
                       }`}>
                         {post.status === 'success' ? <CheckCircle size={10} /> : post.status === 'failed' ? <AlertCircle size={10} /> : null}
                         {post.status === 'success' ? 'OK' : post.status}
@@ -1304,12 +1304,12 @@ function PublishHistory() {
                           href={post.post_url || `https://www.facebook.com/${post.fb_post_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+                          className="inline-flex items-center gap-1 text-xs text-info hover:text-blue-800"
                         >
                           <ExternalLink size={12} /> Xem
                         </a>
                       ) : (
-                        <span className="text-gray-300 text-xs">-</span>
+                        <span className="text-app-dim text-xs">-</span>
                       )}
                     </td>
                   </tr>

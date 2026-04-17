@@ -11,7 +11,7 @@ const TYPE_CONFIG = {
   cookie_expired:  { icon: Key,           color: 'text-orange-500', bg: 'bg-orange-50' },
   campaign_error:  { icon: XCircle,       color: 'text-red-500', bg: 'bg-red-50' },
   job_failed:      { icon: XCircle,       color: 'text-red-500', bg: 'bg-red-50' },
-  campaign_complete: { icon: Check,       color: 'text-green-500', bg: 'bg-green-50' },
+  campaign_complete: { icon: Check,       color: 'text-hermes', bg: 'bg-green-50' },
   daily_budget_hit:  { icon: AlertCircle, color: 'text-yellow-500', bg: 'bg-yellow-50' },
   info:            { icon: Info,          color: 'text-blue-500', bg: 'bg-blue-50' },
 }
@@ -77,7 +77,7 @@ export default function NotificationBell() {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-gray-400 hover:text-gray-600 transition-colors"
+        className="relative p-2 text-app-dim hover:text-app-muted transition-colors"
       >
         <Bell size={20} />
         {unreadCount > 0 && (
@@ -88,10 +88,10 @@ export default function NotificationBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl border border-gray-200 shadow-xl z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-80 bg-app-surface rounded border border-app-border  z-50 overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-            <h3 className="font-semibold text-gray-900 text-sm">Thong bao</h3>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-app-border">
+            <h3 className="font-semibold text-app-primary text-sm">Thong bao</h3>
             {unreadCount > 0 && (
               <button
                 onClick={() => readAllMut.mutate()}
@@ -105,7 +105,7 @@ export default function NotificationBell() {
           {/* List */}
           <div className="max-h-96 overflow-y-auto">
             {notifications.length === 0 ? (
-              <div className="text-center py-8 text-gray-400 text-sm">
+              <div className="text-center py-8 text-app-dim text-sm">
                 Khong co thong bao
               </div>
             ) : (
@@ -118,7 +118,7 @@ export default function NotificationBell() {
                   <div
                     key={n.id}
                     onClick={() => { if (!n.is_read) readMut.mutate(n.id) }}
-                    className={`px-4 py-3 border-b border-gray-50 border-l-3 cursor-pointer hover:bg-gray-50 transition-colors ${borderColor} ${
+                    className={`px-4 py-3 border-b border-gray-50 border-l-3 cursor-pointer hover:bg-app-base transition-colors ${borderColor} ${
                       n.is_read ? 'opacity-60' : ''
                     }`}
                   >
@@ -127,14 +127,14 @@ export default function NotificationBell() {
                         <Icon size={14} className={config.color} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{n.title}</p>
-                        {n.body && <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{n.body}</p>}
-                        <p className="text-[10px] text-gray-400 mt-1">
+                        <p className="text-sm font-medium text-app-primary truncate">{n.title}</p>
+                        {n.body && <p className="text-xs text-app-muted mt-0.5 line-clamp-2">{n.body}</p>}
+                        <p className="text-[10px] text-app-dim mt-1">
                           {formatDistanceToNow(new Date(n.created_at), { addSuffix: true, locale: vi })}
                         </p>
                       </div>
                       {!n.is_read && (
-                        <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 mt-1.5" />
+                        <div className="w-2 h-2 rounded-full bg-info flex-shrink-0 mt-1.5" />
                       )}
                     </div>
                   </div>

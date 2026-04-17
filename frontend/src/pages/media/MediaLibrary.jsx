@@ -14,8 +14,8 @@ const tabs = [
 
 const statusConfig = {
   pending: { icon: Clock, label: 'Chờ xử lý', cls: 'bg-yellow-100 text-yellow-700' },
-  processing: { icon: Loader2, label: 'Đang xử lý', cls: 'bg-blue-100 text-blue-700' },
-  done: { icon: CheckCircle, label: 'Hoàn thành', cls: 'bg-green-100 text-green-700' },
+  processing: { icon: Loader2, label: 'Đang xử lý', cls: 'bg-blue-100 text-info' },
+  done: { icon: CheckCircle, label: 'Hoàn thành', cls: 'bg-green-100 text-hermes' },
   error: { icon: AlertCircle, label: 'Lỗi', cls: 'bg-red-100 text-red-700' }
 }
 
@@ -80,12 +80,12 @@ export default function MediaLibrary() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Thư viện</h1>
+        <h1 className="text-2xl font-bold text-app-primary">Thư viện</h1>
         <div className="flex gap-2">
-          <button onClick={() => setShowDownload(true)} className="flex items-center gap-2 border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50">
+          <button onClick={() => setShowDownload(true)} className="flex items-center gap-2 border border-app-border px-4 py-2 rounded-lg hover:bg-app-base">
             <Download size={18} /> Tải từ URL
           </button>
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploadMutation.isPending} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+          <button onClick={() => fileInputRef.current?.click()} disabled={uploadMutation.isPending} className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90">
             {uploadMutation.isPending ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
             {uploadMutation.isPending ? 'Đang tải lên...' : 'Tải lên'}
           </button>
@@ -94,13 +94,13 @@ export default function MediaLibrary() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex gap-1 mb-6 bg-app-elevated rounded-lg p-1 w-fit">
         {tabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === tab.key ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
+              activeTab === tab.key ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'
             }`}
           >
             {tab.icon && <tab.icon size={14} />}
@@ -112,12 +112,12 @@ export default function MediaLibrary() {
       {/* Media Grid */}
       {filtered.length === 0 ? (
         <div className="text-center py-16">
-          <Film size={48} className="mx-auto mb-3 text-gray-300" />
-          <p className="text-gray-500 mb-2">Chưa có file media nào</p>
-          <p className="text-sm text-gray-400 mb-4">Tải lên ảnh, video hoặc nhạc để bắt đầu tạo nội dung</p>
+          <Film size={48} className="mx-auto mb-3 text-app-dim" />
+          <p className="text-app-muted mb-2">Chưa có file media nào</p>
+          <p className="text-sm text-app-dim mb-4">Tải lên ảnh, video hoặc nhạc để bắt đầu tạo nội dung</p>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm"
+            className="inline-flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90 text-sm"
           >
             <Plus size={16} /> Tải lên file đầu tiên
           </button>
@@ -129,15 +129,15 @@ export default function MediaLibrary() {
             const StatusIcon = status.icon
             const isDone = item.processing_status === 'done'
             return (
-              <div key={item.id} className="bg-white rounded-xl shadow overflow-hidden group">
-                <div className="relative aspect-video bg-gray-100">
+              <div key={item.id} className="bg-app-surface rounded shadow overflow-hidden group">
+                <div className="relative aspect-video bg-app-elevated">
                   {(item.thumbnail_url || item.url || item.original_path) ? (
                     <img src={item.thumbnail_url || item.url || item.original_path} alt={item.title} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
-                      {item.type === 'video' && <Film size={32} className="text-gray-300" />}
-                      {item.type === 'image' && <Image size={32} className="text-gray-300" />}
-                      {item.type === 'music' && <Music size={32} className="text-gray-300" />}
+                      {item.type === 'video' && <Film size={32} className="text-app-dim" />}
+                      {item.type === 'image' && <Image size={32} className="text-app-dim" />}
+                      {item.type === 'music' && <Music size={32} className="text-app-dim" />}
                     </div>
                   )}
 
@@ -170,13 +170,13 @@ export default function MediaLibrary() {
                 </div>
 
                 <div className="p-3">
-                  <h3 className="text-sm font-medium text-gray-900 truncate">{item.title || item.original_filename || 'Chưa đặt tên'}</h3>
+                  <h3 className="text-sm font-medium text-app-primary truncate">{item.title || item.original_filename || 'Chưa đặt tên'}</h3>
                   <div className="flex items-center justify-between mt-2">
                     <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${status.cls}`}>
                       <StatusIcon size={10} className={item.processing_status === 'processing' ? 'animate-spin' : ''} /> {status.label}
                     </span>
                     {item.file_size && (
-                      <span className="text-xs text-gray-400">{(item.file_size / 1024 / 1024).toFixed(1)} MB</span>
+                      <span className="text-xs text-app-dim">{(item.file_size / 1024 / 1024).toFixed(1)} MB</span>
                     )}
                   </div>
 
@@ -184,7 +184,7 @@ export default function MediaLibrary() {
                   {isDone && (
                     <Link
                       to={`/content/new?media_id=${item.id}`}
-                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 mt-2"
+                      className="flex items-center gap-1 text-xs text-info hover:text-info mt-2"
                     >
                       <PenSquare size={12} /> Tạo nội dung
                     </Link>
@@ -199,7 +199,7 @@ export default function MediaLibrary() {
       {/* Download URL Modal */}
       {showDownload && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowDownload(false)}>
-          <div className="bg-white rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+          <div className="bg-app-surface rounded p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold mb-4">Tải từ đường dẫn</h2>
             <input
               placeholder="https://example.com/video.mp4"
@@ -207,12 +207,12 @@ export default function MediaLibrary() {
               onChange={e => setDownloadUrl(e.target.value)}
               className="w-full border rounded-lg px-3 py-2"
             />
-            <p className="text-xs text-gray-400 mt-1">Hỗ trợ link video từ TikTok, YouTube, Facebook...</p>
+            <p className="text-xs text-app-dim mt-1">Hỗ trợ link video từ TikTok, YouTube, Facebook...</p>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowDownload(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Huỷ</button>
+              <button onClick={() => setShowDownload(false)} className="px-4 py-2 border rounded-lg hover:bg-app-base">Huỷ</button>
               <button
                 onClick={() => downloadUrlMutation.mutate(downloadUrl)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="px-4 py-2 bg-info text-white rounded-lg hover:opacity-90"
                 disabled={downloadUrlMutation.isPending || !downloadUrl.trim()}
               >
                 {downloadUrlMutation.isPending ? 'Đang tải...' : 'Tải về'}

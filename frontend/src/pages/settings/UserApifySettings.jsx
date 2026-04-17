@@ -54,7 +54,7 @@ export default function UserApifySettings() {
     }
   }
 
-  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>
+  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-info" /></div>
 
   const hasOwnKeys = keys.some(k => k.key.trim() && !k.key.endsWith('...'))
 
@@ -62,13 +62,13 @@ export default function UserApifySettings() {
     <div>
       <div className="flex justify-between items-center mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Apify API Key</h2>
-          <p className="text-sm text-gray-500 mt-1">Thêm API key Apify riêng. Để trống = dùng mặc định hệ thống.</p>
+          <h2 className="text-lg font-semibold text-app-primary">Apify API Key</h2>
+          <p className="text-sm text-app-muted mt-1">Thêm API key Apify riêng. Để trống = dùng mặc định hệ thống.</p>
         </div>
         <button
           onClick={handleSave}
           disabled={saveMutation.isPending}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90"
         >
           {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save size={18} />}
           Lưu
@@ -76,9 +76,9 @@ export default function UserApifySettings() {
       </div>
 
       {/* Info */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+      <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-6">
         <div className="flex items-start gap-2">
-          <Info size={16} className="text-blue-500 mt-0.5 shrink-0" />
+          <Info size={16} className="text-info mt-0.5 shrink-0" />
           <p className="text-sm text-blue-800">
             {hasOwnKeys
               ? 'Bạn đang dùng API key riêng. Hệ thống sẽ ưu tiên key của bạn.'
@@ -88,9 +88,9 @@ export default function UserApifySettings() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow divide-y">
+      <div className="bg-app-surface rounded shadow divide-y">
         {keys.length === 0 && (
-          <p className="text-sm text-gray-400 text-center py-8">Chưa có API key riêng. Bấm "Thêm key" để thêm.</p>
+          <p className="text-sm text-app-dim text-center py-8">Chưa có API key riêng. Bấm "Thêm key" để thêm.</p>
         )}
 
         {keys.map((entry, idx) => {
@@ -99,26 +99,26 @@ export default function UserApifySettings() {
           return (
             <div key={idx}>
               <div
-                className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50"
+                className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-app-base"
                 onClick={() => setExpandedIdx(isExpanded ? null : idx)}
               >
-                {isExpanded ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                {isExpanded ? <ChevronDown size={16} className="text-app-dim" /> : <ChevronRight size={16} className="text-app-dim" />}
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-gray-800">{entry.label || `Key ${idx + 1}`}</span>
-                  <span className="text-xs text-gray-400 font-mono ml-2">{keyPreview}</span>
+                  <span className="text-sm font-medium text-app-primary">{entry.label || `Key ${idx + 1}`}</span>
+                  <span className="text-xs text-app-dim font-mono ml-2">{keyPreview}</span>
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); if (confirm('Xoá key này?')) removeKey(idx) }}
-                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md"
+                  className="p-1.5 text-app-dim hover:text-red-500 hover:bg-red-50 rounded-md"
                 >
                   <Trash2 size={14} />
                 </button>
               </div>
 
               {isExpanded && (
-                <div className="px-4 pb-4 pt-1 space-y-3 border-t border-gray-100 bg-gray-50/50">
+                <div className="px-4 pb-4 pt-1 space-y-3 border-t border-app-border bg-app-base/50">
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Tên gợi nhớ</label>
+                    <label className="block text-xs font-medium text-app-muted mb-1">Tên gợi nhớ</label>
                     <input
                       type="text"
                       value={entry.label}
@@ -128,7 +128,7 @@ export default function UserApifySettings() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">API Key</label>
+                    <label className="block text-xs font-medium text-app-muted mb-1">API Key</label>
                     <div className="relative">
                       <input
                         type={showKeys[idx] ? 'text' : 'password'}
@@ -139,7 +139,7 @@ export default function UserApifySettings() {
                       />
                       <button
                         onClick={() => setShowKeys(prev => ({ ...prev, [idx]: !prev[idx] }))}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-app-dim"
                       >
                         {showKeys[idx] ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
@@ -154,16 +154,16 @@ export default function UserApifySettings() {
         <div className="p-4">
           <button
             onClick={addKey}
-            className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:text-blue-600 hover:border-blue-300"
+            className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-app-border rounded-lg text-sm text-app-muted hover:text-info hover:border-blue-300"
           >
             <Plus size={16} /> Thêm key
           </button>
         </div>
 
         <div className="px-4 py-3">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-app-dim">
             Lấy API key tại{' '}
-            <a href="https://console.apify.com/account/integrations" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+            <a href="https://console.apify.com/account/integrations" target="_blank" rel="noopener noreferrer" className="text-info hover:underline">
               Apify Console
             </a>
           </p>

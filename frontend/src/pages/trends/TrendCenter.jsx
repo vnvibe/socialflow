@@ -26,8 +26,8 @@ const regions = [
 const sourceBadge = {
   youtube: { label: 'YouTube', cls: 'bg-red-100 text-red-700' },
   reddit: { label: 'Reddit', cls: 'bg-orange-100 text-orange-700' },
-  tiktok: { label: 'TikTok', cls: 'bg-gray-800 text-white' },
-  google: { label: 'Google', cls: 'bg-blue-100 text-blue-700' },
+  tiktok: { label: 'TikTok', cls: 'bg-app-base text-white' },
+  google: { label: 'Google', cls: 'bg-blue-100 text-info' },
   twitter: { label: 'Twitter', cls: 'bg-sky-100 text-sky-700' },
   vnexpress: { label: 'VnExpress', cls: 'bg-emerald-100 text-emerald-700' },
   voz: { label: 'Voz', cls: 'bg-violet-100 text-violet-700' },
@@ -120,7 +120,7 @@ function TrendsTab() {
         <button
           onClick={() => refreshMutation.mutate()}
           disabled={refreshMutation.isPending}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90"
         >
           <RefreshCw size={16} className={refreshMutation.isPending ? 'animate-spin' : ''} />
           Làm mới
@@ -135,8 +135,8 @@ function TrendsTab() {
             onClick={() => setActiveSource(sf.value)}
             className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
               activeSource === sf.value
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                ? 'bg-info text-white'
+                : 'bg-app-elevated text-app-muted hover:bg-app-hover'
             }`}
           >
             {sf.label}
@@ -147,17 +147,17 @@ function TrendsTab() {
       {isLoading ? (
         <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
       ) : trends.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <TrendingUp size={48} className="mx-auto mb-3 text-gray-300" />
+        <div className="text-center py-16 text-app-dim">
+          <TrendingUp size={48} className="mx-auto mb-3 text-app-dim" />
           <p>Không có xu hướng nào cho khu vực này</p>
-          <button onClick={() => refreshMutation.mutate()} className="text-blue-600 hover:underline text-sm mt-2">Làm mới</button>
+          <button onClick={() => refreshMutation.mutate()} className="text-info hover:underline text-sm mt-2">Làm mới</button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {trends.map((trend, idx) => (
-            <div key={trend.id || idx} className="bg-white rounded-xl shadow overflow-hidden hover:shadow-md transition-shadow">
+            <div key={trend.id || idx} className="bg-app-surface rounded shadow overflow-hidden hover: transition-shadow">
               {(trend.thumbnail_url || trend.thumbnail) && (
-                <div className="relative aspect-video bg-gray-100">
+                <div className="relative aspect-video bg-app-elevated">
                   <img src={trend.thumbnail_url || trend.thumbnail} alt="" className="w-full h-full object-cover" />
                   {trend.view_count && (
                     <span className="absolute bottom-2 right-2 flex items-center gap-1 text-xs bg-black/70 text-white px-2 py-0.5 rounded">
@@ -167,15 +167,15 @@ function TrendsTab() {
                 </div>
               )}
               <div className="p-4">
-                <h3 className="font-semibold text-gray-900 line-clamp-2">{trend.keyword || trend.title}</h3>
+                <h3 className="font-semibold text-app-primary line-clamp-2">{trend.keyword || trend.title}</h3>
                 {trend.description && (
-                  <p className="text-xs text-gray-500 line-clamp-2 mt-1">{trend.description}</p>
+                  <p className="text-xs text-app-muted line-clamp-2 mt-1">{trend.description}</p>
                 )}
                 <div className="mt-3">
-                  <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                  <div className="flex items-center justify-between text-xs text-app-muted mb-1">
                     <div className="flex items-center gap-2">
                       {trend.category && (
-                        <span className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px]">{trend.category}</span>
+                        <span className="px-1.5 py-0.5 bg-app-elevated rounded text-[10px]">{trend.category}</span>
                       )}
                       {trend.published_at && (
                         <span className="flex items-center gap-0.5"><Clock size={10} /> {new Date(trend.published_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}</span>
@@ -183,7 +183,7 @@ function TrendsTab() {
                     </div>
                     <span className="font-mono">{trend.score?.toFixed(1)}</span>
                   </div>
-                  <div className="w-full bg-gray-100 rounded-full h-2">
+                  <div className="w-full bg-app-elevated rounded-full h-2">
                     <div
                       className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all"
                       style={{ width: `${Math.max((trend.score / maxScore) * 100, 5)}%` }}
@@ -193,7 +193,7 @@ function TrendsTab() {
                 {trend.sources?.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-3">
                     {trend.sources.map((src, i) => {
-                      const badge = sourceBadge[src] || { label: src, cls: 'bg-gray-100 text-gray-600' }
+                      const badge = sourceBadge[src] || { label: src, cls: 'bg-app-elevated text-app-muted' }
                       return <span key={i} className={`text-[10px] px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>
                     })}
                   </div>
@@ -201,12 +201,12 @@ function TrendsTab() {
                 <div className="flex items-center justify-between mt-4 pt-3 border-t">
                   <button
                     onClick={() => navigate(`/content/new?topic=${encodeURIComponent(trend.keyword || trend.title)}`)}
-                    className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium"
+                    className="flex items-center gap-1 text-sm text-info hover:text-blue-800 font-medium"
                   >
                     <Play size={14} /> Tạo nội dung
                   </button>
                   {trend.url && (
-                    <a href={trend.url} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-600">
+                    <a href={trend.url} target="_blank" rel="noopener noreferrer" className="text-app-dim hover:text-app-muted">
                       <ExternalLink size={14} />
                     </a>
                   )}
@@ -365,14 +365,14 @@ function ResearchTab() {
         <div className="flex items-center justify-between gap-2">
           <button
             onClick={closeEditor}
-            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 font-medium shrink-0"
+            className="flex items-center gap-1.5 text-sm text-app-muted hover:text-app-primary font-medium shrink-0"
           >
             <ArrowLeft size={16} /> <span className="hidden sm:inline">Quay lại kết quả</span><span className="sm:hidden">Quay lại</span>
           </button>
           {rewrittenText && (
             <button
               onClick={sendToPublish}
-              className="flex items-center gap-1.5 px-4 sm:px-5 py-2 sm:py-2.5 text-sm font-medium rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm"
+              className="flex items-center gap-1.5 px-4 sm:px-5 py-2 sm:py-2.5 text-sm font-medium rounded bg-info text-white hover:opacity-90 transition-colors "
             >
               <Send size={15} />
               <span className="hidden sm:inline">Đăng bài</span>
@@ -383,16 +383,16 @@ function ResearchTab() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* LEFT: Original content */}
-          <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-            <div className="px-5 py-3 bg-gray-50 border-b flex items-center justify-between">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Nội dung gốc</span>
+          <div className="bg-app-surface rounded  border overflow-hidden">
+            <div className="px-5 py-3 bg-app-base border-b flex items-center justify-between">
+              <span className="text-xs font-semibold text-app-muted uppercase tracking-wider">Nội dung gốc</span>
               <div className="flex items-center gap-2">
                 {post.url && (
-                  <a href={post.url} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-500">
+                  <a href={post.url} target="_blank" rel="noopener noreferrer" className="text-app-dim hover:text-info">
                     <ExternalLink size={13} />
                   </a>
                 )}
-                <button onClick={() => copyText(originalText)} className="text-gray-400 hover:text-gray-600" title="Copy">
+                <button onClick={() => copyText(originalText)} className="text-app-dim hover:text-app-muted" title="Copy">
                   <Copy size={13} />
                 </button>
               </div>
@@ -401,12 +401,12 @@ function ResearchTab() {
               {/* Author info for facebook */}
               {source === 'facebook' && (
                 <div className="flex items-center gap-3 mb-4 pb-3 border-b">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-info font-bold">
                     {(post.author || '?')[0]}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-gray-800">{post.author || 'Ẩn danh'}</p>
-                    <div className="flex items-center gap-3 text-[11px] text-gray-400">
+                    <p className="text-sm font-semibold text-app-primary">{post.author || 'Ẩn danh'}</p>
+                    <div className="flex items-center gap-3 text-[11px] text-app-dim">
                       {post.date && <span>{new Date(post.date).toLocaleString('vi-VN')}</span>}
                       <span className="flex items-center gap-0.5"><ThumbsUp size={10} /> {post.likes || 0}</span>
                       <span className="flex items-center gap-0.5"><MessageCircle size={10} /> {post.comments || 0}</span>
@@ -418,16 +418,16 @@ function ResearchTab() {
 
               {/* Web title */}
               {source === 'web' && post.title && (
-                <h3 className="text-base font-semibold text-gray-800 mb-3">{post.title}</h3>
+                <h3 className="text-base font-semibold text-app-primary mb-3">{post.title}</h3>
               )}
 
-              <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{originalText}</p>
+              <p className="text-sm text-app-primary whitespace-pre-wrap leading-relaxed">{originalText}</p>
 
               {/* Original media */}
               {post.media && (
                 <div className="mt-4">
-                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Ảnh gốc</span>
-                  <img src={post.media} alt="" className="rounded-xl max-h-64 object-cover" />
+                  <span className="text-[10px] font-semibold text-app-dim uppercase tracking-wider mb-1.5 block">Ảnh gốc</span>
+                  <img src={post.media} alt="" className="rounded max-h-64 object-cover" />
                 </div>
               )}
               {post.images?.length > 0 && (
@@ -441,7 +441,7 @@ function ResearchTab() {
           </div>
 
           {/* RIGHT: Tabbed editor workspace */}
-          <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+          <div className="bg-app-surface rounded  border overflow-hidden">
             {/* Tab bar */}
             <div className="flex border-b">
               <button
@@ -449,7 +449,7 @@ function ResearchTab() {
                 className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium transition-colors ${
                   editorTab === 'rewrite'
                     ? 'text-amber-700 border-b-2 border-amber-500 bg-amber-50/50'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    : 'text-app-muted hover:text-app-primary hover:bg-app-base'
                 }`}
               >
                 <PenLine size={15} />
@@ -461,7 +461,7 @@ function ResearchTab() {
                 className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium transition-colors ${
                   editorTab === 'image'
                     ? 'text-purple-700 border-b-2 border-purple-500 bg-purple-50/50'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    : 'text-app-muted hover:text-app-primary hover:bg-app-base'
                 }`}
               >
                 <ImagePlus size={15} />
@@ -474,11 +474,11 @@ function ResearchTab() {
             {editorTab === 'rewrite' ? (
               <div>
                 {/* Rewrite toolbar */}
-                <div className="px-4 sm:px-5 py-3 bg-gray-50 border-b flex items-center justify-between gap-2">
-                  <span className="text-xs text-gray-500 hidden sm:inline">AI sẽ viết lại nội dung theo phong cách mới</span>
+                <div className="px-4 sm:px-5 py-3 bg-app-base border-b flex items-center justify-between gap-2">
+                  <span className="text-xs text-app-muted hidden sm:inline">AI sẽ viết lại nội dung theo phong cách mới</span>
                   <div className="flex items-center gap-2">
                     {rewrittenText && (
-                      <button onClick={() => copyText(rewrittenText)} className="text-gray-400 hover:text-gray-600" title="Copy">
+                      <button onClick={() => copyText(rewrittenText)} className="text-app-dim hover:text-app-muted" title="Copy">
                         <Copy size={13} />
                       </button>
                     )}
@@ -504,12 +504,12 @@ function ResearchTab() {
                     <textarea
                       value={rewrittenText}
                       onChange={e => setRewrittenText(e.target.value)}
-                      className="w-full text-sm text-gray-800 leading-relaxed border rounded-xl p-4 min-h-[300px] focus:outline-none focus:ring-2 focus:ring-amber-300 resize-y"
+                      className="w-full text-sm text-app-primary leading-relaxed border rounded p-4 min-h-[300px] focus:outline-none focus:ring-2 focus:ring-amber-300 resize-y"
                     />
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-                      <PenLine size={32} className="mb-3 text-gray-300" />
-                      <p className="text-sm font-medium text-gray-500">Bấm "Bắt đầu viết lại"</p>
+                    <div className="flex flex-col items-center justify-center py-16 text-app-dim">
+                      <PenLine size={32} className="mb-3 text-app-dim" />
+                      <p className="text-sm font-medium text-app-muted">Bấm "Bắt đầu viết lại"</p>
                       <p className="text-xs mt-1">AI sẽ soạn nội dung mới, bạn chỉnh sửa sau</p>
                     </div>
                   )}
@@ -518,14 +518,14 @@ function ResearchTab() {
             ) : (
               <div>
                 {/* Image toolbar with model + size */}
-                <div className="px-4 sm:px-5 py-3 bg-gray-50 border-b">
+                <div className="px-4 sm:px-5 py-3 bg-app-base border-b">
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2 sm:gap-3">
                     <div className="flex-1 min-w-0">
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Model</label>
+                      <label className="block text-[10px] font-semibold text-app-muted uppercase tracking-wider mb-1">Model</label>
                       <select
                         value={aiModel}
                         onChange={e => setAiModel(e.target.value)}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+                        className="w-full border border-app-border rounded-lg px-3 py-2 text-sm bg-app-surface focus:outline-none focus:ring-2 focus:ring-purple-300"
                       >
                         {aiModels.map(m => (
                           <option key={m.value} value={m.value}>
@@ -536,11 +536,11 @@ function ResearchTab() {
                     </div>
                     <div className="flex gap-2">
                       <div className="flex-1 sm:w-36">
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Kích thước</label>
+                        <label className="block text-[10px] font-semibold text-app-muted uppercase tracking-wider mb-1">Kích thước</label>
                         <select
                           value={aiSize}
                           onChange={e => setAiSize(e.target.value)}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+                          className="w-full border border-app-border rounded-lg px-3 py-2 text-sm bg-app-surface focus:outline-none focus:ring-2 focus:ring-purple-300"
                         >
                           {aiSizes.map(s => (
                             <option key={s.value} value={s.value}>{s.label}</option>
@@ -574,16 +574,16 @@ function ResearchTab() {
                       <img
                         src={generatedImage.url || generatedImage.image_url}
                         alt=""
-                        className="rounded-xl w-full max-h-80 object-cover"
+                        className="rounded w-full max-h-80 object-cover"
                       />
-                      <p className="text-xs text-gray-400 mt-2 text-center">
+                      <p className="text-xs text-app-dim mt-2 text-center">
                         {aiModels.find(m => m.value === aiModel)?.label} &middot; {aiSizes.find(s => s.value === aiSize)?.label}
                       </p>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-                      <ImagePlus size={32} className="mb-3 text-gray-300" />
-                      <p className="text-sm font-medium text-gray-500">Chọn model, kích thước rồi bấm "Tạo ảnh"</p>
+                    <div className="flex flex-col items-center justify-center py-16 text-app-dim">
+                      <ImagePlus size={32} className="mb-3 text-app-dim" />
+                      <p className="text-sm font-medium text-app-muted">Chọn model, kích thước rồi bấm "Tạo ảnh"</p>
                       <p className="text-xs mt-1">AI tạo ảnh dựa trên nội dung bài viết</p>
                     </div>
                   )}
@@ -595,8 +595,8 @@ function ResearchTab() {
 
         {/* Bottom publish bar (sticky) */}
         {rewrittenText && (
-          <div className="sticky bottom-0 bg-white rounded-2xl shadow-lg border p-3 sm:p-4 flex items-center justify-between gap-3">
-            <div className="text-xs sm:text-sm text-gray-500 min-w-0">
+          <div className="sticky bottom-0 bg-app-surface rounded  border p-3 sm:p-4 flex items-center justify-between gap-3">
+            <div className="text-xs sm:text-sm text-app-muted min-w-0">
               <Sparkles size={14} className="inline mr-1 text-emerald-500" />
               <span className="hidden sm:inline">Nội dung đã sẵn sàng</span>
               <span className="sm:hidden">Sẵn sàng</span>
@@ -604,7 +604,7 @@ function ResearchTab() {
             </div>
             <button
               onClick={sendToPublish}
-              className="flex items-center gap-1.5 px-4 sm:px-6 py-2 sm:py-2.5 text-sm font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm shrink-0"
+              className="flex items-center gap-1.5 px-4 sm:px-6 py-2 sm:py-2.5 text-sm font-semibold rounded bg-info text-white hover:opacity-90 transition-colors  shrink-0"
             >
               <Send size={15} />
               <span className="hidden sm:inline">Chuyển sang đăng bài</span>
@@ -623,21 +623,21 @@ function ResearchTab() {
   return (
     <div className="space-y-5">
       {/* ── Search bar ── */}
-      <div className="bg-white rounded-2xl shadow-sm border p-3 sm:p-4">
+      <div className="bg-app-surface rounded  border p-3 sm:p-4">
         <form onSubmit={handleSubmit} className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3">
           <div className="relative flex-1">
-            <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-app-dim" />
             <input
               type="url"
               value={url}
               onChange={e => setUrl(e.target.value)}
               placeholder="Dán link Facebook hoặc website cần nghiên cứu..."
-              className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-white transition-all"
+              className="w-full pl-10 pr-4 py-3 bg-app-base border border-app-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:bg-app-surface transition-all"
               required
             />
             {url.trim() && (
               <span className={`absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
-                detected.source === 'facebook' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+                detected.source === 'facebook' ? 'bg-blue-100 text-info' : 'bg-green-100 text-hermes'
               }`}>
                 {detected.source === 'facebook' ? <Facebook size={10} /> : <Globe size={10} />}
                 {detected.label}
@@ -647,7 +647,7 @@ function ResearchTab() {
           <button
             type="submit"
             disabled={researchMutation.isPending}
-            className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:bg-blue-400 transition-colors shrink-0"
+            className="flex items-center gap-2 bg-info text-white px-6 py-3 rounded text-sm font-medium hover:opacity-90 disabled:bg-blue-400 transition-colors shrink-0"
           >
             {researchMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
             {researchMutation.isPending ? 'Đang thu thập...' : 'Nghiên cứu'}
@@ -656,8 +656,8 @@ function ResearchTab() {
             <button
               type="button"
               onClick={() => setShowHistory(!showHistory)}
-              className={`flex items-center gap-1.5 px-3 py-3 rounded-xl text-sm border transition-colors shrink-0 ${
-                showHistory ? 'bg-gray-100 text-gray-700 border-gray-300' : 'text-gray-400 border-gray-200 hover:text-gray-600 hover:border-gray-300'
+              className={`flex items-center gap-1.5 px-3 py-3 rounded text-sm border transition-colors shrink-0 ${
+                showHistory ? 'bg-app-elevated text-app-primary border-app-border' : 'text-app-dim border-app-border hover:text-app-muted hover:border-app-border'
               }`}
               title="Lịch sử nghiên cứu"
             >
@@ -668,39 +668,39 @@ function ResearchTab() {
 
         {researchMutation.isPending && (
           <div className="mt-3 flex items-center gap-3 px-2">
-            <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: '60%' }} />
+            <div className="flex-1 h-1.5 bg-app-elevated rounded-full overflow-hidden">
+              <div className="h-full bg-info rounded-full animate-pulse" style={{ width: '60%' }} />
             </div>
-            <span className="text-xs text-gray-400 shrink-0">Apify đang chạy, 1-3 phút...</span>
+            <span className="text-xs text-app-dim shrink-0">Apify đang chạy, 1-3 phút...</span>
           </div>
         )}
 
         {!url.trim() && !activeResult && !showHistory && (
-          <p className="text-xs text-gray-400 mt-2 px-1">Facebook (group, page, profile, bài viết) &amp; website</p>
+          <p className="text-xs text-app-dim mt-2 px-1">Facebook (group, page, profile, bài viết) &amp; website</p>
         )}
 
         {showHistory && (
           <div className="mt-3 border-t pt-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Lịch sử nghiên cứu</span>
-              <button onClick={() => setShowHistory(false)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+              <span className="text-xs font-semibold text-app-muted uppercase tracking-wide">Lịch sử nghiên cứu</span>
+              <button onClick={() => setShowHistory(false)} className="text-app-dim hover:text-app-muted"><X size={14} /></button>
             </div>
             {historyLoading ? (
-              <div className="flex justify-center py-4"><Loader2 size={16} className="animate-spin text-gray-400" /></div>
+              <div className="flex justify-center py-4"><Loader2 size={16} className="animate-spin text-app-dim" /></div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {history.map(item => (
                   <div
                     key={item.id}
-                    className="group flex items-center gap-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 cursor-pointer transition-colors"
+                    className="group flex items-center gap-2 bg-app-base hover:bg-app-elevated border border-app-border rounded-lg px-3 py-2 cursor-pointer transition-colors"
                     onClick={() => { loadResultMutation.mutate(item.id); setShowHistory(false) }}
                   >
-                    {item.source === 'facebook' ? <Facebook size={12} className="text-blue-500 shrink-0" /> : <Globe size={12} className="text-green-500 shrink-0" />}
-                    <span className="text-xs text-gray-700 max-w-[200px] truncate">{item.source_url}</span>
-                    <span className="text-[10px] text-gray-400">{new Date(item.created_at).toLocaleDateString('vi-VN')}</span>
+                    {item.source === 'facebook' ? <Facebook size={12} className="text-info shrink-0" /> : <Globe size={12} className="text-hermes shrink-0" />}
+                    <span className="text-xs text-app-primary max-w-[200px] truncate">{item.source_url}</span>
+                    <span className="text-[10px] text-app-dim">{new Date(item.created_at).toLocaleDateString('vi-VN')}</span>
                     <button
                       onClick={e => { e.stopPropagation(); if (confirm('Xoá?')) deleteMutation.mutate(item.id) }}
-                      className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity"
+                      className="opacity-0 group-hover:opacity-100 text-app-dim hover:text-red-500 transition-opacity"
                     ><X size={12} /></button>
                   </div>
                 ))}
@@ -712,14 +712,14 @@ function ResearchTab() {
 
       {/* ── Empty state ── */}
       {!activeResult && !researchMutation.isPending && (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-          <div className="w-20 h-20 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-            <Search size={32} className="text-gray-300" />
+        <div className="flex flex-col items-center justify-center py-20 text-app-dim">
+          <div className="w-20 h-20 rounded-full bg-app-elevated flex items-center justify-center mb-4">
+            <Search size={32} className="text-app-dim" />
           </div>
-          <p className="text-base font-medium text-gray-500">Dán URL và bấm Nghiên cứu</p>
+          <p className="text-base font-medium text-app-muted">Dán URL và bấm Nghiên cứu</p>
           <p className="text-sm mt-1">Hệ thống sẽ thu thập nội dung bài viết cho bạn</p>
           {history.length > 0 && (
-            <button onClick={() => setShowHistory(true)} className="mt-4 flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium">
+            <button onClick={() => setShowHistory(true)} className="mt-4 flex items-center gap-1.5 text-sm text-info hover:text-info font-medium">
               <History size={14} /> Xem lịch sử ({history.length})
             </button>
           )}
@@ -728,36 +728,36 @@ function ResearchTab() {
 
       {/* ── Results list ── */}
       {activeResult && activeResult.results?.length === 0 && (
-        <div className="text-center py-16"><p className="text-gray-400">Không tìm thấy dữ liệu từ URL này</p></div>
+        <div className="text-center py-16"><p className="text-app-dim">Không tìm thấy dữ liệu từ URL này</p></div>
       )}
 
       {activeResult && activeResult.results?.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-600">
+            <span className="text-sm font-medium text-app-muted">
               {activeResult.count} kết quả
-              <span className="text-gray-400 font-normal ml-2">{resultSource === 'facebook' ? 'Facebook' : 'Website'}</span>
+              <span className="text-app-dim font-normal ml-2">{resultSource === 'facebook' ? 'Facebook' : 'Website'}</span>
             </span>
-            <button onClick={() => setActiveResult(null)} className="text-xs text-gray-400 hover:text-gray-600">Xoá kết quả</button>
+            <button onClick={() => setActiveResult(null)} className="text-xs text-app-dim hover:text-app-muted">Xoá kết quả</button>
           </div>
 
           {activeResult.results.map((item, idx) => {
             const isFb = resultSource === 'facebook'
             const text = item.text || item.heading || ''
             return (
-              <div key={idx} className="bg-white rounded-2xl shadow-sm border hover:shadow-md transition-shadow overflow-hidden">
+              <div key={idx} className="bg-app-surface rounded  border hover: transition-shadow overflow-hidden">
                 <div className="p-5">
                   <div className="flex items-start gap-4">
                     {/* Left: content preview */}
                     <div className="flex-1 min-w-0">
                       {isFb ? (
                         <div className="flex items-center gap-2 mb-2">
-                          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs font-bold shrink-0">
+                          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-info text-xs font-bold shrink-0">
                             {(item.author || '?')[0]}
                           </div>
                           <div>
-                            <p className="text-sm font-semibold text-gray-800">{item.author || 'Ẩn danh'}</p>
-                            <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                            <p className="text-sm font-semibold text-app-primary">{item.author || 'Ẩn danh'}</p>
+                            <div className="flex items-center gap-2 text-[11px] text-app-dim">
                               {item.date && <span>{new Date(item.date).toLocaleString('vi-VN')}</span>}
                               <span><ThumbsUp size={9} className="inline" /> {item.likes || 0}</span>
                               <span><MessageCircle size={9} className="inline" /> {item.comments || 0}</span>
@@ -766,9 +766,9 @@ function ResearchTab() {
                           </div>
                         </div>
                       ) : (
-                        <h3 className="text-sm font-semibold text-gray-800 mb-1">{item.title || item.url}</h3>
+                        <h3 className="text-sm font-semibold text-app-primary mb-1">{item.title || item.url}</h3>
                       )}
-                      <p className="text-sm text-gray-600 line-clamp-3 whitespace-pre-wrap">{text}</p>
+                      <p className="text-sm text-app-muted line-clamp-3 whitespace-pre-wrap">{text}</p>
                     </div>
 
                     {/* Right: thumbnail */}
@@ -776,14 +776,14 @@ function ResearchTab() {
                       <img
                         src={item.media || item.images[0]}
                         alt=""
-                        className="w-24 h-24 rounded-xl object-cover shrink-0"
+                        className="w-24 h-24 rounded object-cover shrink-0"
                       />
                     )}
                   </div>
                 </div>
 
                 {/* Action bar */}
-                <div className="flex items-center gap-2 px-5 py-3 bg-gray-50 border-t">
+                <div className="flex items-center gap-2 px-5 py-3 bg-app-base border-t">
                   <button
                     onClick={() => openEditor(item, resultSource)}
                     className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors"
@@ -791,11 +791,11 @@ function ResearchTab() {
                     <PenLine size={14} />
                     Soạn lại & Đăng bài
                   </button>
-                  <button onClick={() => copyText(text)} className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
+                  <button onClick={() => copyText(text)} className="flex items-center gap-1.5 px-3 py-2 text-sm text-app-muted hover:text-app-primary rounded-lg hover:bg-app-elevated transition-colors">
                     <Copy size={13} /> Copy
                   </button>
                   {item.url && (
-                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-2 text-sm text-app-muted hover:text-app-primary rounded-lg hover:bg-app-elevated transition-colors">
                       <ExternalLink size={13} /> Mở gốc
                     </a>
                   )}
@@ -818,12 +818,12 @@ export default function TrendCenter() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Xu hướng & Nghiên cứu</h1>
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+        <h1 className="text-2xl font-bold text-app-primary">Xu hướng & Nghiên cứu</h1>
+        <div className="flex gap-1 bg-app-elevated p-1 rounded-lg">
           <button
             onClick={() => setTab('trends')}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              tab === 'trends' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+              tab === 'trends' ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'
             }`}
           >
             <TrendingUp size={16} />
@@ -832,7 +832,7 @@ export default function TrendCenter() {
           <button
             onClick={() => setTab('research')}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              tab === 'research' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+              tab === 'research' ? 'bg-app-surface shadow text-app-primary' : 'text-app-muted hover:text-app-primary'
             }`}
           >
             <Search size={16} />

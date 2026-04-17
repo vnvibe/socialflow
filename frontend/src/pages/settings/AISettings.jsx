@@ -6,7 +6,7 @@ import api from '../../lib/api'
 
 const providerList = [
   {
-    key: 'openai', name: 'OpenAI', color: 'bg-green-500',
+    key: 'openai', name: 'OpenAI', color: 'bg-hermes',
     models: [
       { value: 'gpt-4o', label: 'GPT-4o (mới nhất)' },
       { value: 'gpt-4o-mini', label: 'GPT-4o Mini (rẻ, nhanh)' },
@@ -15,7 +15,7 @@ const providerList = [
     ]
   },
   {
-    key: 'deepseek', name: 'DeepSeek', color: 'bg-blue-500',
+    key: 'deepseek', name: 'DeepSeek', color: 'bg-info',
     models: [
       { value: 'deepseek-chat', label: 'DeepSeek V3 (deepseek-chat)' },
       { value: 'deepseek-reasoner', label: 'DeepSeek R1 (reasoning)' },
@@ -178,16 +178,16 @@ export default function AISettings() {
     })
   }
 
-  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>
+  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-info" /></div>
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-lg font-semibold text-gray-900">AI Providers</h2>
+        <h2 className="text-lg font-semibold text-app-primary">AI Providers</h2>
         <button
           onClick={() => saveMutation.mutate(settings)}
           disabled={saveMutation.isPending}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90"
         >
           <Save size={18} />
           {saveMutation.isPending ? 'Đang lưu...' : 'Lưu tất cả'}
@@ -197,29 +197,29 @@ export default function AISettings() {
       {/* Configured Providers */}
       <div className="space-y-4 mb-6">
         {configuredProviderKeys.map(key => {
-          const info = providerList.find(p => p.key === key) || { key, name: key, color: 'bg-gray-500', models: [] }
+          const info = providerList.find(p => p.key === key) || { key, name: key, color: 'bg-app-muted', models: [] }
           const ps = settings.providers?.[key] || {}
           const testResult = testResults[key]
 
           return (
-            <div key={key} className="bg-white rounded-xl shadow p-4">
+            <div key={key} className="bg-app-surface rounded shadow p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <div className={`w-3 h-3 rounded-full ${info.color}`} />
-                  <h3 className="font-semibold text-gray-900">{info.name}</h3>
-                  {ps.enabled && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Active</span>}
+                  <h3 className="font-semibold text-app-primary">{info.name}</h3>
+                  {ps.enabled && <span className="text-xs bg-green-100 text-hermes px-2 py-0.5 rounded-full">Active</span>}
                 </div>
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <div className={`relative w-10 h-5 rounded-full transition-colors ${ps.enabled ? 'bg-blue-600' : 'bg-gray-300'}`}>
-                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${ps.enabled ? 'translate-x-5' : ''}`} />
+                    <div className={`relative w-10 h-5 rounded-full transition-colors ${ps.enabled ? 'bg-info' : 'bg-app-hover'}`}>
+                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-app-surface rounded-full shadow transition-transform ${ps.enabled ? 'translate-x-5' : ''}`} />
                     </div>
                     <input type="checkbox" checked={ps.enabled || false} onChange={e => updateProvider(key, 'enabled', e.target.checked)} className="sr-only" />
                   </label>
                   <button
                     onClick={() => handleTestProvider(key)}
                     disabled={testMutation.isPending && testMutation.variables?.provider === key}
-                    className="flex items-center gap-1 text-sm border rounded-lg px-3 py-1.5 hover:bg-gray-50"
+                    className="flex items-center gap-1 text-sm border rounded-lg px-3 py-1.5 hover:bg-app-base"
                   >
                     {testMutation.isPending && testMutation.variables?.provider === key ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
                     Test
@@ -233,7 +233,7 @@ export default function AISettings() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {/* API Key */}
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">API Key</label>
+                  <label className="block text-xs text-app-muted mb-1">API Key</label>
                   <div className="relative">
                     <input
                       type={showKeys[key] ? 'text' : 'password'}
@@ -242,7 +242,7 @@ export default function AISettings() {
                       placeholder={`${info.name} API Key`}
                       className="w-full border rounded-lg px-3 py-2 pr-10 text-sm font-mono"
                     />
-                    <button onClick={() => toggleKeyVisibility(key)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <button onClick={() => toggleKeyVisibility(key)} className="absolute right-2 top-1/2 -translate-y-1/2 text-app-dim hover:text-app-muted">
                       {showKeys[key] ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
@@ -250,7 +250,7 @@ export default function AISettings() {
 
                 {/* Model Select */}
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Model mặc định</label>
+                  <label className="block text-xs text-app-muted mb-1">Model mặc định</label>
                   <select
                     value={ps.model || ''}
                     onChange={e => updateProvider(key, 'model', e.target.value)}
@@ -263,7 +263,7 @@ export default function AISettings() {
               </div>
 
               {testResult && (
-                <div className={`flex items-center gap-2 mt-3 text-sm ${testResult.success ? 'text-green-600' : 'text-red-600'}`}>
+                <div className={`flex items-center gap-2 mt-3 text-sm ${testResult.success ? 'text-hermes' : 'text-red-600'}`}>
                   {testResult.success ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
                   <span className="truncate">{testResult.message}</span>
                 </div>
@@ -277,12 +277,12 @@ export default function AISettings() {
       {availableToAdd.length > 0 && (
         <div className="mb-8">
           {!showAddProvider ? (
-            <button onClick={() => setShowAddProvider(true)} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 border border-dashed border-blue-300 rounded-lg px-4 py-2 w-full justify-center hover:bg-blue-50">
+            <button onClick={() => setShowAddProvider(true)} className="flex items-center gap-2 text-sm text-info hover:text-blue-800 border border-dashed border-blue-300 rounded-lg px-4 py-2 w-full justify-center hover:bg-blue-50">
               <Plus size={16} /> Thêm provider
             </button>
           ) : (
-            <div className="bg-white rounded-xl shadow p-4">
-              <p className="text-sm font-medium text-gray-700 mb-3">Chọn provider để thêm:</p>
+            <div className="bg-app-surface rounded shadow p-4">
+              <p className="text-sm font-medium text-app-primary mb-3">Chọn provider để thêm:</p>
               <div className="flex flex-wrap gap-2">
                 {availableToAdd.map(p => (
                   <button
@@ -297,14 +297,14 @@ export default function AISettings() {
                       }))
                       setShowAddProvider(false)
                     }}
-                    className="flex items-center gap-2 border rounded-lg px-3 py-2 text-sm hover:bg-gray-50"
+                    className="flex items-center gap-2 border rounded-lg px-3 py-2 text-sm hover:bg-app-base"
                   >
                     <div className={`w-2.5 h-2.5 rounded-full ${p.color}`} />
                     {p.name}
                   </button>
                 ))}
               </div>
-              <button onClick={() => setShowAddProvider(false)} className="text-xs text-gray-400 mt-2 hover:text-gray-600">Hủy</button>
+              <button onClick={() => setShowAddProvider(false)} className="text-xs text-app-dim mt-2 hover:text-app-muted">Hủy</button>
             </div>
           )}
         </div>
@@ -312,9 +312,9 @@ export default function AISettings() {
 
       {/* Default per Function */}
       <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Model mặc định theo chức năng</h2>
-        <p className="text-sm text-gray-500">Chọn provider + model riêng cho từng chức năng. Để trống sẽ dùng provider đầu tiên đang bật.</p>
-        <div className="bg-white rounded-xl shadow p-4">
+        <h2 className="text-lg font-semibold text-app-primary">Model mặc định theo chức năng</h2>
+        <p className="text-sm text-app-muted">Chọn provider + model riêng cho từng chức năng. Để trống sẽ dùng provider đầu tiên đang bật.</p>
+        <div className="bg-app-surface rounded shadow p-4">
           <div className="space-y-4">
             {functions.map(fn => {
               const fnDefault = settings.defaults?.[fn.key] || {}
@@ -322,7 +322,7 @@ export default function AISettings() {
 
               return (
                 <div key={fn.key} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                  <label className="text-sm font-medium text-gray-700 sm:w-48 shrink-0">{fn.label}</label>
+                  <label className="text-sm font-medium text-app-primary sm:w-48 shrink-0">{fn.label}</label>
                   <div className="flex gap-2 flex-1">
                     <select
                       value={fnDefault.provider || ''}

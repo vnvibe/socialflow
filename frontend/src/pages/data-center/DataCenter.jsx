@@ -8,11 +8,11 @@ import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
 const STATUS_CONFIG = {
-  discovered: { label: 'Discovered', color: 'bg-blue-100 text-blue-700' },
+  discovered: { label: 'Discovered', color: 'bg-blue-100 text-info' },
   friend_sent: { label: 'Friend Sent', color: 'bg-yellow-100 text-yellow-700' },
-  followed: { label: 'Followed', color: 'bg-green-100 text-green-700' },
+  followed: { label: 'Followed', color: 'bg-green-100 text-hermes' },
   connected: { label: 'Connected', color: 'bg-emerald-100 text-emerald-700' },
-  skipped: { label: 'Skipped', color: 'bg-gray-100 text-gray-600' },
+  skipped: { label: 'Skipped', color: 'bg-app-elevated text-app-muted' },
   blocked: { label: 'Blocked', color: 'bg-red-100 text-red-700' },
 }
 
@@ -20,14 +20,14 @@ function StatPill({ label, value, color, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`flex-1 rounded-xl border-2 py-3 px-2 text-center transition-all ${
+      className={`flex-1 rounded border-2 py-3 px-2 text-center transition-all ${
         active
-          ? `${color} border-current shadow-sm`
-          : 'bg-white border-gray-200 hover:border-gray-300'
+          ? `${color} border-current `
+          : 'bg-app-surface border-app-border hover:border-app-border'
       }`}
     >
-      <p className={`text-xl font-bold ${active ? '' : 'text-gray-900'}`}>{value}</p>
-      <p className={`text-[10px] font-semibold uppercase tracking-wider ${active ? '' : 'text-gray-500'}`}>{label}</p>
+      <p className={`text-xl font-bold ${active ? '' : 'text-app-primary'}`}>{value}</p>
+      <p className={`text-[10px] font-semibold uppercase tracking-wider ${active ? '' : 'text-app-muted'}`}>{label}</p>
     </button>
   )
 }
@@ -159,12 +159,12 @@ export default function DataCenter() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-            <Database size={20} className="text-blue-600" />
+          <div className="w-10 h-10 rounded bg-blue-100 flex items-center justify-center">
+            <Database size={20} className="text-info" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">UID Data Center</h1>
-            <p className="text-sm text-gray-500">{total.toLocaleString()} profiles collected</p>
+            <h1 className="text-2xl font-bold text-app-primary">UID Data Center</h1>
+            <p className="text-sm text-app-muted">{total.toLocaleString()} profiles collected</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -173,13 +173,13 @@ export default function DataCenter() {
               queryClient.invalidateQueries({ queryKey: ['leads'] })
               queryClient.invalidateQueries({ queryKey: ['leads-stats'] })
             }}
-            className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+            className="flex items-center gap-1.5 px-3 py-2 border border-app-border rounded-lg text-sm text-app-muted hover:bg-app-base"
           >
             <RefreshCw size={14} /> Refresh
           </button>
           <button
             onClick={() => setShowImport(!showImport)}
-            className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+            className="flex items-center gap-1.5 px-3 py-2 border border-app-border rounded-lg text-sm text-app-muted hover:bg-app-base"
           >
             <Upload size={14} /> Import
           </button>
@@ -194,24 +194,24 @@ export default function DataCenter() {
 
       {/* Import Panel */}
       {showImport && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-2">Bulk Import</h3>
-          <p className="text-xs text-gray-500 mb-3">Moi dong: fb_uid, ten (VD: 100012345678, Nguyen Van A)</p>
+        <div className="bg-app-surface rounded border border-app-border p-5">
+          <h3 className="text-sm font-semibold text-app-primary mb-2">Bulk Import</h3>
+          <p className="text-xs text-app-muted mb-3">Moi dong: fb_uid, ten (VD: 100012345678, Nguyen Van A)</p>
           <textarea
             value={importText}
             onChange={e => setImportText(e.target.value)}
             rows={5}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+            className="w-full border border-app-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
             placeholder="100012345678, Nguyen Van A&#10;100087654321, Tran Van B"
           />
           <div className="flex justify-end gap-2 mt-3">
-            <button onClick={() => setShowImport(false)} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700">
+            <button onClick={() => setShowImport(false)} className="px-3 py-1.5 text-sm text-app-muted hover:text-app-primary">
               Huy
             </button>
             <button
               onClick={handleBulkImport}
               disabled={bulkImportMut.isPending}
-              className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-1.5 bg-info text-white text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-50"
             >
               {bulkImportMut.isPending ? 'Dang import...' : 'Import'}
             </button>
@@ -224,21 +224,21 @@ export default function DataCenter() {
         <StatPill
           label="Total"
           value={total.toLocaleString()}
-          color="bg-gray-50 text-gray-700"
+          color="bg-app-base text-app-primary"
           active={!statusFilter}
           onClick={() => { setStatusFilter(''); setPage(1) }}
         />
         <StatPill
           label="Facebook"
           value={(stats?.by_platform?.facebook || total).toLocaleString()}
-          color="bg-blue-50 text-blue-700"
+          color="bg-blue-50 text-info"
           active={false}
           onClick={() => {}}
         />
         <StatPill
           label="Discovered"
           value={(byStatus.discovered || 0).toLocaleString()}
-          color="bg-blue-50 text-blue-700"
+          color="bg-blue-50 text-info"
           active={statusFilter === 'discovered'}
           onClick={() => { setStatusFilter(statusFilter === 'discovered' ? '' : 'discovered'); setPage(1) }}
         />
@@ -252,14 +252,14 @@ export default function DataCenter() {
         <StatPill
           label="Followed"
           value={(byStatus.followed || 0).toLocaleString()}
-          color="bg-green-50 text-green-700"
+          color="bg-green-50 text-hermes"
           active={statusFilter === 'followed'}
           onClick={() => { setStatusFilter(statusFilter === 'followed' ? '' : 'followed'); setPage(1) }}
         />
         <StatPill
           label="Skipped"
           value={(byStatus.skipped || 0).toLocaleString()}
-          color="bg-gray-100 text-gray-600"
+          color="bg-app-elevated text-app-muted"
           active={statusFilter === 'skipped'}
           onClick={() => { setStatusFilter(statusFilter === 'skipped' ? '' : 'skipped'); setPage(1) }}
         />
@@ -268,19 +268,19 @@ export default function DataCenter() {
       {/* Search + Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-app-dim" />
           <input
             type="text"
             value={search}
             onChange={e => { setSearch(e.target.value); setPage(1) }}
             placeholder="Search by name, UID, source..."
-            className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full pl-9 pr-3 py-2.5 border border-app-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
         <select
           value={sourceFilter}
           onChange={e => { setSourceFilter(e.target.value); setPage(1) }}
-          className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 bg-white"
+          className="px-3 py-2.5 border border-app-border rounded-lg text-sm text-app-muted bg-app-surface"
         >
           <option value="">All Sources</option>
           <option value="reaction">Reaction</option>
@@ -290,21 +290,21 @@ export default function DataCenter() {
           <option value="manual">Manual</option>
           <option value="import">Import</option>
         </select>
-        <button className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+        <button className="flex items-center gap-1.5 px-4 py-2.5 bg-info text-white rounded-lg text-sm font-medium hover:opacity-90">
           <Filter size={14} /> Filter
         </button>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-app-surface rounded border border-app-border overflow-hidden">
         {/* Table header */}
-        <div className="grid grid-cols-[40px_1fr_90px_110px_110px_100px_110px] gap-2 px-4 py-3 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+        <div className="grid grid-cols-[40px_1fr_90px_110px_110px_100px_110px] gap-2 px-4 py-3 bg-app-base border-b border-app-border text-xs font-semibold text-app-muted uppercase tracking-wider">
           <div className="flex items-center">
             <input
               type="checkbox"
               checked={selected.size === leads.length && leads.length > 0}
               onChange={toggleSelectAll}
-              className="w-4 h-4 rounded border-gray-300"
+              className="w-4 h-4 rounded border-app-border"
             />
           </div>
           <div>UID / Name</div>
@@ -318,12 +318,12 @@ export default function DataCenter() {
         {/* Rows */}
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <Loader size={20} className="animate-spin text-blue-500" />
+            <Loader size={20} className="animate-spin text-info" />
           </div>
         ) : leads.length === 0 ? (
           <div className="text-center py-12">
-            <Database size={40} className="mx-auto text-gray-300 mb-2" />
-            <p className="text-gray-500 text-sm">Chua co du lieu</p>
+            <Database size={40} className="mx-auto text-app-dim mb-2" />
+            <p className="text-app-muted text-sm">Chua co du lieu</p>
           </div>
         ) : (
           leads.map(lead => {
@@ -332,14 +332,14 @@ export default function DataCenter() {
             return (
               <div
                 key={lead.id}
-                className="group grid grid-cols-[40px_1fr_90px_110px_110px_100px_110px] gap-2 px-4 py-3 border-b border-gray-100 hover:bg-gray-50 items-center text-sm"
+                className="group grid grid-cols-[40px_1fr_90px_110px_110px_100px_110px] gap-2 px-4 py-3 border-b border-app-border hover:bg-app-base items-center text-sm"
               >
                 <div>
                   <input
                     type="checkbox"
                     checked={selected.has(lead.id)}
                     onChange={() => toggleSelect(lead.id)}
-                    className="w-4 h-4 rounded border-gray-300"
+                    className="w-4 h-4 rounded border-app-border"
                   />
                 </div>
                 <div className="flex items-center gap-3 min-w-0">
@@ -351,17 +351,17 @@ export default function DataCenter() {
                       onError={(e) => { e.target.style.display = 'none' }}
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0 text-xs font-bold text-gray-500">
+                    <div className="w-8 h-8 rounded-full bg-app-hover flex items-center justify-center shrink-0 text-xs font-bold text-app-muted">
                       {(lead.name || '?')[0].toUpperCase()}
                     </div>
                   )}
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{lead.name || lead.fb_uid}</p>
-                    <p className="text-xs text-gray-400 truncate">{lead.fb_uid}</p>
+                    <p className="text-sm font-medium text-app-primary truncate">{lead.name || lead.fb_uid}</p>
+                    <p className="text-xs text-app-dim truncate">{lead.fb_uid}</p>
                   </div>
                 </div>
                 <div>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-info">
                     FB
                   </span>
                 </div>
@@ -376,16 +376,16 @@ export default function DataCenter() {
                     ))}
                   </select>
                 </div>
-                <div className="text-xs text-gray-500 flex items-center gap-1">
-                  <Zap size={12} className="text-gray-400" />
+                <div className="text-xs text-app-muted flex items-center gap-1">
+                  <Zap size={12} className="text-app-dim" />
                   {lead.source || '--'}
                 </div>
-                <div className="text-xs text-gray-400 truncate">{lead.note || '--'}</div>
+                <div className="text-xs text-app-dim truncate">{lead.note || '--'}</div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">{formatDate(lead.discovered_at)}</span>
+                  <span className="text-xs text-app-dim">{formatDate(lead.discovered_at)}</span>
                   <button
                     onClick={() => { if (confirm('Xoa lead nay?')) deleteMut.mutate(lead.id) }}
-                    className="p-1 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="p-1 text-app-dim hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <Trash2 size={12} />
                   </button>
@@ -399,21 +399,21 @@ export default function DataCenter() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-app-muted">
             Page {page} / {totalPages} ({totalCount.toLocaleString()} total)
           </p>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="p-2 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 disabled:opacity-30"
+              className="p-2 rounded-lg border border-app-border text-app-muted hover:bg-app-base disabled:opacity-30"
             >
               <ChevronLeft size={16} />
             </button>
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="p-2 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 disabled:opacity-30"
+              className="p-2 rounded-lg border border-app-border text-app-muted hover:bg-app-base disabled:opacity-30"
             >
               <ChevronRight size={16} />
             </button>

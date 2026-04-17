@@ -79,9 +79,9 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
   }
 
   return (
-    <div className="bg-white rounded-xl shadow p-4">
+    <div className="bg-app-surface rounded shadow p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className={`font-semibold text-gray-900 ${compact ? 'text-sm' : ''}`}>Hashtag</h3>
+        <h3 className={`font-semibold text-app-primary ${compact ? 'text-sm' : ''}`}>Hashtag</h3>
         <div className="flex items-center gap-1.5">
           {/* Library toggle */}
           <button
@@ -93,7 +93,7 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
             <FolderOpen size={compact ? 11 : 13} />
             {compact ? '' : 'Đã lưu'}
             {library.length > 0 && (
-              <span className={`text-[10px] px-1 rounded-full ${showLibrary ? 'bg-white/20' : 'bg-amber-200'}`}>
+              <span className={`text-[10px] px-1 rounded-full ${showLibrary ? 'bg-app-surface/20' : 'bg-amber-200'}`}>
                 {library.length}
               </span>
             )}
@@ -104,7 +104,7 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
             <button
               onClick={() => setShowSaveForm(!showSaveForm)}
               className={`flex items-center gap-1 text-${compact ? 'xs' : 'sm'} px-${compact ? '2' : '3'} py-1 rounded-lg transition-colors ${
-                showSaveForm ? 'bg-green-600 text-white' : 'bg-green-50 text-green-600 hover:bg-green-100'
+                showSaveForm ? 'bg-hermes text-white' : 'bg-green-50 text-hermes hover:bg-green-100'
               }`}
               title="Lưu bộ hashtag hiện tại"
             >
@@ -131,7 +131,7 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
         placeholder="Nhập hashtag, cách nhau bằng dấu phẩy. VD: banhmi, saigon, amthuc"
         className="w-full border rounded-lg px-3 py-2 text-sm"
       />
-      <p className="text-xs text-gray-400 mt-1">Không cần nhập dấu #, hệ thống tự thêm</p>
+      <p className="text-xs text-app-dim mt-1">Không cần nhập dấu #, hệ thống tự thêm</p>
 
       {/* Current tags preview — click to remove */}
       {currentTags.length > 0 && (
@@ -187,7 +187,7 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
                     const newTags = [...currentTags, cleanTag]
                     onChange(newTags.join(', '))
                   }}
-                  className="text-xs px-2 py-0.5 rounded-full border bg-white text-purple-600 border-purple-200 hover:bg-purple-100 transition-colors"
+                  className="text-xs px-2 py-0.5 rounded-full border bg-app-surface text-purple-600 border-purple-200 hover:bg-purple-100 transition-colors"
                 >
                   +{cleanTag}
                 </button>
@@ -200,7 +200,7 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
       {/* Save preset form */}
       {showSaveForm && (
         <div className="mt-3 flex items-center gap-2 p-2.5 bg-green-50 rounded-lg border border-green-200">
-          <Bookmark size={14} className="text-green-500 flex-shrink-0" />
+          <Bookmark size={14} className="text-hermes flex-shrink-0" />
           <input
             value={presetName}
             onChange={e => setPresetName(e.target.value)}
@@ -212,11 +212,11 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
           <button
             onClick={handleSavePreset}
             disabled={!presetName.trim() || currentTags.length === 0 || saveMutation.isPending}
-            className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-40 font-medium"
+            className="px-3 py-1.5 bg-hermes text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-40 font-medium"
           >
             {saveMutation.isPending ? <Loader size={14} className="animate-spin" /> : 'Lưu'}
           </button>
-          <button onClick={() => { setShowSaveForm(false); setPresetName('') }} className="text-gray-400 hover:text-gray-600">
+          <button onClick={() => { setShowSaveForm(false); setPresetName('') }} className="text-app-dim hover:text-app-muted">
             <X size={16} />
           </button>
         </div>
@@ -229,12 +229,12 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
             <span className="text-xs font-medium text-amber-700">Thư viện Hashtag ({library.length} bộ)</span>
           </div>
           {isLoadingLibrary ? (
-            <div className="flex items-center justify-center py-6 gap-2 text-gray-400">
+            <div className="flex items-center justify-center py-6 gap-2 text-app-dim">
               <Loader size={14} className="animate-spin" />
               <span className="text-xs">Đang tải...</span>
             </div>
           ) : library.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-6">
+            <p className="text-xs text-app-dim text-center py-6">
               Chưa lưu bộ hashtag nào. Tạo hashtag rồi bấm "Lưu" để lưu lại.
             </p>
           ) : (
@@ -242,7 +242,7 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
               {library.map(preset => (
                 <div key={preset.id} className="px-3 py-2.5 hover:bg-amber-50 group">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium text-gray-800">{preset.name}</span>
+                    <span className="text-sm font-medium text-app-primary">{preset.name}</span>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => handleApplyPreset(preset)}
@@ -261,7 +261,7 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
                       <button
                         onClick={() => handleDeletePreset(preset.id)}
                         disabled={deleteMutation.isPending}
-                        className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 disabled:opacity-30"
+                        className="text-app-dim hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 disabled:opacity-30"
                         title="Xóa bộ hashtag"
                       >
                         <Trash2 size={12} />
@@ -270,10 +270,10 @@ export default function HashtagSection({ value, onChange, onAiGenerate, isGenera
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {preset.tags.slice(0, 10).map((tag, i) => (
-                      <span key={i} className="text-[10px] bg-white text-gray-500 px-1.5 py-0.5 rounded-full border border-gray-200">#{tag}</span>
+                      <span key={i} className="text-[10px] bg-app-surface text-app-muted px-1.5 py-0.5 rounded-full border border-app-border">#{tag}</span>
                     ))}
                     {preset.tags.length > 10 && (
-                      <span className="text-[10px] text-gray-400">+{preset.tags.length - 10}</span>
+                      <span className="text-[10px] text-app-dim">+{preset.tags.length - 10}</span>
                     )}
                   </div>
                 </div>

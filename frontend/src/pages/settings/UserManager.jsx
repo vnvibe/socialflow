@@ -6,8 +6,8 @@ import api from '../../lib/api'
 
 const roleBadge = {
   admin: { label: 'Admin', cls: 'bg-red-100 text-red-700', icon: Shield },
-  manager: { label: 'Manager', cls: 'bg-blue-100 text-blue-700', icon: UserCheck },
-  user: { label: 'User', cls: 'bg-gray-100 text-gray-600', icon: UserCheck }
+  manager: { label: 'Manager', cls: 'bg-blue-100 text-info', icon: UserCheck },
+  user: { label: 'User', cls: 'bg-app-elevated text-app-muted', icon: UserCheck }
 }
 
 export default function UserManager() {
@@ -94,8 +94,8 @@ export default function UserManager() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Quản lý người dùng</h1>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+        <h1 className="text-2xl font-bold text-app-primary">Quản lý người dùng</h1>
+        <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 bg-info text-white px-4 py-2 rounded-lg hover:opacity-90">
           <Plus size={18} /> Thêm user
         </button>
       </div>
@@ -106,18 +106,18 @@ export default function UserManager() {
           <h2 className="text-sm font-semibold text-orange-600 mb-3 flex items-center gap-2">
             <Clock size={16} /> Chờ duyệt ({pendingUsers.length})
           </h2>
-          <div className="bg-orange-50 border border-orange-200 rounded-xl overflow-hidden">
+          <div className="bg-orange-50 border border-orange-200 rounded overflow-hidden">
             <div className="divide-y divide-orange-100">
               {pendingUsers.map(user => (
                 <div key={user.id} className="flex items-center justify-between px-4 py-3">
                   <div>
-                    <p className="font-medium text-gray-900">{user.username || user.email.split('@')[0]}</p>
-                    <p className="text-sm text-gray-500">{user.email}</p>
+                    <p className="font-medium text-app-primary">{user.username || user.email.split('@')[0]}</p>
+                    <p className="text-sm text-app-muted">{user.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => toggleActiveMutation.mutate({ id: user.id, is_active: true })}
-                      className="px-4 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 font-medium"
+                      className="px-4 py-1.5 bg-hermes text-white text-sm rounded-lg hover:bg-green-700 font-medium"
                     >
                       Duyệt
                     </button>
@@ -140,15 +140,15 @@ export default function UserManager() {
       )}
 
       {/* Active Users */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
+      <div className="bg-app-surface rounded shadow overflow-hidden">
         <table className="w-full">
-          <thead className="bg-gray-50">
+          <thead className="bg-app-base">
             <tr>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">User</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Email</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Role</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Status</th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-gray-600">Actions</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">User</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Email</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Role</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-app-muted">Status</th>
+              <th className="px-4 py-3 text-right text-sm font-medium text-app-muted">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -156,14 +156,14 @@ export default function UserManager() {
               const role = roleBadge[user.role] || roleBadge.user
               const RoleIcon = role.icon
               return (
-                <tr key={user.id} className="hover:bg-gray-50">
+                <tr key={user.id} className="hover:bg-app-base">
                   <td className="px-4 py-3 font-medium">{user.username || user.display_name || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{user.email}</td>
+                  <td className="px-4 py-3 text-sm text-app-muted">{user.email}</td>
                   <td className="px-4 py-3">
                     <select
                       value={user.role}
                       onChange={(e) => changeRoleMutation.mutate({ id: user.id, role: e.target.value })}
-                      className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white"
+                      className="text-xs px-2 py-1 rounded-lg border border-app-border bg-app-surface"
                     >
                       <option value="user">User</option>
                       <option value="manager">Manager</option>
@@ -171,7 +171,7 @@ export default function UserManager() {
                     </select>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-100 text-hermes">
                       <UserCheck size={12} /> Active
                     </span>
                   </td>
@@ -185,7 +185,7 @@ export default function UserManager() {
                       </button>
                       <button
                         onClick={() => openProxyModal(user)}
-                        className="text-sm px-3 py-1 rounded-lg border text-blue-600 border-blue-200 hover:bg-blue-50 flex items-center gap-1"
+                        className="text-sm px-3 py-1 rounded-lg border text-info border-blue-200 hover:bg-blue-50 flex items-center gap-1"
                       >
                         <Network size={12} /> Proxy
                       </button>
@@ -211,7 +211,7 @@ export default function UserManager() {
                 </tr>
               )
             })}
-            {activeUsers.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Chưa có user nào</td></tr>}
+            {activeUsers.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-app-dim">Chưa có user nào</td></tr>}
           </tbody>
         </table>
       </div>
@@ -219,17 +219,17 @@ export default function UserManager() {
       {/* Proxy Assignment Modal */}
       {proxyModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setProxyModal(null)}>
-          <div className="bg-white rounded-xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="bg-app-surface rounded p-6 w-full max-w-md max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold mb-2">Gán proxy cho {proxyModal.userName}</h2>
-            <p className="text-sm text-gray-500 mb-4">Chọn proxy mà user này được phép sử dụng.</p>
+            <p className="text-sm text-app-muted mb-4">Chọn proxy mà user này được phép sử dụng.</p>
 
             <div className="space-y-2 mb-4">
-              {allProxies.length === 0 && <p className="text-sm text-gray-400 text-center py-4">Chưa có proxy nào</p>}
+              {allProxies.length === 0 && <p className="text-sm text-app-dim text-center py-4">Chưa có proxy nào</p>}
               {allProxies.map(proxy => (
                 <label
                   key={proxy.id}
                   className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    selectedProxyIds.includes(proxy.id) ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+                    selectedProxyIds.includes(proxy.id) ? 'border-blue-400 bg-blue-50' : 'border-app-border hover:bg-app-base'
                   }`}
                 >
                   <input
@@ -242,22 +242,22 @@ export default function UserManager() {
                         setSelectedProxyIds(prev => prev.filter(id => id !== proxy.id))
                       }
                     }}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600"
+                    className="w-4 h-4 rounded border-app-border text-info"
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800">{proxy.label || `${proxy.host}:${proxy.port}`}</p>
-                    <p className="text-xs text-gray-400">{proxy.host}:{proxy.port} {proxy.country ? `(${proxy.country})` : ''}</p>
+                    <p className="text-sm font-medium text-app-primary">{proxy.label || `${proxy.host}:${proxy.port}`}</p>
+                    <p className="text-xs text-app-dim">{proxy.host}:{proxy.port} {proxy.country ? `(${proxy.country})` : ''}</p>
                   </div>
                 </label>
               ))}
             </div>
 
             <div className="flex justify-end gap-2">
-              <button onClick={() => setProxyModal(null)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Hủy</button>
+              <button onClick={() => setProxyModal(null)} className="px-4 py-2 border rounded-lg hover:bg-app-base">Hủy</button>
               <button
                 onClick={() => assignProxiesMutation.mutate({ target_user_id: proxyModal.userId, proxy_ids: selectedProxyIds })}
                 disabled={assignProxiesMutation.isPending}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="px-4 py-2 bg-info text-white rounded-lg hover:opacity-90"
               >
                 {assignProxiesMutation.isPending ? 'Saving...' : `Lưu (${selectedProxyIds.length} proxy)`}
               </button>
@@ -272,12 +272,12 @@ export default function UserManager() {
       {/* Add User Modal */}
       {showAdd && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowAdd(false)}>
-          <div className="bg-white rounded-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+          <div className="bg-app-surface rounded p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold mb-4">Thêm user</h2>
-            <p className="text-sm text-gray-500 mb-4">User được admin tạo sẽ tự động active.</p>
+            <p className="text-sm text-app-muted mb-4">User được admin tạo sẽ tự động active.</p>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-app-primary mb-1">Email</label>
                 <input
                   type="email"
                   value={form.email}
@@ -287,7 +287,7 @@ export default function UserManager() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Mật khẩu</label>
+                <label className="block text-sm font-medium text-app-primary mb-1">Mật khẩu</label>
                 <input
                   type="password"
                   value={form.password}
@@ -297,7 +297,7 @@ export default function UserManager() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <label className="block text-sm font-medium text-app-primary mb-1">Role</label>
                 <select
                   value={form.role}
                   onChange={e => setForm({ ...form, role: e.target.value })}
@@ -310,10 +310,10 @@ export default function UserManager() {
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowAdd(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Hủy</button>
+              <button onClick={() => setShowAdd(false)} className="px-4 py-2 border rounded-lg hover:bg-app-base">Hủy</button>
               <button
                 onClick={() => addUserMutation.mutate(form)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="px-4 py-2 bg-info text-white rounded-lg hover:opacity-90"
                 disabled={addUserMutation.isPending || !form.email || !form.password}
               >
                 {addUserMutation.isPending ? 'Creating...' : 'Tạo user'}
@@ -391,9 +391,9 @@ function PermissionsModal({ userId, userName, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-app-surface rounded p-6 w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <h2 className="text-lg font-bold mb-1">Phân quyền: {userName}</h2>
-        <p className="text-sm text-gray-500 mb-4">Chọn tài khoản, fanpage, nhóm mà user được phép sử dụng.</p>
+        <p className="text-sm text-app-muted mb-4">Chọn tài khoản, fanpage, nhóm mà user được phép sử dụng.</p>
 
         {loading ? (
           <div className="flex justify-center py-8"><div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" /></div>
@@ -402,68 +402,68 @@ function PermissionsModal({ userId, userName, onClose }) {
             {/* Accounts */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-700">Tài khoản Facebook ({selected.account.length}/{accounts.length})</h3>
-                <button onClick={() => selectAll('account', accounts.map(a => a.id))} className="text-xs text-blue-600 hover:underline">
+                <h3 className="text-sm font-semibold text-app-primary">Tài khoản Facebook ({selected.account.length}/{accounts.length})</h3>
+                <button onClick={() => selectAll('account', accounts.map(a => a.id))} className="text-xs text-info hover:underline">
                   {selected.account.length === accounts.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {accounts.map(a => (
-                  <label key={a.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.account.includes(a.id) ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                  <label key={a.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.account.includes(a.id) ? 'border-blue-400 bg-blue-50' : 'border-app-border hover:bg-app-base'}`}>
                     <input type="checkbox" checked={selected.account.includes(a.id)} onChange={() => toggle('account', a.id)} className="w-3.5 h-3.5 rounded" />
                     <span className="truncate">{a.username || a.fb_user_id}</span>
                   </label>
                 ))}
-                {accounts.length === 0 && <p className="text-xs text-gray-400 col-span-2">Chưa có tài khoản nào</p>}
+                {accounts.length === 0 && <p className="text-xs text-app-dim col-span-2">Chưa có tài khoản nào</p>}
               </div>
             </div>
 
             {/* Fanpages */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-700">Fanpage ({selected.fanpage.length}/{fanpages.length})</h3>
-                <button onClick={() => selectAll('fanpage', fanpages.map(f => f.id))} className="text-xs text-blue-600 hover:underline">
+                <h3 className="text-sm font-semibold text-app-primary">Fanpage ({selected.fanpage.length}/{fanpages.length})</h3>
+                <button onClick={() => selectAll('fanpage', fanpages.map(f => f.id))} className="text-xs text-info hover:underline">
                   {selected.fanpage.length === fanpages.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {fanpages.map(f => (
-                  <label key={f.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.fanpage.includes(f.id) ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                  <label key={f.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.fanpage.includes(f.id) ? 'border-green-400 bg-green-50' : 'border-app-border hover:bg-app-base'}`}>
                     <input type="checkbox" checked={selected.fanpage.includes(f.id)} onChange={() => toggle('fanpage', f.id)} className="w-3.5 h-3.5 rounded" />
                     <span className="truncate">{f.name || f.fb_page_id}</span>
                   </label>
                 ))}
-                {fanpages.length === 0 && <p className="text-xs text-gray-400 col-span-2">Chưa có fanpage nào</p>}
+                {fanpages.length === 0 && <p className="text-xs text-app-dim col-span-2">Chưa có fanpage nào</p>}
               </div>
             </div>
 
             {/* Groups */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-700">Nhóm ({selected.group.length}/{groups.length})</h3>
-                <button onClick={() => selectAll('group', groups.map(g => g.id))} className="text-xs text-blue-600 hover:underline">
+                <h3 className="text-sm font-semibold text-app-primary">Nhóm ({selected.group.length}/{groups.length})</h3>
+                <button onClick={() => selectAll('group', groups.map(g => g.id))} className="text-xs text-info hover:underline">
                   {selected.group.length === groups.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                 {groups.map(g => (
-                  <label key={g.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.group.includes(g.id) ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                  <label key={g.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer text-sm ${selected.group.includes(g.id) ? 'border-orange-400 bg-orange-50' : 'border-app-border hover:bg-app-base'}`}>
                     <input type="checkbox" checked={selected.group.includes(g.id)} onChange={() => toggle('group', g.id)} className="w-3.5 h-3.5 rounded" />
                     <span className="truncate">{g.name || g.fb_group_id}</span>
                   </label>
                 ))}
-                {groups.length === 0 && <p className="text-xs text-gray-400 col-span-2">Chưa có nhóm nào</p>}
+                {groups.length === 0 && <p className="text-xs text-app-dim col-span-2">Chưa có nhóm nào</p>}
               </div>
             </div>
           </div>
         )}
 
         <div className="flex justify-between items-center mt-6 pt-4 border-t">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-app-dim">
             Tổng: {selected.account.length + selected.fanpage.length + selected.group.length} quyền
           </p>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Hủy</button>
+            <button onClick={onClose} className="px-4 py-2 border rounded-lg hover:bg-app-base">Hủy</button>
             <button
               onClick={handleSave}
               disabled={saving}

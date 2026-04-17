@@ -53,36 +53,36 @@ export default function NurtureSettingsModal({ profile, onClose, onSave }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-app-surface rounded  p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-bold text-gray-900">Cai dat nuoi nick</h2>
-          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600">
+          <h2 className="text-lg font-bold text-app-primary">Cai dat nuoi nick</h2>
+          <button onClick={onClose} className="p-1 text-app-dim hover:text-app-muted">
             <X size={18} />
           </button>
         </div>
 
-        <p className="text-xs text-gray-500 mb-4">Nick: <span className="text-purple-600 font-medium">{accName}</span></p>
+        <p className="text-xs text-app-muted mb-4">Nick: <span className="text-purple-600 font-medium">{accName}</span></p>
 
         <div className="space-y-5">
           {/* Persona */}
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-2 block">Phong cach comment</label>
+            <label className="text-xs font-medium text-app-muted mb-2 block">Phong cach comment</label>
             <div className="grid grid-cols-2 gap-2">
               {PERSONAS.map(p => (
                 <button
                   key={p.value}
                   onClick={() => setPersona(p.value)}
-                  className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all text-left ${
+                  className={`flex items-center gap-2 p-3 rounded border-2 transition-all text-left ${
                     persona === p.value
                       ? 'border-purple-300 bg-purple-50'
-                      : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                      : 'border-app-border bg-app-base hover:bg-app-elevated'
                   }`}
                 >
                   <span className="text-xl">{p.emoji}</span>
                   <div>
-                    <p className="text-xs font-medium text-gray-900">{p.label}</p>
-                    <p className="text-[10px] text-gray-500">{p.desc}</p>
+                    <p className="text-xs font-medium text-app-primary">{p.label}</p>
+                    <p className="text-[10px] text-app-muted">{p.desc}</p>
                   </div>
                 </button>
               ))}
@@ -91,32 +91,32 @@ export default function NurtureSettingsModal({ profile, onClose, onSave }) {
 
           {/* Daily Targets */}
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-3 block">Muc tieu hang ngay</label>
+            <label className="text-xs font-medium text-app-muted mb-3 block">Muc tieu hang ngay</label>
             <div className="space-y-3">
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">Sessions/ngay</span>
+                  <span className="text-xs text-app-muted">Sessions/ngay</span>
                   <span className="text-xs text-purple-600 font-bold">{dailySessions}</span>
                 </div>
                 <input type="range" min={1} max={10} value={dailySessions} onChange={e => setDailySessions(parseInt(e.target.value))} className="w-full" />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">React/ngay</span>
+                  <span className="text-xs text-app-muted">React/ngay</span>
                   <span className="text-xs text-pink-600 font-bold">{dailyReacts}</span>
                 </div>
                 <input type="range" min={1} max={50} value={dailyReacts} onChange={e => setDailyReacts(parseInt(e.target.value))} className="w-full" />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">Comment/ngay</span>
-                  <span className="text-xs text-blue-600 font-bold">{dailyComments}</span>
+                  <span className="text-xs text-app-muted">Comment/ngay</span>
+                  <span className="text-xs text-info font-bold">{dailyComments}</span>
                 </div>
                 <input type="range" min={0} max={10} value={dailyComments} onChange={e => setDailyComments(parseInt(e.target.value))} className="w-full" />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">Story views/ngay</span>
+                  <span className="text-xs text-app-muted">Story views/ngay</span>
                   <span className="text-xs text-purple-600 font-bold">{dailyStories}</span>
                 </div>
                 <input type="range" min={0} max={20} value={dailyStories} onChange={e => setDailyStories(parseInt(e.target.value))} className="w-full" />
@@ -126,20 +126,20 @@ export default function NurtureSettingsModal({ profile, onClose, onSave }) {
 
           {/* Active Hours */}
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-2 block">Gio hoat dong</label>
+            <label className="text-xs font-medium text-app-muted mb-2 block">Gio hoat dong</label>
             <div className="flex items-center gap-3">
               <div className="flex-1">
-                <span className="text-[10px] text-gray-500 block mb-1">Tu</span>
+                <span className="text-[10px] text-app-muted block mb-1">Tu</span>
                 <select value={activeHoursStart} onChange={e => setActiveHoursStart(parseInt(e.target.value))}
-                  className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                  className="w-full border border-app-border rounded-lg px-2 py-1.5 text-sm">
                   {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>)}
                 </select>
               </div>
-              <span className="text-gray-400 mt-4">—</span>
+              <span className="text-app-dim mt-4">—</span>
               <div className="flex-1">
-                <span className="text-[10px] text-gray-500 block mb-1">Den</span>
+                <span className="text-[10px] text-app-muted block mb-1">Den</span>
                 <select value={activeHoursEnd} onChange={e => setActiveHoursEnd(parseInt(e.target.value))}
-                  className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                  className="w-full border border-app-border rounded-lg px-2 py-1.5 text-sm">
                   {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>)}
                 </select>
               </div>
@@ -148,12 +148,12 @@ export default function NurtureSettingsModal({ profile, onClose, onSave }) {
 
           {/* Active Days */}
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-2 block">Ngay hoat dong</label>
+            <label className="text-xs font-medium text-app-muted mb-2 block">Ngay hoat dong</label>
             <div className="flex gap-1.5">
               {DAY_LABELS.map(d => (
                 <button key={d.value} onClick={() => toggleDay(d.value)}
                   className={`w-9 h-9 rounded-full text-xs font-medium transition-colors ${
-                    activeDays.includes(d.value) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+                    activeDays.includes(d.value) ? 'bg-info text-white' : 'bg-app-hover text-app-muted hover:bg-app-hover'
                   }`}>
                   {d.label}
                 </button>
@@ -164,12 +164,12 @@ export default function NurtureSettingsModal({ profile, onClose, onSave }) {
           {/* Session Gap */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-gray-500">Khoang cach giua cac session</label>
+              <label className="text-xs font-medium text-app-muted">Khoang cach giua cac session</label>
               <span className="text-xs text-purple-600 font-bold">{sessionGap} phut</span>
             </div>
             <input type="range" min={15} max={480} step={15} value={sessionGap}
               onChange={e => setSessionGap(parseInt(e.target.value))} className="w-full" />
-            <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+            <div className="flex justify-between text-[10px] text-app-dim mt-0.5">
               <span>15 phut</span>
               <span>8 gio</span>
             </div>
@@ -177,10 +177,10 @@ export default function NurtureSettingsModal({ profile, onClose, onSave }) {
         </div>
 
         {/* Actions */}
-        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Huy</button>
+        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-app-border">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-app-muted hover:text-app-primary">Huy</button>
           <button onClick={handleSave} disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50">
+            className="flex items-center gap-1.5 px-4 py-2 bg-info text-white rounded-lg hover:opacity-90 text-sm font-medium disabled:opacity-50">
             <Save size={14} /> {saving ? 'Dang luu...' : 'Luu cai dat'}
           </button>
         </div>

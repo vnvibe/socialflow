@@ -10,7 +10,7 @@ import {
 
 const healthConfig = {
   healthy: {
-    color: 'bg-green-100 text-green-700',
+    color: 'bg-green-100 text-hermes',
     icon: CheckCircle,
     label: 'Hoạt động',
   },
@@ -41,12 +41,12 @@ const healthConfig = {
     label: 'Hết hạn',
   },
   disabled: {
-    color: 'bg-gray-100 text-gray-500',
+    color: 'bg-app-elevated text-app-muted',
     icon: Ban,
     label: 'Vô hiệu hóa',
   },
   unknown: {
-    color: 'bg-gray-100 text-gray-500',
+    color: 'bg-app-elevated text-app-muted',
     icon: HelpCircle,
     label: 'Chưa kiểm tra',
   },

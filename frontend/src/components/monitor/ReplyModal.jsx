@@ -124,58 +124,58 @@ export default function ReplyModal({ post, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] flex flex-col"
+        className="bg-app-surface rounded w-full max-w-lg  max-h-[90vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-app-border">
           <div className="flex items-center gap-2">
             <MessageCircle size={18} className="text-blue-600" />
-            <h2 className="text-base font-bold text-gray-900">Tra loi bai viet</h2>
+            <h2 className="text-base font-bold text-app-primary">Tra loi bai viet</h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+          <button onClick={onClose} className="text-app-dim hover:text-app-muted p-1">
             <X size={18} />
           </button>
         </div>
 
         <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
           {/* Original post preview */}
-          <div className="bg-gray-50 rounded-xl p-3.5">
+          <div className="bg-app-base rounded p-3.5">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0">
-                {post.source_type === 'group' ? <Users size={13} className="text-gray-500" /> : <Globe size={13} className="text-gray-500" />}
+              <div className="w-8 h-8 rounded-full bg-app-hover flex items-center justify-center shrink-0">
+                {post.source_type === 'group' ? <Users size={13} className="text-app-muted" /> : <Globe size={13} className="text-app-muted" />}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-medium text-gray-900 truncate">{post.source_name || '—'}</span>
-                  {post.author_name && <span className="text-xs text-gray-500">· {post.author_name}</span>}
+                  <span className="text-sm font-medium text-app-primary truncate">{post.source_name || '—'}</span>
+                  {post.author_name && <span className="text-xs text-app-muted">· {post.author_name}</span>}
                 </div>
                 {post.posted_at && (
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-app-dim">
                     {formatDistanceToNow(new Date(post.posted_at), { addSuffix: true, locale: vi })}
                   </span>
                 )}
               </div>
               {post.post_url && (
-                <a href={post.post_url} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-500 shrink-0">
+                <a href={post.post_url} target="_blank" rel="noopener noreferrer" className="text-app-dim hover:text-blue-500 shrink-0">
                   <ExternalLink size={13} />
                 </a>
               )}
             </div>
-            <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed line-clamp-6">
+            <p className="text-sm text-app-primary whitespace-pre-line leading-relaxed line-clamp-6">
               {post.content_text}
             </p>
             {post.image_url && (
               <img src={post.image_url} className="mt-2 rounded-lg max-h-32 object-cover w-full" loading="lazy" alt="" />
             )}
-            <div className="flex items-center gap-4 mt-2 pt-2 border-t border-gray-200">
-              <span className="flex items-center gap-1 text-xs text-gray-500">
+            <div className="flex items-center gap-4 mt-2 pt-2 border-t border-app-border">
+              <span className="flex items-center gap-1 text-xs text-app-muted">
                 <Heart size={11} className="text-red-400" /> {fmtNum(post.reactions)}
               </span>
-              <span className="flex items-center gap-1 text-xs text-gray-500">
+              <span className="flex items-center gap-1 text-xs text-app-muted">
                 <MessageCircle size={11} className="text-blue-400" /> {fmtNum(post.comments)}
               </span>
-              <span className="flex items-center gap-1 text-xs text-gray-500">
+              <span className="flex items-center gap-1 text-xs text-app-muted">
                 <Share2 size={11} className="text-green-400" /> {fmtNum(post.shares)}
               </span>
             </div>
@@ -190,14 +190,14 @@ export default function ReplyModal({ post, onClose }) {
 
           {/* Tone selector + regenerate */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 shrink-0">Giong van:</span>
+            <span className="text-xs text-app-muted shrink-0">Giong van:</span>
             <div className="flex gap-1 flex-1">
               {TONES.map(t => (
                 <button
                   key={t.key}
                   onClick={() => setTone(t.key)}
                   className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                    tone === t.key ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    tone === t.key ? 'bg-blue-100 text-blue-700' : 'bg-app-elevated text-app-muted hover:bg-app-hover'
                   }`}
                 >
                   {t.label}
@@ -222,42 +222,42 @@ export default function ReplyModal({ post, onClose }) {
               placeholder={generating ? 'Dang tao comment...' : 'Nhap comment tai day...'}
               rows={3}
               disabled={generating}
-              className="w-full rounded-xl border border-gray-300 px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+              className="w-full rounded border border-app-border px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:bg-app-base disabled:text-app-dim"
             />
-            <p className="text-xs text-gray-400 mt-1 text-right">{comment.length} ky tu</p>
+            <p className="text-xs text-app-dim mt-1 text-right">{comment.length} ky tu</p>
           </div>
 
           {/* Account picker */}
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1.5">Tai khoan comment</label>
+            <label className="block text-xs font-medium text-app-muted mb-1.5">Tai khoan comment</label>
             {accounts.length === 0 ? (
               <p className="text-xs text-red-500">Chua co tai khoan Facebook nao. Them tai khoan truoc.</p>
             ) : (
               <div className="relative">
                 <button
                   onClick={() => setShowAccountPicker(!showAccountPicker)}
-                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-300 text-sm hover:border-gray-400 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-app-border text-sm hover:border-gray-400 transition-colors"
                 >
                   <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${selectedAccount?.status === 'healthy' ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                    <div className={`w-2 h-2 rounded-full ${selectedAccount?.status === 'healthy' ? 'bg-hermes' : 'bg-yellow-500'}`} />
                     <span className="truncate">{selectedAccount?.username || 'Chon tai khoan...'}</span>
                   </div>
-                  <ChevronDown size={14} className="text-gray-400 shrink-0" />
+                  <ChevronDown size={14} className="text-app-dim shrink-0" />
                 </button>
 
                 {showAccountPicker && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                  <div className="absolute z-10 w-full mt-1 bg-app-surface border border-app-border rounded-lg  max-h-40 overflow-y-auto">
                     {accounts.map(acc => (
                       <button
                         key={acc.id}
                         onClick={() => { setSelectedAccountId(acc.id); setShowAccountPicker(false) }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 text-left ${
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-app-base text-left ${
                           acc.id === selectedAccountId ? 'bg-blue-50' : ''
                         }`}
                       >
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${acc.status === 'healthy' ? 'bg-green-500' : acc.status === 'expired' ? 'bg-red-500' : 'bg-yellow-500'}`} />
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${acc.status === 'healthy' ? 'bg-hermes' : acc.status === 'expired' ? 'bg-red-500' : 'bg-yellow-500'}`} />
                         <span className="truncate">{acc.username}</span>
-                        <span className="text-xs text-gray-400 ml-auto shrink-0">{acc.status}</span>
+                        <span className="text-xs text-app-dim ml-auto shrink-0">{acc.status}</span>
                       </button>
                     ))}
                   </div>
@@ -268,17 +268,17 @@ export default function ReplyModal({ post, onClose }) {
         </div>
 
         {/* Footer actions */}
-        <div className="px-5 py-3.5 border-t border-gray-100 flex items-center justify-between">
+        <div className="px-5 py-3.5 border-t border-app-border flex items-center justify-between">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            className="px-4 py-2 text-sm text-app-muted hover:text-app-primary transition-colors"
           >
             Huy
           </button>
           <button
             onClick={handleSend}
             disabled={sending || !comment.trim() || !selectedAccountId}
-            className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium bg-info text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {sending ? <Loader size={14} className="animate-spin" /> : <Send size={14} />}
             Gui comment

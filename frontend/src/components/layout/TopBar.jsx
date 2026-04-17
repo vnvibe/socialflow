@@ -7,7 +7,7 @@ import ProactiveAlerts from './ProactiveAlerts'
 const roleBadgeColors = {
   admin: 'bg-red-100 text-red-700',
   manager: 'bg-blue-100 text-blue-700',
-  user: 'bg-gray-100 text-gray-700',
+  user: 'bg-app-elevated text-app-primary',
 }
 
 export default function TopBar({ onMenuToggle }) {
@@ -18,9 +18,9 @@ export default function TopBar({ onMenuToggle }) {
   }
 
   return (
-    <header className="h-14 sm:h-16 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-6 shrink-0">
+    <header className="h-14 sm:h-16 bg-app-surface border-b border-app-border flex items-center justify-between px-3 sm:px-6 shrink-0">
       <div className="flex items-center gap-2">
-        <button onClick={onMenuToggle} className="md:hidden p-2 -ml-1 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100">
+        <button onClick={onMenuToggle} className="md:hidden p-2 -ml-1 text-app-muted hover:text-app-primary rounded-lg hover:bg-app-elevated">
           <Menu size={20} />
         </button>
         <AgentStatus />
@@ -35,7 +35,7 @@ export default function TopBar({ onMenuToggle }) {
             <User className="w-4 h-4 text-slate-600" />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">
+            <span className="text-sm font-medium text-app-primary">
               {profile?.username || 'User'}
             </span>
             {profile?.role && (
@@ -53,7 +53,7 @@ export default function TopBar({ onMenuToggle }) {
         {/* Logout */}
         <button
           onClick={handleLogout}
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 transition-colors px-3 py-2 rounded-lg hover:bg-gray-100"
+          className="flex items-center gap-2 text-sm text-app-muted hover:text-app-primary transition-colors px-3 py-2 rounded-lg hover:bg-app-elevated"
         >
           <LogOut className="w-4 h-4" />
           Logout
