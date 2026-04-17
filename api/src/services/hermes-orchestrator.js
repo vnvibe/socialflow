@@ -140,11 +140,42 @@ async function buildOrchestrationContext(campaignId, supabase) {
     .select('group_id, status, fb_groups!inner(id, fb_group_id, name, url, member_count, join_status, pending_since, last_posted_at, consecutive_skips)')
     .eq('campaign_id', campaignId)
 
+  const groupIds = (junction || []).map(r => r.group_id).filter(Boolean)
+
+  // Check-history per group: pending/running jobs + past finished checks.
+  // Lets the skill distinguish "pending because FB hasn't approved yet" from
+  // "pending because no nick has checked it yet".
+  const checkHistory = new Map() // group_id → { has_check_job, last_check_at, check_count }
+  if (groupIds.length) {
+    try {
+      const { data: checkJobs } = await supabase
+        .from('jobs')
+        .select('payload, status, finished_at, created_at')
+        .eq('type', 'check_group_membership')
+        .in('status', ['pending', 'claimed', 'running', 'done', 'failed'])
+        .gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString())
+      for (const j of checkJobs || []) {
+        const gid = j.payload?.group_row_id
+        if (!gid || !groupIds.includes(gid)) continue
+        const entry = checkHistory.get(gid) || { has_check_job: false, last_check_at: null, check_count: 0 }
+        const inflight = ['pending', 'claimed', 'running'].includes(j.status)
+        if (inflight) entry.has_check_job = true
+        const ts = j.finished_at || j.created_at
+        if (ts && (!entry.last_check_at || new Date(ts) > new Date(entry.last_check_at))) {
+          entry.last_check_at = ts
+        }
+        if (j.status === 'done' || j.status === 'failed') entry.check_count++
+        checkHistory.set(gid, entry)
+      }
+    } catch {}
+  }
+
   const groups = (junction || []).map(r => {
     const g = r.fb_groups || {}
     const pendingDays = g.pending_since
       ? Math.floor((Date.now() - new Date(g.pending_since).getTime()) / 86400000)
       : null
+    const hist = checkHistory.get(g.id) || { has_check_job: false, last_check_at: null, check_count: 0 }
     return {
       id: g.id,
       fb_group_id: g.fb_group_id,
@@ -155,6 +186,10 @@ async function buildOrchestrationContext(campaignId, supabase) {
       posts_this_week: null, // expensive to compute; skip for now
       last_posted_at: g.last_posted_at,
       consecutive_skips: g.consecutive_skips || 0,
+      // New (2026-04-17): so Hermes can decide "recheck vs skip" smartly
+      has_check_job: hist.has_check_job,
+      last_check_at: hist.last_check_at,
+      check_count: hist.check_count,
     }
   })
 
@@ -207,6 +242,35 @@ async function buildOrchestrationContext(campaignId, supabase) {
   }
 }
 
+// 30-minute dedup window — don't let the orchestrator pile up jobs of the
+// same type for the same nick when a previous recommendation is still pending.
+// Prevents the "check already queued" noise seen in production + saves
+// capacity on the 2-slot agent.
+async function recentJobExists(supabase, { accountId, jobType, windowMinutes = 30 }) {
+  if (!accountId) return false
+  const since = new Date(Date.now() - windowMinutes * 60000).toISOString()
+  const { data } = await supabase
+    .from('jobs')
+    .select('id, payload, status, created_at')
+    .eq('type', jobType)
+    .in('status', ['pending', 'claimed', 'running'])
+    .gte('created_at', since)
+  return (data || []).some(j => j.payload?.account_id === accountId)
+}
+
+// Build consistent payload for orchestrator-created jobs. Every job MUST carry
+// owner_id so the agent's activity logger can insert into campaign_activity_log
+// (owner_id is NOT NULL in schema). Observed bug: agent flushed null owner_id
+// and the whole batch rolled back.
+function orchestratorPayload(context, extras = {}) {
+  return {
+    campaign_id: context.campaign?.id,
+    owner_id: context.campaign?.owner_id || null,
+    orchestrator: true,
+    ...extras,
+  }
+}
+
 // ─── Action executors ──────────────────────────────────────
 async function executeAction(action, campaignId, context, supabase) {
   switch (action.type) {
@@ -217,6 +281,12 @@ async function executeAction(action, campaignId, context, supabase) {
       const nick = (context.nicks || []).find(n => n.id === accId)
       if (!nick) return { ok: false, detail: 'nick not found in context' }
       if (nick.active_job) return { ok: false, detail: 'nick already has active job' }
+
+      // Dedup: if a same-type job for this nick is already in-flight within
+      // the last 30 minutes, skip silently. The in-flight one covers the need.
+      if (await recentJobExists(supabase, { accountId: accId, jobType })) {
+        return { ok: false, detail: `${jobType} for nick already queued <30min` }
+      }
 
       // Find the role for this nick in this campaign.
       // pg-supabase wrapper doesn't implement .contains() for arrays, so pull
@@ -234,13 +304,11 @@ async function executeAction(action, campaignId, context, supabase) {
           priority: 2,
           status: 'pending',
           scheduled_at: new Date().toISOString(),
-          payload: {
+          payload: orchestratorPayload(context, {
             account_id: accId,
-            campaign_id: campaignId,
             role_id: roleRow?.id || null,
             group_id: groupId,
-            orchestrator: true,
-          },
+          }),
           created_by: context.campaign?.owner_id || null,
         })
         .select('id')
@@ -274,7 +342,8 @@ async function executeAction(action, campaignId, context, supabase) {
       if (!accountId) return { ok: false, detail: 'no healthy nick available to recheck from' }
 
       // Dedup: skip if a pending membership check already exists for this group.
-      // pg-supabase doesn't support jsonb contains — filter client-side.
+      // Keep the per-group dedup (not just per-nick) because membership checks
+      // are keyed by group_row_id.
       const { data: existingJobs } = await supabase
         .from('jobs')
         .select('id, payload')
@@ -288,12 +357,11 @@ async function executeAction(action, campaignId, context, supabase) {
         priority: 7,
         status: 'pending',
         scheduled_at: new Date(Date.now() + 60000).toISOString(),
-        payload: {
+        payload: orchestratorPayload(context, {
           account_id: accountId,
-          campaign_id: campaignId,
           group_row_id: action.target_id,
-          orchestrator: true,
-        },
+        }),
+        created_by: context.campaign?.owner_id || null,
       })
       if (error) return { ok: false, detail: error.message }
       return { ok: true, detail: 'recheck queued' }
