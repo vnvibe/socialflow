@@ -853,14 +853,18 @@ export default function MonitorSection({ campaignId, campaign }) {
                 </div>
               )}
 
-              {/* Recent decisions */}
-              {aiPilotLogs.length === 0 ? (
-                <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-200">
-                  <Brain size={40} className="mx-auto mb-2 opacity-30" />
-                  <p className="text-sm font-medium">Chưa có quyết định nào</p>
-                  <p className="text-[11px] mt-1">Đã chạy: {campaign?.total_runs || 0} lần (trigger mỗi 3 lần)</p>
+              {/* Audit 2026-04-17: decisions log moved to Hermes tab (hermes_decisions table).
+                  This AI Pilot tab now only shows strategy memories + performance stats.
+                  Keep aiPilotLogs variable out of render; the tab Hermes in CampaignHub is
+                  the single source of truth for orchestrator decisions. */}
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-sm text-purple-900">
+                <div className="font-medium mb-1">📋 Quyết định của Hermes đã chuyển</div>
+                <div className="text-xs text-purple-700">
+                  Xem tab <strong>Hermes</strong> trong Campaign Hub để theo dõi quyết định
+                  orchestrator, duyệt recommendations pending, và xem nhật ký học tập.
                 </div>
-              ) : (
+              </div>
+              {false && aiPilotLogs.length > 0 && (
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase">Quyết định gần đây ({aiPilotLogs.length})</h3>
                   {aiPilotLogs.map((d, idx) => {

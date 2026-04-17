@@ -44,6 +44,35 @@ module.exports = async (fastify) => {
     return data || []
   })
 
+  // GET /accounts/hermes-scores — 7-day avg Hermes feedback score per nick
+  // Used by AgentsRoster + any other UI that wants a per-nick health signal.
+  // Returns: [{ account_id, avg_score, total_calls }]
+  fastify.get('/hermes-scores', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const accessibleIds = await getAccessibleIds(supabase, req.user.id, 'account')
+    if (accessibleIds.length === 0) return []
+
+    const since = new Date(Date.now() - 7 * 86400000).toISOString()
+    // account_id in hermes_feedback is TEXT (agent-side identifier) — cast both sides
+    // to text when comparing. pg-supabase wrapper doesn't implement complex aggregates,
+    // so do group-by on the server via raw SQL through the shared pg pool.
+    try {
+      const sql = `
+        SELECT account_id,
+               AVG(score)::numeric(3,2) AS avg_score,
+               COUNT(*)::int AS total_calls
+        FROM hermes_feedback
+        WHERE created_at > $1
+          AND account_id = ANY($2::text[])
+        GROUP BY account_id
+      `
+      const { rows } = await supabase._pool.query(sql, [since, accessibleIds])
+      return rows
+    } catch (err) {
+      fastify.log.error({ err }, '[HERMES-SCORES] query failed')
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // GET /accounts/:id/health-signals — Recent signals for a specific account
   fastify.get('/:id/health-signals', { preHandler: fastify.authenticate }, async (req, reply) => {
     if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {
@@ -752,11 +781,29 @@ module.exports = async (fastify) => {
 
   // ─── POST /accounts/:id/activate ─────────────────────────
   // Mark account healthy + auto-assign a job based on campaign_roles
-  fastify.post('/:id/activate', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { data: account } = await supabase.from('accounts')
-      .select('id, owner_id, username, status, is_active')
-      .eq('id', req.params.id).eq('owner_id', req.user.id).single()
+  fastify.post('/:id/activate', async (req, reply) => {
+    // Dual auth
+    const AGENT_SECRET = process.env.AGENT_SECRET
+    const isAgent = AGENT_SECRET && req.headers['x-agent-key'] === AGENT_SECRET
+    let ownerId = null
+    if (!isAgent) {
+      try {
+        await fastify.authenticate(req, reply)
+        if (reply.sent) return
+        ownerId = req.user.id
+      } catch {
+        return reply.code(401).send({ error: 'Auth required' })
+      }
+    }
+
+    let aq = supabase.from('accounts').select('id, owner_id, username, status, is_active').eq('id', req.params.id)
+    if (!isAgent) aq = aq.eq('owner_id', ownerId)
+
+    const { data: account } = await aq.single()
     if (!account) return reply.code(404).send({ error: 'Account not found' })
+
+    // If agent, we get ownerId from the account
+    if (isAgent) ownerId = account.owner_id
 
     // Mark healthy
     await supabase.from('accounts').update({
@@ -768,7 +815,7 @@ module.exports = async (fastify) => {
     // Find active campaign_role for this account
     const { data: campaigns } = await supabase.from('campaigns')
       .select('id, name, status, campaign_roles(id, role_type, account_ids, is_active)')
-      .eq('owner_id', req.user.id)
+      .eq('owner_id', ownerId)
       .in('status', ['running', 'active'])
 
     let assignedJob = null
@@ -806,11 +853,11 @@ module.exports = async (fastify) => {
             campaign_id: c.id,
             role_id: role.id,
             role_type: role.role_type,
-            owner_id: req.user.id,
+            owner_id: ownerId,
             triggered_by: 'activate',
           },
           scheduled_at: new Date(Date.now() + 30000).toISOString(), // 30s delay
-          created_by: req.user.id,
+          created_by: ownerId,
         }).select('id, type').single()
         if (job) {
           assignedJob = job

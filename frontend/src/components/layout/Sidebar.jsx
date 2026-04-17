@@ -37,6 +37,7 @@ const mainLinks = [
   { to: '/data-center', label: 'Data Center', icon: Database },
   { to: '/group-monitor', label: 'Theo dõi nhóm', icon: Radar },
   { to: '/settings/websites', label: 'Website', icon: Globe },
+  { to: '/hermes/settings', label: 'Hermes AI', icon: Bot },
 ]
 
 const settingsLinks = []

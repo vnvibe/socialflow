@@ -8,9 +8,9 @@
  * Click nick → SlidePanel with 7-day activity chart, last 10 jobs,
  * pilot memories, pause/health actions.
  */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Play, Pause, Plus, X, ArrowRightLeft } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
@@ -93,7 +93,7 @@ function RoleSelect({ currentRole, onChange, disabled }) {
 }
 
 // ─── Single nick row inside campaign accordion ────────────
-function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, onSelect, onRemove, onRoleChange, onRepair, campaigns }) {
+function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, onSelect, onRemove, onRoleChange, onRepair, onTogglePause, campaigns }) {
   const [transferOpen, setTransferOpen] = useState(false)
 
   const status = runningJob ? 'busy'
@@ -101,6 +101,7 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
     : nick.status === 'healthy' ? 'online'
     : nick.status === 'at_risk' ? 'idle'
     : 'error'
+  const isPaused = !nick.is_active && nick.status !== 'checkpoint' && nick.status !== 'expired'
 
   // Daily budget & breakdown
   const dailyBudgetTotal = (() => {
@@ -217,6 +218,13 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
 
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           <button
+            onClick={() => onTogglePause?.(nick, !isPaused)}
+            title={isPaused ? 'Chạy lại nick' : 'Tạm dừng nick'}
+            className={`p-1 ${isPaused ? 'text-hermes hover:text-hermes' : 'text-app-muted hover:text-warn'}`}
+          >
+            {isPaused ? <Play size={14} /> : <Pause size={14} />}
+          </button>
+          <button
             onClick={() => setTransferOpen(!transferOpen)}
             title="Chuyển campaign"
             className="text-app-muted hover:text-info p-1"
@@ -232,6 +240,14 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
           </button>
         </div>
       </div>
+
+      {/* Paused badge — shown when user manually paused (not checkpoint/expired which already have their own styling) */}
+      {isPaused && (
+        <div className="absolute top-2 right-24 px-2 py-0.5 text-[10px] font-mono-ui rounded-sm"
+          style={{ background: 'var(--bg-elevated)', border: '1px solid var(--warn)', color: 'var(--warn)' }}>
+          ⏸ Tạm dừng
+        </div>
+      )}
 
       {/* INLINE DETAIL — always visible (no click required) */}
       <div className="mt-2 pl-9 grid grid-cols-12 gap-3 font-mono-ui text-[11px]">
@@ -315,7 +331,7 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
 }
 
 // ─── Single campaign accordion section ─────────────────────
-function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, todayJobsByAcc, campaigns, onRoleChange, onRemoveFromRole, onSelect, onRepair }) {
+function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, todayJobsByAcc, campaigns, onRoleChange, onRemoveFromRole, onSelect, onRepair, onTogglePause }) {
   const [expanded, setExpanded] = useState(true)
   const nav = useNavigate()
 
@@ -415,6 +431,7 @@ function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, tod
                 onRemove={(accId) => onRemoveFromRole(campaign.id, accId)}
                 onRoleChange={(accId, newRole) => onRoleChange(campaign.id, accId, newRole)}
                 onRepair={onRepair}
+                onTogglePause={onTogglePause}
               />
             ))
           )}
@@ -439,7 +456,7 @@ function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, tod
 }
 
 // ─── Unassigned nicks section ──────────────────────────────
-function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect, onRepair }) {
+function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect, onRepair, onTogglePause }) {
   const [expanded, setExpanded] = useState(false)
 
   if (nicks.length === 0) return null
@@ -474,6 +491,7 @@ function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc
           onRemove={() => {}}
           onRoleChange={() => {}}
           onRepair={onRepair}
+          onTogglePause={onTogglePause}
         />
       ))}
     </div>
@@ -674,12 +692,27 @@ export default function AgentsRoster() {
   const qc = useQueryClient()
   const [selected, setSelected] = useState(null)
   const [repairNick, setRepairNick] = useState(null)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
     queryFn: async () => asArray((await api.get('/accounts')).data),
     refetchInterval: 30000,
   })
+
+  // Deep-link: ?repair={account_id} from ProactiveAlerts toast click.
+  // Wait for accounts to load, then open the modal for that nick + clear the param.
+  useEffect(() => {
+    const repairId = searchParams.get('repair')
+    if (!repairId || !accounts.length) return
+    const nick = accounts.find(a => a.id === repairId)
+    if (nick) {
+      setRepairNick(nick)
+      const next = new URLSearchParams(searchParams)
+      next.delete('repair')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, accounts, setSearchParams])
 
   const { data: campaigns = [] } = useQuery({
     queryKey: ['campaigns'],
@@ -722,6 +755,23 @@ export default function AgentsRoster() {
     refetchInterval: 60000,
   })
 
+  // 7-day Hermes feedback avg score per nick — authoritative health signal
+  // per-nick (unlike job.result.hermes_score which was only sometimes populated).
+  const { data: hermesScoresByAcc = {} } = useQuery({
+    queryKey: ['hermes', 'scores-7d'],
+    queryFn: async () => {
+      try {
+        const rows = (await api.get('/accounts/hermes-scores')).data || []
+        const map = {}
+        for (const r of rows) {
+          map[r.account_id] = { avg_score: Number(r.avg_score) || 0, total_calls: r.total_calls || 0 }
+        }
+        return map
+      } catch { return {} }
+    },
+    refetchInterval: 120000,
+  })
+
   const runningJobs = jobs.filter(j => ['claimed', 'running'].includes(j.status))
 
   // Compute today stats per account (client-side aggregation)
@@ -741,29 +791,38 @@ export default function AgentsRoster() {
 
   const todayStatsByAcc = useMemo(() => {
     const stats = {}
+    // Base: every account with jobs today
     for (const [accId, accJobs] of Object.entries(todayJobsByAcc)) {
-      let scoresSum = 0, scoresCount = 0
       let done = 0, failed = 0
       for (const j of accJobs) {
         if (j.status === 'done') done++
         if (j.status === 'failed') failed++
-        const score = j.result?.hermes_score
-        if (typeof score === 'number') {
-          scoresSum += score
-          scoresCount++
-        }
       }
       stats[accId] = {
         total: accJobs.length,
         done, failed,
-        avg_score: scoresCount > 0 ? scoresSum / scoresCount : 0,
-        // Real counts from DB (ai_pilot_memory + hermes_feedback)
+        // 7-day Hermes feedback avg is authoritative; fall back to 0 if no calls yet
+        avg_score: hermesScoresByAcc[accId]?.avg_score || 0,
+        score_calls_7d: hermesScoresByAcc[accId]?.total_calls || 0,
         memory_count: memCounts[accId] || 0,
         fewshot_count: fewshotCounts[accId] || 0,
       }
     }
+    // Also include accounts with NO jobs today but with a 7-day Hermes score
+    // so the badge renders on idle nicks too.
+    for (const [accId, s] of Object.entries(hermesScoresByAcc)) {
+      if (!stats[accId]) {
+        stats[accId] = {
+          total: 0, done: 0, failed: 0,
+          avg_score: s.avg_score,
+          score_calls_7d: s.total_calls,
+          memory_count: memCounts[accId] || 0,
+          fewshot_count: fewshotCounts[accId] || 0,
+        }
+      }
+    }
     return stats
-  }, [todayJobsByAcc, memCounts, fewshotCounts])
+  }, [todayJobsByAcc, memCounts, fewshotCounts, hermesScoresByAcc])
 
   // Assigned account ids across all campaigns
   const assignedIds = useMemo(() => {
@@ -828,6 +887,31 @@ export default function AgentsRoster() {
     },
   })
 
+  // Pause/resume a single nick via is_active toggle. Optimistic update so the
+  // row dims immediately; poller respects is_active=false on next cycle.
+  const togglePauseNick = useMutation({
+    mutationFn: async ({ nick, pause }) => {
+      await api.put(`/accounts/${nick.id}`, { is_active: !pause })
+    },
+    onMutate: async ({ nick, pause }) => {
+      await qc.cancelQueries({ queryKey: ['accounts'] })
+      const prev = qc.getQueryData(['accounts'])
+      qc.setQueryData(['accounts'], (old) => {
+        if (!Array.isArray(old)) return old
+        return old.map(a => a.id === nick.id ? { ...a, is_active: !pause } : a)
+      })
+      return { prev }
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['accounts'], ctx.prev)
+      toast.error(err.response?.data?.error || err.message)
+    },
+    onSuccess: (_d, { nick, pause }) => {
+      toast.success(pause ? `Đã tạm dừng ${nick.username}` : `${nick.username} hoạt động lại`)
+      qc.invalidateQueries({ queryKey: ['accounts'] })
+    },
+  })
+
   // Top stats
   const activeNicks = accounts.filter(a => a.is_active).length
   const busyNow = runningJobs.length
@@ -869,6 +953,7 @@ export default function AgentsRoster() {
               onRoleChange={(campaignId, accountId, newRole) => changeRole.mutate({ campaignId, accountId, newRole })}
               onRemoveFromRole={(campaignId, accountId) => removeFromCampaign.mutate({ campaignId, accountId })}
               onRepair={setRepairNick}
+              onTogglePause={(nick, pause) => togglePauseNick.mutate({ nick, pause })}
             />
           ))}
 
@@ -879,6 +964,7 @@ export default function AgentsRoster() {
             todayJobsByAcc={todayJobsByAcc}
             onSelect={setSelected}
             onRepair={setRepairNick}
+            onTogglePause={(nick, pause) => togglePauseNick.mutate({ nick, pause })}
           />
 
           {campaigns.length === 0 && accounts.length > 0 && (

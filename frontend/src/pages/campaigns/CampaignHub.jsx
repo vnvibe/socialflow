@@ -947,6 +947,228 @@ function ActivityTab({ campaignId, campaign }) {
   )
 }
 
+// ─── Tab: Hermes (orchestrator decisions log + approval) ──
+const HERMES_ACTION_ICON = {
+  assign_job:     '🎯',
+  skip_group:     '🚫',
+  recheck_group:  '🔄',
+  reassign_nick:  '↔️',
+  pause_nick:     '⏸',
+  alert_user:     '⚠️',
+  create_content: '✍️',
+}
+const OUTCOME_LABEL = {
+  success:        { label: '✓ Đã làm', color: 'text-hermes' },
+  user_approved:  { label: '✓ Duyệt',  color: 'text-hermes' },
+  failed:         { label: '✗ Lỗi',    color: 'text-danger' },
+  pending:        { label: '⏳ Chờ',   color: 'text-warn' },
+  user_rejected:  { label: '× Bỏ qua', color: 'text-app-muted' },
+}
+
+function HermesTab({ campaignId }) {
+  const qc = useQueryClient()
+  const [selectedId, setSelectedId] = useState(null)
+  const [typeFilter, setTypeFilter] = useState('')
+
+  const { data: resp, isLoading } = useQuery({
+    queryKey: ['hermes-decisions', campaignId, typeFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams({ campaign_id: campaignId, limit: '100' })
+      if (typeFilter) params.set('decision_type', typeFilter)
+      return (await api.get(`/ai-hermes/decisions?${params}`)).data
+    },
+    refetchInterval: 15000,
+  })
+  const rows = useMemo(() => {
+    const list = Array.isArray(resp) ? resp : asArray(resp)
+    // Skip the "orchestration_summary" wrapper rows — those are just meta
+    return list.filter(r => r.decision_type !== 'orchestration_summary')
+  }, [resp])
+
+  const selected = rows.find(r => r.id === selectedId) || rows[0]
+
+  const approveMut = useMutation({
+    mutationFn: async (id) => (await api.patch(`/ai-hermes/decisions/${id}/approve`)).data,
+    onSuccess: () => {
+      toast.success('Đã áp dụng')
+      qc.invalidateQueries({ queryKey: ['hermes-decisions', campaignId] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+  const rejectMut = useMutation({
+    mutationFn: async (id) => (await api.patch(`/ai-hermes/decisions/${id}/reject`)).data,
+    onSuccess: () => {
+      toast.success('Đã bỏ qua')
+      qc.invalidateQueries({ queryKey: ['hermes-decisions', campaignId] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
+  const pendingCount = rows.filter(r => r.outcome === 'pending').length
+
+  return (
+    <div className="flex h-full">
+      {/* Left panel — list */}
+      <div className="w-1/2 flex flex-col" style={{ borderRight: '1px solid var(--border)' }}>
+        <div
+          className="flex items-center gap-3 px-4 py-3 flex-wrap"
+          style={{ borderBottom: '1px solid var(--border)' }}
+        >
+          <span className="font-medium text-sm">Quyết định của Hermes</span>
+          {pendingCount > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded"
+              style={{ background: 'var(--warn)', color: 'white' }}>
+              {pendingCount} chờ duyệt
+            </span>
+          )}
+          <select
+            className="ml-auto px-2 py-1 rounded text-xs"
+            style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+          >
+            <option value="">Tất cả</option>
+            <option value="orchestration">Orchestration</option>
+            <option value="self_improvement">Self-improvement</option>
+            <option value="reporter">Report</option>
+          </select>
+        </div>
+        <div className="flex-1 overflow-auto">
+          {isLoading ? (
+            <div className="p-8 text-center font-mono-ui text-xs" style={{ color: 'var(--text-muted)' }}>
+              Đang tải…
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="p-8 text-center font-mono-ui text-xs" style={{ color: 'var(--text-muted)' }}>
+              Chưa có quyết định nào — cron orchestrator chạy mỗi 15 phút.
+            </div>
+          ) : (
+            rows.map(r => {
+              const icon = HERMES_ACTION_ICON[r.action_type] || '🧠'
+              const isSelected = selected?.id === r.id
+              const outcome = OUTCOME_LABEL[r.outcome] || { label: r.outcome || '—', color: 'text-app-muted' }
+              const autoBadge = r.auto_applied ? '🤖' : r.auto_apply ? '🤖' : '👤'
+              return (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedId(r.id)}
+                  className={`w-full text-left px-4 py-3 text-xs flex items-start gap-3 hover:bg-app-muted/10 ${isSelected ? 'bg-app-muted/20' : ''}`}
+                  style={{ borderBottom: '1px solid var(--border)' }}
+                >
+                  <span className="font-mono-ui text-app-muted tabular-nums shrink-0">
+                    {fmtTime(r.created_at)}
+                  </span>
+                  <span className="shrink-0">{icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate">
+                        {r.action_type || r.decision_type}
+                      </span>
+                      <span className="shrink-0" title={r.auto_apply ? 'auto-applied' : 'needs user'}>
+                        {autoBadge}
+                      </span>
+                    </div>
+                    {r.target_name && (
+                      <div className="text-app-muted truncate mt-0.5">→ {r.target_name}</div>
+                    )}
+                  </div>
+                  <span className={`shrink-0 ${outcome.color}`}>{outcome.label}</span>
+                </button>
+              )
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Right panel — detail */}
+      <div className="w-1/2 flex flex-col overflow-hidden">
+        {!selected ? (
+          <div className="p-8 text-center font-mono-ui text-xs" style={{ color: 'var(--text-muted)' }}>
+            Chọn một quyết định để xem chi tiết
+          </div>
+        ) : (
+          <div className="flex-1 overflow-auto p-6 space-y-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-app-muted mb-1">Thời gian</div>
+              <div className="text-sm">{new Date(selected.created_at).toLocaleString('vi-VN')}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-app-muted mb-1">Loại</div>
+              <div className="text-sm">
+                {selected.decision_type}
+                {selected.action_type && <> · {selected.action_type}</>}
+              </div>
+            </div>
+            {selected.target_name && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-app-muted mb-1">Target</div>
+                <div className="text-sm">{selected.target_name}</div>
+              </div>
+            )}
+            {selected.context_summary && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-app-muted mb-1">Hermes nhận định</div>
+                <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                  {selected.context_summary}
+                </div>
+              </div>
+            )}
+            {selected.reason && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-app-muted mb-1">Lý do</div>
+                <div className="text-sm">{selected.reason}</div>
+              </div>
+            )}
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-app-muted mb-1">Payload</div>
+              <pre className="text-[11px] font-mono-ui p-3 overflow-auto"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', maxHeight: 300 }}>
+{JSON.stringify(selected.decision, null, 2)}
+              </pre>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-app-muted mb-1">Kết quả</div>
+              <div className="text-sm flex gap-2 items-center">
+                <span className={OUTCOME_LABEL[selected.outcome]?.color || ''}>
+                  {OUTCOME_LABEL[selected.outcome]?.label || selected.outcome}
+                </span>
+                {selected.applied_at && (
+                  <span className="text-xs text-app-muted">
+                    · {new Date(selected.applied_at).toLocaleString('vi-VN')}
+                  </span>
+                )}
+              </div>
+              {selected.outcome_detail && (
+                <div className="text-xs text-app-muted mt-1">{selected.outcome_detail}</div>
+              )}
+            </div>
+            {selected.outcome === 'pending' && (
+              <div className="flex gap-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                <button
+                  onClick={() => approveMut.mutate(selected.id)}
+                  disabled={approveMut.isPending}
+                  className="px-4 py-2 rounded text-sm font-medium"
+                  style={{ background: 'var(--hermes)', color: 'white' }}
+                >
+                  {approveMut.isPending ? 'Đang áp dụng…' : 'Áp dụng'}
+                </button>
+                <button
+                  onClick={() => rejectMut.mutate(selected.id)}
+                  disabled={rejectMut.isPending}
+                  className="px-4 py-2 rounded text-sm"
+                  style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+                >
+                  Bỏ qua
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Tabs config ───────────────────────────────────────────
 const TABS = [
   { key: 'overview',  label: 'Overview' },
@@ -956,6 +1178,7 @@ const TABS = [
   { key: 'content',   label: 'Content' },
   { key: 'groups',    label: 'Nhóm' },
   { key: 'data',      label: 'Data' },
+  { key: 'hermes',    label: 'Hermes' },
 ]
 
 // ─── Hermes Review modal ───────────────────────────────────
@@ -1425,6 +1648,7 @@ export default function CampaignHub() {
         {tab === 'agents'    && <AgentsTab campaign={campaign} />}
         {tab === 'execution' && <ExecutionTab campaignId={id} />}
         {tab === 'activity'  && <ActivityTab campaignId={id} campaign={campaign} />}
+        {tab === 'hermes'    && <HermesTab campaignId={id} />}
         {tab === 'content'   && <ContentTab campaignId={id} />}
         {tab === 'groups'    && <GroupsTab campaignId={id} />}
         {tab === 'data'      && <DataTab campaignId={id} />}
