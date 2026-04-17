@@ -308,6 +308,50 @@ module.exports = async (fastify) => {
     return reply.code(status).send(json)
   })
 
+  // ─── SOUL editor (Hermes personality) ────────────────────
+  // Reads/writes /root/.hermes/SOUL.md — Hermes's system-prompt-level identity.
+  // PUT also triggers a /skills/reload so changes take effect without restart.
+  const fsp = require('fs').promises
+  const os  = require('os')
+  const path = require('path')
+  const SOUL_PATH = process.env.HERMES_SOUL_PATH
+    || path.join(os.homedir(), '.hermes', 'SOUL.md')
+
+  fastify.get('/soul', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const content = await fsp.readFile(SOUL_PATH, 'utf-8').catch(() => '')
+      return { path: SOUL_PATH, content }
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  fastify.put('/soul', { preHandler: fastify.requireAdmin }, async (req, reply) => {
+    const { content } = req.body || {}
+    if (typeof content !== 'string') {
+      return reply.code(400).send({ error: 'content (string) required' })
+    }
+    try {
+      // Backup before overwriting
+      try {
+        const prev = await fsp.readFile(SOUL_PATH, 'utf-8').catch(() => '')
+        if (prev) await fsp.writeFile(SOUL_PATH + '.bak', prev)
+      } catch {}
+      await fsp.writeFile(SOUL_PATH, content)
+      // Hot-reload Hermes so new SOUL takes effect
+      try {
+        await fetch(`${HERMES_URL}/skills/reload`, {
+          method: 'POST',
+          headers: { 'X-Agent-Key': AGENT_SECRET },
+          signal: AbortSignal.timeout(5000),
+        })
+      } catch {}
+      return { ok: true, bytes: content.length }
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // ─── Orchestrator routes ─────────────────────────────────
   // POST /ai-hermes/orchestrate/:campaign_id — one-shot run
   const orchestrator = require('../services/hermes-orchestrator')

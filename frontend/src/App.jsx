@@ -14,7 +14,6 @@ import SignalWall from './pages/monitor/SignalWall'
 import HermesSettings from './pages/hermes/HermesSettings'
 import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
-import Dashboard from './pages/dashboard/Dashboard'
 import AccountList from './pages/accounts/AccountList'
 import AccountDetail from './pages/accounts/AccountDetail'
 import PageList from './pages/pages-manager/PageList'
@@ -25,8 +24,6 @@ import VideoEditor from './pages/media/VideoEditor'
 import ContentComposer from './pages/content/ContentComposer'
 import ContentList from './pages/content/ContentList'
 import UnifiedPublish from './pages/publish/UnifiedPublish'
-import Monitor from './pages/monitor/Monitor'
-import CampaignManager from './pages/publish/CampaignManager'
 import CampaignCalendar from './pages/publish/CampaignCalendar'
 import TrendCenter from './pages/trends/TrendCenter'
 import Analytics from './pages/analytics/Analytics'
@@ -37,9 +34,7 @@ import WebsiteSettings from './pages/settings/WebsiteSettings'
 import WebsiteReport from './pages/websites/WebsiteReport'
 import OAuthCallback from './pages/OAuthCallback'
 import GoogleCallbackRelay from './pages/GoogleCallbackRelay'
-import CampaignList from './pages/campaigns/CampaignList'
 import CampaignForm from './pages/campaigns/CampaignForm'
-import CampaignDetail from './pages/campaigns/CampaignDetail'
 import AccountHealth from './pages/accounts/AccountHealth'
 import DataCenter from './pages/data-center/DataCenter'
 import NickNurture from './pages/nick-nurture/NickNurture'
@@ -103,10 +98,11 @@ export default function App() {
                 <Route path="/hermes" element={<HermesBrain />} />
                 <Route path="/hermes/settings" element={<HermesSettings />} />
 
-                {/* ── Legacy dashboard fallback ── */}
-                <Route path="/dashboard-legacy" element={<Dashboard />} />
-                <Route path="/campaigns-legacy" element={<CampaignList />} />
-                <Route path="/monitor-legacy" element={<Monitor />} />
+                {/* ── Legacy redirects — actual pages removed 2026-04-17 ── */}
+                <Route path="/dashboard-legacy" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/campaigns-legacy" element={<Navigate to="/campaigns" replace />} />
+                <Route path="/monitor-legacy"   element={<Navigate to="/monitor" replace />} />
+                <Route path="/campaigns/old"    element={<Navigate to="/campaigns" replace />} />
 
                 {/* ── Unchanged existing pages ── */}
                 <Route path="/accounts" element={<AccountList />} />
@@ -122,10 +118,9 @@ export default function App() {
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/campaigns/new" element={<CampaignForm />} />
                 <Route path="/campaigns/:id" element={<CampaignHub />} />
-                <Route path="/campaigns/:id/legacy" element={<CampaignDetail />} />
+                <Route path="/campaigns/:id/legacy" element={<Navigate to="/campaigns/:id" replace />} />
                 <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
                 <Route path="/campaigns/:id/hermes" element={<CampaignHermesEditor />} />
-                <Route path="/campaigns/old" element={<CampaignManager />} />
                 <Route path="/health" element={<AccountHealth />} />
                 <Route path="/nick-nurture" element={<NickNurture />} />
                 <Route path="/calendar" element={<CampaignCalendar />} />

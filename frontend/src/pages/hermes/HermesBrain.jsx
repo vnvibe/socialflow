@@ -5,7 +5,8 @@
  * Bottom: live call feed.
  */
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import api from '../../lib/api'
 import SkillCard from '../../components/hermes/SkillCard'
 import HermesScoreBadge from '../../components/hermes/HermesScoreBadge'
@@ -18,6 +19,78 @@ function formatAgo(ts) {
   if (sec < 60) return `${sec}s ago`
   if (sec < 3600) return `${Math.round(sec / 60)}m ago`
   return `${Math.round(sec / 3600)}h ago`
+}
+
+// Self-improvement timeline — mirrors the Learning section inside /hermes/settings
+// but lives here as a quick overview without leaving the Brain page.
+function LearningTimeline() {
+  const qc = useQueryClient()
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['hermes-learning-log'],
+    queryFn: async () => {
+      const r = await api.get('/ai-hermes/learning-log?limit=30')
+      return Array.isArray(r.data) ? r.data : (r.data?.data || [])
+    },
+    refetchInterval: 30000,
+  })
+  const runMut = useMutation({
+    mutationFn: async () => (await api.post('/ai-hermes/daily-review', {})).data,
+    onSuccess: () => {
+      toast.success('Daily review đã chạy')
+      qc.invalidateQueries({ queryKey: ['hermes-learning-log'] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
+  return (
+    <div className="flex-1 overflow-auto p-6 font-mono-ui">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="text-[11px] uppercase tracking-wider text-app-muted">Nhật ký học tập</div>
+        <span className="text-[10px] text-app-dim">cron 23:00 VN · auto</span>
+        <button
+          onClick={() => runMut.mutate()}
+          disabled={runMut.isPending}
+          className="ml-auto btn-hermes"
+        >
+          {runMut.isPending ? 'Đang chạy…' : 'Run now'}
+        </button>
+      </div>
+      {isLoading ? (
+        <div className="text-app-muted text-sm">Đang tải…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-app-muted text-sm">Chưa có nhật ký nào.</div>
+      ) : (
+        <div className="space-y-3">
+          {rows.map(r => {
+            const decision = r.decision || {}
+            const review = decision.review || {}
+            const applied = decision.applied || {}
+            return (
+              <div key={r.id} className="p-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4 }}>
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="text-[10px] text-app-muted tabular-nums">
+                    {new Date(r.created_at).toLocaleString('vi-VN')}
+                  </span>
+                  <span className="text-xs">🧠 Self-review {decision.date || ''}</span>
+                  {applied.skills_rewritten?.length > 0 && (
+                    <span className="text-[10px] px-2 py-0.5 text-hermes" style={{ background: 'var(--hermes-dim)', borderRadius: 4 }}>
+                      +{applied.skills_rewritten.length} rewrites
+                    </span>
+                  )}
+                </div>
+                {r.outcome_detail && <div className="text-sm text-app-primary">"{r.outcome_detail}"</div>}
+                {Array.isArray(review.insights) && review.insights.length > 0 && (
+                  <ul className="text-xs text-app-muted mt-2 ml-4 space-y-0.5">
+                    {review.insights.map((s, i) => <li key={i}>• {s}</li>)}
+                  </ul>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function HermesBrain() {
@@ -72,7 +145,7 @@ export default function HermesBrain() {
         className="flex items-center px-6 font-mono-ui text-[11px] uppercase tracking-wider"
         style={{ borderBottom: '1px solid var(--border)' }}
       >
-        {['overview', 'skills'].map((t) => (
+        {['overview', 'skills', 'learning'].map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -89,6 +162,9 @@ export default function HermesBrain() {
 
       {/* Tab: Skills editor */}
       {tab === 'skills' && <SkillsEditor />}
+
+      {/* Tab: Learning — self-improvement timeline */}
+      {tab === 'learning' && <LearningTimeline />}
 
       {/* Tab: Overview — Body: 2 columns */}
       {tab === 'overview' && <>

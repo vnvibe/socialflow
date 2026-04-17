@@ -10,6 +10,7 @@
  */
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, GripVertical, AlertTriangle, Check, Loader } from 'lucide-react'
 import api from '../../lib/api'
@@ -698,14 +699,364 @@ function MemorySection() {
 }
 
 // ───────────────────────────────────────────────────────────
+// SECTION: SOUL — edit ~/.hermes/SOUL.md (Hermes personality)
+// ───────────────────────────────────────────────────────────
+function SoulSection() {
+  const qc = useQueryClient()
+  const [draft, setDraft] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['hermes-soul'],
+    queryFn: async () => (await api.get('/ai-hermes/soul')).data,
+  })
+  useEffect(() => {
+    if (data && !loaded) { setDraft(data.content || ''); setLoaded(true) }
+  }, [data, loaded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveMut = useMutation({
+    mutationFn: async () => (await api.put('/ai-hermes/soul', { content: draft })).data,
+    onSuccess: () => {
+      toast.success('SOUL đã cập nhật + hot-reload')
+      qc.invalidateQueries({ queryKey: ['hermes-soul'] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
+  const dirty = loaded && draft !== (data?.content || '')
+  return (
+    <div className="p-6 font-mono-ui">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="text-[11px] uppercase tracking-wider text-app-muted">SOUL — Hermes personality</div>
+        <div className="flex-1 text-[10px] text-app-dim">{data?.path || '~/.hermes/SOUL.md'}</div>
+        {dirty && <span className="text-[10px] text-warn">● unsaved</span>}
+      </div>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        disabled={isLoading}
+        className="w-full font-mono-ui text-xs p-3"
+        style={{
+          background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+          color: 'var(--text-primary)', minHeight: 420, borderRadius: 4, outline: 'none',
+        }}
+        placeholder="Bạn là Hermes, AI marketing assistant..."
+      />
+      <div className="mt-3 flex gap-2">
+        <button
+          onClick={() => saveMut.mutate()}
+          disabled={!dirty || saveMut.isPending}
+          className="btn-hermes"
+        >
+          {saveMut.isPending ? 'Đang lưu…' : 'Lưu SOUL'}
+        </button>
+        <button
+          onClick={() => { setDraft(data?.content || ''); }}
+          disabled={!dirty}
+          className="btn-ghost"
+        >
+          Hoàn tác
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ───────────────────────────────────────────────────────────
+// SECTION: DECISIONS — all hermes_decisions across campaigns
+// ───────────────────────────────────────────────────────────
+function DecisionsSection() {
+  const nav = useNavigate()
+  const [outcomeFilter, setOutcomeFilter] = useState('')
+  const { data: resp, isLoading } = useQuery({
+    queryKey: ['hermes-decisions-global', outcomeFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: '100' })
+      if (outcomeFilter) params.set('outcome', outcomeFilter)
+      return (await api.get(`/ai-hermes/decisions?${params}`)).data
+    },
+    refetchInterval: 20000,
+  })
+  const rows = useMemo(() => {
+    const list = Array.isArray(resp) ? resp : Array.isArray(resp?.data) ? resp.data : []
+    return list.filter(r => r.decision_type !== 'orchestration_summary')
+  }, [resp])
+
+  return (
+    <div className="p-6 font-mono-ui">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="text-[11px] uppercase tracking-wider text-app-muted">Decisions (global)</div>
+        <select
+          className="ml-auto px-2 py-1 text-xs"
+          style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 4 }}
+          value={outcomeFilter}
+          onChange={(e) => setOutcomeFilter(e.target.value)}
+        >
+          <option value="">Tất cả</option>
+          <option value="pending">Pending</option>
+          <option value="success">Success</option>
+          <option value="failed">Failed</option>
+        </select>
+      </div>
+      {isLoading ? (
+        <div className="text-app-muted text-sm">Đang tải…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-app-muted text-sm">Chưa có quyết định nào.</div>
+      ) : (
+        <table className="w-full text-xs">
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th className="text-left py-2 text-[10px] uppercase text-app-muted">Thời gian</th>
+              <th className="text-left py-2 text-[10px] uppercase text-app-muted">Loại</th>
+              <th className="text-left py-2 text-[10px] uppercase text-app-muted">Target</th>
+              <th className="text-left py-2 text-[10px] uppercase text-app-muted">Auto</th>
+              <th className="text-left py-2 text-[10px] uppercase text-app-muted">Outcome</th>
+              <th className="py-2 w-24"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const outcomeColor = r.outcome === 'pending' ? 'text-warn'
+                : r.outcome === 'failed' ? 'text-danger'
+                : r.outcome === 'success' || r.outcome === 'user_approved' ? 'text-hermes'
+                : 'text-app-muted'
+              return (
+                <tr key={r.id} className="hover-row" style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td className="py-2 text-app-muted tabular-nums">
+                    {new Date(r.created_at).toLocaleString('vi-VN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                  <td className="py-2">{r.action_type || r.decision_type}</td>
+                  <td className="py-2 text-app-muted truncate max-w-xs">{r.target_name || '—'}</td>
+                  <td className="py-2">{r.auto_applied ? '🤖' : '👤'}</td>
+                  <td className={`py-2 ${outcomeColor}`}>{r.outcome || '—'}</td>
+                  <td className="py-2">
+                    {r.campaign_id && (
+                      <button
+                        onClick={() => nav(`/campaigns/${r.campaign_id}?tab=hermes`)}
+                        className="text-hermes text-[10px] hover:underline"
+                      >
+                        Mở ↗
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+// ───────────────────────────────────────────────────────────
+// SECTION: LEARNING — self-improvement timeline
+// ───────────────────────────────────────────────────────────
+function LearningSection() {
+  const qc = useQueryClient()
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['hermes-learning-log'],
+    queryFn: async () => {
+      const r = await api.get('/ai-hermes/learning-log?limit=60')
+      return Array.isArray(r.data) ? r.data : (r.data?.data || [])
+    },
+    refetchInterval: 30000,
+  })
+  const runMut = useMutation({
+    mutationFn: async () => (await api.post('/ai-hermes/daily-review', {})).data,
+    onSuccess: () => {
+      toast.success('Daily review đã chạy')
+      qc.invalidateQueries({ queryKey: ['hermes-learning-log'] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
+  return (
+    <div className="p-6 font-mono-ui">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="text-[11px] uppercase tracking-wider text-app-muted">Nhật ký học tập</div>
+        <button
+          onClick={() => runMut.mutate()}
+          disabled={runMut.isPending}
+          className="ml-auto btn-hermes"
+        >
+          {runMut.isPending ? 'Đang chạy (~20s)…' : 'Run Daily Review Now'}
+        </button>
+      </div>
+      {isLoading ? (
+        <div className="text-app-muted text-sm">Đang tải…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-app-muted text-sm">
+          Chưa có nhật ký. Cron tự chạy lúc 23:00 VN hàng ngày, hoặc bấm nút trên.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rows.map(r => {
+            const decision = r.decision || {}
+            const review = decision.review || {}
+            const applied = decision.applied || {}
+            return (
+              <div
+                key={r.id}
+                className="p-3"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4 }}
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-[10px] text-app-muted tabular-nums">
+                    {new Date(r.created_at).toLocaleString('vi-VN')}
+                  </span>
+                  <span className="text-xs">🧠 Self-review {decision.date || ''}</span>
+                  {applied.skills_rewritten?.length > 0 && (
+                    <span className="text-[10px] px-2 py-0.5 text-hermes" style={{ background: 'var(--hermes-dim)', borderRadius: 4 }}>
+                      +{applied.skills_rewritten.length} skill rewrites
+                    </span>
+                  )}
+                  {applied.feedback_purged > 0 && (
+                    <span className="text-[10px] px-2 py-0.5 text-warn" style={{ background: 'rgba(249,115,22,0.1)', borderRadius: 4 }}>
+                      purged {applied.feedback_purged}
+                    </span>
+                  )}
+                </div>
+                {r.outcome_detail && (
+                  <div className="text-sm text-app-primary mb-2">"{r.outcome_detail}"</div>
+                )}
+                {review.summary && review.summary !== r.outcome_detail && (
+                  <div className="text-xs text-app-muted mb-2">{review.summary}</div>
+                )}
+                {Array.isArray(review.insights) && review.insights.length > 0 && (
+                  <ul className="text-xs text-app-muted space-y-0.5 ml-4">
+                    {review.insights.map((s, i) => <li key={i}>• {s}</li>)}
+                  </ul>
+                )}
+                {applied.skills_rewritten?.length > 0 && (
+                  <div className="text-[10px] text-hermes mt-2">
+                    Rewrote: {applied.skills_rewritten.map(s => s.task_type).join(', ')}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ───────────────────────────────────────────────────────────
+// SECTION: REPORTS — AI-generated campaign reports
+// ───────────────────────────────────────────────────────────
+function ReportsSection() {
+  const [campaignId, setCampaignId] = useState('')
+  const [report, setReport] = useState(null)
+
+  const { data: campaigns = [] } = useQuery({
+    queryKey: ['campaigns-for-reports'],
+    queryFn: async () => {
+      const r = await api.get('/campaigns')
+      return Array.isArray(r.data) ? r.data : (r.data?.data || [])
+    },
+  })
+
+  const genMut = useMutation({
+    mutationFn: async () => (await api.post(`/ai-hermes/report/${campaignId}`, {})).data,
+    onSuccess: (data) => { setReport(data); toast.success('Báo cáo đã tạo') },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
+  return (
+    <div className="p-6 font-mono-ui">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="text-[11px] uppercase tracking-wider text-app-muted">Weekly reports</div>
+      </div>
+      <div className="flex items-center gap-2 mb-4">
+        <select
+          value={campaignId}
+          onChange={(e) => { setCampaignId(e.target.value); setReport(null) }}
+          className="px-3 py-2 text-sm"
+          style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 4, minWidth: 280 }}
+        >
+          <option value="">— Chọn campaign —</option>
+          {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <button
+          onClick={() => genMut.mutate()}
+          disabled={!campaignId || genMut.isPending}
+          className="btn-hermes"
+        >
+          {genMut.isPending ? 'Đang tạo (~15s)…' : 'Tạo báo cáo'}
+        </button>
+      </div>
+      {report && (
+        <div
+          className="p-4 space-y-4 text-sm"
+          style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4 }}
+        >
+          {report.executive_summary && (
+            <div>
+              <div className="text-[10px] uppercase text-app-muted mb-1">Tóm tắt</div>
+              <div className="text-app-primary">{report.executive_summary}</div>
+            </div>
+          )}
+          {Array.isArray(report.highlights) && report.highlights.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase text-app-muted mb-1">Điểm nổi bật</div>
+              <ul className="space-y-1 ml-4">
+                {report.highlights.map((s, i) => <li key={i} className="text-hermes">• {s}</li>)}
+              </ul>
+            </div>
+          )}
+          {Array.isArray(report.issues) && report.issues.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase text-app-muted mb-1">Vấn đề</div>
+              <ul className="space-y-1 ml-4">
+                {report.issues.map((s, i) => <li key={i} className="text-warn">⚠ {s}</li>)}
+              </ul>
+            </div>
+          )}
+          {Array.isArray(report.recommendations) && report.recommendations.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase text-app-muted mb-1">Đề xuất</div>
+              <ul className="space-y-1 ml-4">
+                {report.recommendations.map((s, i) => <li key={i} className="text-info">→ {s}</li>)}
+              </ul>
+            </div>
+          )}
+          {report.next_week_plan && (
+            <div>
+              <div className="text-[10px] uppercase text-app-muted mb-1">Kế hoạch tuần tới</div>
+              <div className="text-app-primary italic">{report.next_week_plan}</div>
+            </div>
+          )}
+          <div className="pt-2 flex gap-2" style={{ borderTop: '1px solid var(--border)' }}>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(JSON.stringify(report, null, 2))
+                toast.success('Đã copy JSON')
+              }}
+              className="btn-ghost"
+            >
+              Copy JSON
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ───────────────────────────────────────────────────────────
 // Main page
 // ───────────────────────────────────────────────────────────
 const SECTIONS = [
-  { key: 'model',    label: '1. Model' },
-  { key: 'skills',   label: '2. Skills' },
-  { key: 'quality',  label: '3. Quality Gate' },
-  { key: 'fallback', label: '4. Fallback' },
-  { key: 'memory',   label: '5. Memory' },
+  { key: 'model',     label: 'Model' },
+  { key: 'skills',    label: 'Skills' },
+  { key: 'quality',   label: 'Quality' },
+  { key: 'fallback',  label: 'Fallback' },
+  { key: 'memory',    label: 'Memory' },
+  { key: 'soul',      label: 'SOUL' },
+  { key: 'decisions', label: 'Decisions' },
+  { key: 'learning',  label: 'Learning' },
+  { key: 'reports',   label: 'Reports' },
 ]
 
 export default function HermesSettings() {
@@ -744,11 +1095,15 @@ export default function HermesSettings() {
       </div>
 
       <div className="flex-1 overflow-auto">
-        {section === 'model'    && <ModelSection />}
-        {section === 'skills'   && <SkillsSection />}
-        {section === 'quality'  && <QualityGateSection />}
-        {section === 'fallback' && <FallbackSection />}
-        {section === 'memory'   && <MemorySection />}
+        {section === 'model'     && <ModelSection />}
+        {section === 'skills'    && <SkillsSection />}
+        {section === 'quality'   && <QualityGateSection />}
+        {section === 'fallback'  && <FallbackSection />}
+        {section === 'memory'    && <MemorySection />}
+        {section === 'soul'      && <SoulSection />}
+        {section === 'decisions' && <DecisionsSection />}
+        {section === 'learning'  && <LearningSection />}
+        {section === 'reports'   && <ReportsSection />}
       </div>
     </div>
   )
