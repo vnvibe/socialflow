@@ -24,6 +24,7 @@ const asArray = (d) => Array.isArray(d) ? d
 // ─── Tab: Overview ─────────────────────────────────────────
 function OverviewTab({ campaign, campaignId }) {
   const nav = useNavigate()
+  const [, setSearchParams] = useSearchParams()
   const { data: kpi } = useQuery({
     queryKey: ['campaigns', campaignId, 'kpi'],
     queryFn: async () => {
@@ -188,25 +189,51 @@ function OverviewTab({ campaign, campaignId }) {
             KPI today
           </div>
           <div style={{ border: '1px solid var(--border)' }}>
+            <div
+              className="flex items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-wider text-app-muted"
+              style={{ borderBottom: '1px solid var(--border)' }}
+            >
+              <span className="flex-1">Nick</span>
+              <span className="w-20 text-right">Likes</span>
+              <span className="w-24 text-right">Comments</span>
+              <span className="w-20 text-right">Posts</span>
+              <span className="w-20 text-right">FR</span>
+              <span className="w-20 text-right">Groups</span>
+              <span className="w-16 text-right">Status</span>
+            </div>
             {kpi.rows.slice(0, 10).map((row, i) => (
-              <div
+              <button
                 key={i}
-                className="flex items-center gap-4 px-4 py-2 text-xs"
+                type="button"
+                onClick={() => {
+                  // Jump to Hoạt động tab filtered by this nick
+                  setSearchParams({ tab: 'activity', account_id: row.account_id })
+                }}
+                className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-app-muted/10 text-left"
                 style={{ borderBottom: '1px solid var(--border)' }}
               >
                 <span className="flex-1 text-app-primary truncate">
-                  {row.nick_name || row.account_id?.slice(0, 8)}
+                  {row.username || row.nick_name || row.account_id?.slice(0, 8)}
                 </span>
-                <span className="text-app-muted">
-                  likes {row.done_likes || 0}/{row.target_likes || 0}
+                <span className="w-20 text-right text-app-muted font-mono-ui">
+                  {row.done_likes || 0}/{row.target_likes || 0}
                 </span>
-                <span className="text-app-muted">
-                  comments {row.done_comments || 0}/{row.target_comments || 0}
+                <span className="w-24 text-right text-app-muted font-mono-ui">
+                  {row.done_comments || 0}/{row.target_comments || 0}
                 </span>
-                <span className={row.kpi_met ? 'text-hermes' : 'text-app-muted'}>
+                <span className="w-20 text-right text-app-muted font-mono-ui">
+                  {row.done_posts || 0}/{row.target_posts || 0}
+                </span>
+                <span className="w-20 text-right text-app-muted font-mono-ui">
+                  {row.done_friend_requests || 0}/{row.target_friend_requests || 0}
+                </span>
+                <span className="w-20 text-right text-app-muted font-mono-ui">
+                  {row.done_group_joins || 0}/{row.target_group_joins || 0}
+                </span>
+                <span className={`w-16 text-right ${row.kpi_met ? 'text-hermes' : 'text-app-muted'}`}>
                   {row.kpi_met ? '✓ met' : '...'}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -640,11 +667,292 @@ function ExecutionTab({ campaignId }) {
   )
 }
 
+// ─── Tab: Hoạt động (per-action feed from campaign_activity_log) ──
+// Icon map — keep in sync with ACTION_LABELS below.
+const ACTION_ICON = {
+  like: '❤️',
+  comment: '💬',
+  opportunity_comment: '💬',
+  join_group: '👥',
+  friend_request: '🤝',
+  post: '📝',
+  visit_group: '👀',
+  ai_evaluate_posts: '🧠',
+  ai_evaluate_group: '🧠',
+  cookie_saved: '🍪',
+}
+const ACTION_LABEL = {
+  like: 'đã like bài',
+  comment: 'đã comment bài',
+  opportunity_comment: 'đã comment (ad)',
+  join_group: 'đã tham gia nhóm',
+  friend_request: 'đã gửi kết bạn',
+  post: 'đã đăng bài',
+  visit_group: 'đã vào nhóm',
+  ai_evaluate_posts: 'AI đánh giá bài',
+  ai_evaluate_group: 'AI đánh giá nhóm',
+  cookie_saved: 'đã lưu cookie',
+}
+const FILTERABLE_TYPES = [
+  { value: '',                    label: 'Tất cả' },
+  { value: 'comment',             label: 'Comment' },
+  { value: 'opportunity_comment', label: 'Comment (AD)' },
+  { value: 'like',                label: 'Like' },
+  { value: 'post',                label: 'Post' },
+  { value: 'join_group',          label: 'Join Group' },
+  { value: 'friend_request',      label: 'Friend Request' },
+]
+
+function fmtTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const today = new Date()
+  const sameDay = d.toDateString() === today.toDateString()
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  if (sameDay) return `${hh}:${mm}`
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mo} ${hh}:${mm}`
+}
+
+function ActivityRow({ row }) {
+  const d = row.details || {}
+  const icon = ACTION_ICON[row.action_type] || '•'
+  const label = ACTION_LABEL[row.action_type] || row.action_type
+  const targetName = row.target_name || d.group_name || d.profile_name || ''
+  const targetUrl = row.target_url || d.group_url || d.profile_url || null
+  const postUrl = d.post_url || null
+  const commentText = d.comment_text || null
+  const captionPreview = d.caption ? d.caption.slice(0, 120) : null
+  const dim = { color: 'var(--text-muted)' }
+  const statusDot = row.result_status === 'failed' ? '🔴' : row.result_status === 'skipped' ? '⚪' : '🟢'
+
+  return (
+    <div className="px-6 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="flex items-baseline gap-3">
+        <span className="font-mono-ui text-xs" style={dim}>{fmtTime(row.created_at)}</span>
+        <span>{statusDot}</span>
+        <span className="font-medium">{row.account_name || '—'}</span>
+      </div>
+      <div className="mt-1 text-sm">
+        <span className="mr-2">{icon}</span>
+        <span>{label}</span>
+        {targetName && (
+          <span>
+            {' '}
+            {row.action_type === 'friend_request' || row.action_type === 'post' ? '' : 'trong'}
+            {' '}<span style={{ fontWeight: 500 }}>{targetName}</span>
+          </span>
+        )}
+      </div>
+      {commentText && (
+        <div className="mt-1 text-sm" style={{ fontStyle: 'italic', ...dim }}>
+          "{commentText.length > 200 ? commentText.slice(0, 200) + '…' : commentText}"
+        </div>
+      )}
+      {captionPreview && !commentText && (
+        <div className="mt-1 text-sm" style={{ fontStyle: 'italic', ...dim }}>
+          "{captionPreview}{d.caption?.length > 120 ? '…' : ''}"
+        </div>
+      )}
+      {row.action_type === 'join_group' && typeof d.member_count === 'number' && (
+        <div className="mt-1 text-xs" style={dim}>
+          {d.member_count.toLocaleString('vi-VN')} thành viên
+        </div>
+      )}
+      {row.error_message || d.error ? (
+        <div className="mt-1 text-xs" style={{ color: 'var(--danger)' }}>
+          Lỗi: {row.error_message || d.error}
+        </div>
+      ) : null}
+      <div className="mt-2 flex gap-3 text-xs">
+        {postUrl && (
+          <a href={postUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--hermes)' }}>
+            Xem bài ↗
+          </a>
+        )}
+        {targetUrl && (
+          <a href={targetUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--hermes)' }}>
+            {row.action_type === 'friend_request' ? 'Xem profile ↗' : 'Xem nhóm ↗'}
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ActivityTab({ campaignId, campaign }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [filterType, setFilterType] = useState('')
+  const [filterToday, setFilterToday] = useState(true)
+  // Seed nick filter from ?account_id= in URL (KPI click-through from Overview)
+  const [filterAccountId, setFilterAccountId] = useState(searchParams.get('account_id') || '')
+  const [limit, setLimit] = useState(50)
+
+  // Keep URL param in sync with dropdown so back-button works
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams)
+    if (filterAccountId) next.set('account_id', filterAccountId)
+    else next.delete('account_id')
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true })
+  }, [filterAccountId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { data: resp, isLoading } = useQuery({
+    queryKey: ['campaign-activity-log', campaignId, filterType, filterToday, filterAccountId, limit],
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      params.set('limit', String(limit))
+      if (filterType) params.set('action_type', filterType)
+      if (filterAccountId) params.set('account_id', filterAccountId)
+      if (filterToday) {
+        const start = new Date()
+        start.setHours(0, 0, 0, 0)
+        params.set('date_from', start.toISOString())
+      }
+      const r = await api.get(`/campaigns/${campaignId}/activity-log?${params}`)
+      return r.data
+    },
+    refetchInterval: 10000,
+  })
+
+  const rows = useMemo(() => {
+    const list = Array.isArray(resp?.items) ? resp.items
+      : Array.isArray(resp?.data) ? resp.data
+      : Array.isArray(resp) ? resp : []
+    // Only show user-facing actions (skip ops_monitor, daily_plan, etc. system chatter)
+    const keep = new Set(Object.keys(ACTION_ICON))
+    return list.filter(r => keep.has(r.action_type))
+  }, [resp])
+
+  function exportCsv() {
+    if (!rows.length) return
+    const esc = (v) => {
+      if (v == null) return ''
+      const s = String(v).replace(/"/g, '""')
+      return /[",\n]/.test(s) ? `"${s}"` : s
+    }
+    const header = ['Thời gian', 'Nick', 'Hành động', 'Target', 'Link', 'Nội dung', 'Status']
+    const lines = [header.join(',')]
+    for (const r of rows) {
+      const d = r.details || {}
+      const link = d.post_url || r.target_url || d.profile_url || ''
+      const content = d.comment_text || d.caption || ''
+      lines.push([
+        r.created_at,
+        r.account_name,
+        ACTION_LABEL[r.action_type] || r.action_type,
+        r.target_name || '',
+        link,
+        content,
+        r.result_status,
+      ].map(esc).join(','))
+    }
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const safeName = (campaign?.name || 'campaign').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_')
+    const dateStr = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `campaign_activity_${safeName}_${dateStr}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Pull account list for filter dropdown
+  const accountIdsInRows = useMemo(() => {
+    const m = new Map()
+    for (const r of rows) {
+      if (r.account_id && !m.has(r.account_id)) m.set(r.account_id, r.account_name)
+    }
+    return [...m.entries()]
+  }, [rows])
+
+  return (
+    <div className="flex flex-col h-full">
+      <div
+        className="flex items-center gap-3 px-6 py-3 flex-wrap"
+        style={{ borderBottom: '1px solid var(--border)' }}
+      >
+        <span className="font-medium text-sm">Hoạt động</span>
+        <select
+          className="px-2 py-1 rounded text-xs"
+          style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+          value={filterType}
+          onChange={(e) => setFilterType(e.target.value)}
+        >
+          {FILTERABLE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+        <select
+          className="px-2 py-1 rounded text-xs"
+          style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+          value={filterToday ? 'today' : 'all'}
+          onChange={(e) => setFilterToday(e.target.value === 'today')}
+        >
+          <option value="today">Hôm nay</option>
+          <option value="all">Tất cả</option>
+        </select>
+        {accountIdsInRows.length > 0 && (
+          <select
+            className="px-2 py-1 rounded text-xs"
+            style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+            value={filterAccountId}
+            onChange={(e) => setFilterAccountId(e.target.value)}
+          >
+            <option value="">Tất cả nick</option>
+            {accountIdsInRows.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
+        )}
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-xs font-mono-ui" style={{ color: 'var(--text-muted)' }}>
+            {rows.length} hoạt động
+          </span>
+          <button
+            onClick={exportCsv}
+            disabled={!rows.length}
+            className="px-3 py-1 rounded text-xs"
+            style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+          >
+            Export CSV
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-auto">
+        {isLoading ? (
+          <div className="p-8 text-center font-mono-ui text-xs" style={{ color: 'var(--text-muted)' }}>
+            Đang tải…
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="p-8 text-center font-mono-ui text-xs" style={{ color: 'var(--text-muted)' }}>
+            Chưa có hoạt động nào.
+          </div>
+        ) : (
+          <>
+            {rows.map(r => <ActivityRow key={r.id} row={r} />)}
+            {rows.length >= limit && (
+              <div className="p-4 text-center">
+                <button
+                  onClick={() => setLimit(l => l + 50)}
+                  className="px-4 py-2 rounded text-sm"
+                  style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+                >
+                  Tải thêm 50 hoạt động
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Tabs config ───────────────────────────────────────────
 const TABS = [
   { key: 'overview',  label: 'Overview' },
   { key: 'agents',    label: 'Agents' },
   { key: 'execution', label: 'Execution' },
+  { key: 'activity',  label: 'Hoạt động' },
   { key: 'content',   label: 'Content' },
   { key: 'groups',    label: 'Nhóm' },
   { key: 'data',      label: 'Data' },
@@ -1116,6 +1424,7 @@ export default function CampaignHub() {
         {tab === 'overview'  && <OverviewTab campaign={campaign} campaignId={id} />}
         {tab === 'agents'    && <AgentsTab campaign={campaign} />}
         {tab === 'execution' && <ExecutionTab campaignId={id} />}
+        {tab === 'activity'  && <ActivityTab campaignId={id} campaign={campaign} />}
         {tab === 'content'   && <ContentTab campaignId={id} />}
         {tab === 'groups'    && <GroupsTab campaignId={id} />}
         {tab === 'data'      && <DataTab campaignId={id} />}
