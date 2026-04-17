@@ -217,14 +217,14 @@ async function executeAction(action, campaignId, context, supabase) {
       if (!nick) return { ok: false, detail: 'nick not found in context' }
       if (nick.active_job) return { ok: false, detail: 'nick already has active job' }
 
-      // Find the role for this nick in this campaign
-      const { data: roleRow } = await supabase
+      // Find the role for this nick in this campaign.
+      // pg-supabase wrapper doesn't implement .contains() for arrays, so pull
+      // all roles for the campaign and filter in JS.
+      const { data: roles } = await supabase
         .from('campaign_roles')
-        .select('id')
+        .select('id, account_ids')
         .eq('campaign_id', campaignId)
-        .contains('account_ids', [accId])
-        .limit(1)
-        .maybeSingle()
+      const roleRow = (roles || []).find(r => (r.account_ids || []).includes(accId))
 
       const { data: inserted, error } = await supabase
         .from('jobs')
@@ -272,14 +272,15 @@ async function executeAction(action, campaignId, context, supabase) {
         || (context.nicks || []).find(n => n.status === 'healthy')?.id
       if (!accountId) return { ok: false, detail: 'no healthy nick available to recheck from' }
 
-      // Dedup: skip if a pending membership check already exists
-      const { count: existing } = await supabase
+      // Dedup: skip if a pending membership check already exists for this group.
+      // pg-supabase doesn't support jsonb contains — filter client-side.
+      const { data: existingJobs } = await supabase
         .from('jobs')
-        .select('id', { count: 'exact', head: true })
+        .select('id, payload')
         .eq('type', 'check_group_membership')
         .in('status', ['pending', 'running', 'claimed'])
-        .contains('payload', { group_row_id: action.target_id })
-      if ((existing || 0) > 0) return { ok: false, detail: 'check already queued' }
+      const dup = (existingJobs || []).some(j => j.payload?.group_row_id === action.target_id)
+      if (dup) return { ok: false, detail: 'check already queued' }
 
       const { error } = await supabase.from('jobs').insert({
         type: 'check_group_membership',
