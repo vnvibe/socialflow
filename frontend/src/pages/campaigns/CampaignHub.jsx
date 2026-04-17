@@ -196,7 +196,6 @@ function OverviewTab({ campaign, campaignId }) {
               <span className="flex-1">Nick</span>
               <span className="w-20 text-right">Likes</span>
               <span className="w-24 text-right">Comments</span>
-              <span className="w-20 text-right">Posts</span>
               <span className="w-20 text-right">FR</span>
               <span className="w-20 text-right">Groups</span>
               <span className="w-16 text-right">Status</span>
@@ -220,9 +219,6 @@ function OverviewTab({ campaign, campaignId }) {
                 </span>
                 <span className="w-24 text-right text-app-muted font-mono-ui">
                   {row.done_comments || 0}/{row.target_comments || 0}
-                </span>
-                <span className="w-20 text-right text-app-muted font-mono-ui">
-                  {row.done_posts || 0}/{row.target_posts || 0}
                 </span>
                 <span className="w-20 text-right text-app-muted font-mono-ui">
                   {row.done_friend_requests || 0}/{row.target_friend_requests || 0}
