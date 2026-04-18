@@ -22,19 +22,36 @@ class AIOrchestrator {
     const config = { ...this.getFunctionConfig(functionName), ...overrideConfig }
     const providers = [config.provider, ...this.fallbackChain.filter(p => p !== config.provider)]
 
+    // Learning functions MUST go through Hermes (self-learning skills + memory).
+    // Falling back to DeepSeek silently bypasses the learning loop → at scale
+    // (10+ nicks) this causes spam because evaluation doesn't improve over time.
+    const HERMES_STRICT = new Set(['relevance_review', 'comment_gen', 'quality_gate', 'profile_eval', 'group_eval', 'post_strategy'])
+    const strictHermes = HERMES_STRICT.has(functionName) && config.provider === 'hermes'
+
+    let lastErr = null
     for (const providerName of providers) {
       const providerConfig = this.providers[providerName]
       if (!providerConfig?.enabled || !providerConfig?.api_key) continue
 
+      // Strict mode: if Hermes is the intended provider, never fall back.
+      if (strictHermes && providerName !== 'hermes') {
+        console.warn(`[ORCHESTRATOR] ${functionName} strict-Hermes: refusing fallback to ${providerName} (last err: ${lastErr?.status || lastErr?.message || 'n/a'})`)
+        throw lastErr || new Error(`Hermes unavailable for ${functionName} (strict mode)`)
+      }
+
       try {
-        return await this.callProvider(providerName, providerConfig, config.model, messages, config.max_tokens, functionName, config)
+        const result = await this.callProvider(providerName, providerConfig, config.model, messages, config.max_tokens, functionName, config)
+        return { ...result, provider: providerName }
       } catch (err) {
-        if (err.status === 429 || err.status >= 500) continue
+        lastErr = err
+        const reason = err.status ? `HTTP ${err.status}` : (err.name === 'AbortError' ? 'timeout' : err.message)
+        console.warn(`[ORCHESTRATOR] ${functionName} via ${providerName} failed: ${reason}`)
+        if (err.status === 429 || err.status >= 500 || err.name === 'AbortError') continue
         throw err
       }
     }
 
-    throw new Error('All AI providers are unavailable')
+    throw lastErr || new Error('All AI providers are unavailable')
   }
 
   async callProvider(providerName, providerConfig, model, messages, maxTokens, functionName, config = {}) {

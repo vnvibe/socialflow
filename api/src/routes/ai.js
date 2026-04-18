@@ -102,6 +102,7 @@ module.exports = async (fastify) => {
 
       return {
         text: result.text,
+        provider: result.provider,
         tokens: { input: result.inputTokens, output: result.outputTokens }
       }
     } catch (err) {

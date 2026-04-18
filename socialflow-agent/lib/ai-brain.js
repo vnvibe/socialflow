@@ -235,6 +235,10 @@ CHỈ trả về JSON, không giải thích.`
     })
 
     const text = res.data?.text || res.data?.result || ''
+    const provider = res.data?.provider || 'unknown'
+    if (provider !== 'hermes') {
+      console.warn(`[AI-BRAIN] evaluatePosts ran on ${provider} (expected hermes) — learning loop bypassed`)
+    }
     const match = text.match(/\[[\s\S]*\]/)
     if (match) {
       const results = JSON.parse(match[0])
