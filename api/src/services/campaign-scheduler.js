@@ -102,7 +102,129 @@ function initScheduler() {
     catch (err) { console.error('[AUTO-APPLY-CRON] error:', err.message) }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
-  console.log('[SCHEDULER] Campaign + Role + Engagement + Monitoring + Scout + Membership + AutoApply scheduler started')
+  // ── Weekly group re-evaluation: Sunday 02:00 VN ──────────────────────
+  // Groups we already joined may have drifted (spam creep, topic shift,
+  // engagement died). Re-score against the current campaign topic; if the
+  // new score is <4, downgrade to tier D + pause the junction row so nurture
+  // stops visiting. Uses Hermes `group_evaluator` skill (same one scout uses).
+  cron.schedule('0 2 * * 0', async () => {
+    try { await reevaluateStaleGroups() }
+    catch (err) { console.error('[GROUP-REEVAL] error:', err.message) }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
+  console.log('[SCHEDULER] Campaign + Role + Engagement + Monitoring + Scout + Membership + AutoApply + WeeklyGroupReeval scheduler started')
+}
+
+// ─── Weekly re-evaluation of joined groups ───────────────────────────────
+// Queries groups we're a member of that haven't been re-scored in 7+ days and
+// asks Hermes to re-score them. If score drops <4, downgrade tier + pause
+// campaign_groups status so nurture stops visiting.
+async function reevaluateStaleGroups() {
+  const HERMES_URL = process.env.HERMES_URL || 'http://127.0.0.1:8100'
+  const AGENT_SECRET = process.env.AGENT_SECRET
+  if (!AGENT_SECRET) {
+    console.warn('[GROUP-REEVAL] AGENT_SECRET not set, skipping')
+    return
+  }
+
+  const staleCutoff = new Date(Date.now() - 7 * 86400000).toISOString()
+  // Pull up to 50 stale groups per run to avoid hammering Hermes. 50 × 15s
+  // per LLM call = ~12 min per run, well under the cron cadence.
+  const { data: rows, error } = await supabase
+    .from('campaign_groups')
+    .select('group_id, campaign_id, status, fb_groups!inner(id, fb_group_id, name, member_count, evaluated_at, topic, score_tier, ai_relevance), campaigns!inner(topic, owner_id)')
+    .eq('status', 'active')
+    .eq('fb_groups.is_member', true)
+    .or(`evaluated_at.is.null,evaluated_at.lt.${staleCutoff}`, { foreignTable: 'fb_groups' })
+    .limit(50)
+
+  if (error) {
+    console.error('[GROUP-REEVAL] query failed:', error.message)
+    return
+  }
+  if (!rows?.length) {
+    console.log('[GROUP-REEVAL] no stale groups')
+    return
+  }
+
+  let downgraded = 0
+  let refreshed = 0
+  let failed = 0
+
+  for (const r of rows) {
+    const g = r.fb_groups
+    const campaignTopic = r.campaigns?.topic || ''
+    if (!g || !campaignTopic) continue
+    try {
+      // Call Hermes group_evaluator via /agent/generate (same skill scout uses)
+      const res = await fetch(`${HERMES_URL}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Agent-Key': AGENT_SECRET },
+        body: JSON.stringify({
+          messages: [{
+            role: 'user',
+            content: JSON.stringify({
+              name: g.name,
+              member_count: g.member_count || 0,
+              group_type: 'unknown',
+              description: '',
+              keywords: (g.topic || '').split(/[,;]/).filter(Boolean),
+              post_frequency: 'unknown',
+              pending_days: null,
+              campaign_topic: campaignTopic,
+            }),
+          }],
+          max_tokens: 300,
+          temperature: 0.2,
+          task_type: 'group_evaluator',
+        }),
+        signal: AbortSignal.timeout(30000),
+      })
+      if (!res.ok) { failed++; continue }
+      const json = await res.json()
+      const text = json.text || ''
+      const match = text.match(/\{[\s\S]*\}/)
+      if (!match) { failed++; continue }
+      const result = JSON.parse(match[0])
+      const score = Number(result.score) || 0
+      const decision = result.decision || 'unknown'
+
+      const tier = score >= 8 ? 'A' : score >= 6 ? 'B' : score >= 4 ? 'C' : 'D'
+      const updates = {
+        score_tier: tier,
+        global_score: score,
+        evaluated_at: new Date().toISOString(),
+      }
+      // Merge into ai_relevance jsonb cache
+      const topicKey = campaignTopic.toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
+      const prev = g.ai_relevance || {}
+      prev[topicKey] = {
+        score, decision, relevant: score >= 5,
+        reason: (result.reason || '').slice(0, 300),
+        evaluated_at: new Date().toISOString(),
+        source: 'weekly_reeval',
+      }
+      updates.ai_relevance = prev
+
+      await supabase.from('fb_groups').update(updates).eq('id', g.id)
+
+      if (score < 4) {
+        // Pause the junction — nurture won't see this group anymore
+        await supabase.from('campaign_groups')
+          .update({ status: 'paused', tier: 'D' })
+          .eq('campaign_id', r.campaign_id)
+          .eq('group_id', r.group_id)
+        downgraded++
+      } else {
+        refreshed++
+      }
+    } catch (err) {
+      failed++
+      console.warn(`[GROUP-REEVAL] ${g.name}: ${err.message}`)
+    }
+  }
+
+  console.log(`[GROUP-REEVAL] done: ${refreshed} refreshed, ${downgraded} downgraded to D, ${failed} failed (of ${rows.length})`)
 }
 
 // ─── Auto-apply Hermes Review for enabled campaigns ──────────────────────

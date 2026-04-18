@@ -116,10 +116,84 @@ async function buildOrchestrationContext(campaignId, supabase) {
       }
     }
 
+    // ── Checkpoint-risk signal (per nick) ──────────────────
+    // Hermes uses this to PROACTIVELY throttle before the nick actually dies.
+    // Three inputs:
+    //   1. recent_checkpoints_7d — how many times this nick failed with
+    //      CHECKPOINT/SESSION_EXPIRED in the last 7 days (from job_failures)
+    //   2. avg_gap_seconds — average time between the nick's last 10 actions
+    //      (too fast = bot-like → higher risk)
+    //   3. patterns — any ai_pilot_memory.checkpoint_pattern rows Hermes has
+    //      previously deduced for this nick
+    const since7d = new Date(Date.now() - 7 * 86400000).toISOString()
+    const riskByNick = new Map()
+    try {
+      // 1. Checkpoint failures per nick (last 7d)
+      const { data: failRows } = await supabase
+        .from('job_failures')
+        .select('account_id, error_type')
+        .gte('created_at', since7d)
+        .in('error_type', ['CHECKPOINT', 'SESSION_EXPIRED'])
+      for (const r of failRows || []) {
+        const e = riskByNick.get(r.account_id) || { recent_checkpoints_7d: 0 }
+        e.recent_checkpoints_7d = (e.recent_checkpoints_7d || 0) + 1
+        riskByNick.set(r.account_id, e)
+      }
+
+      // 2. Avg gap between last 10 actions (per nick)
+      const { data: recentActions } = await supabase
+        .from('campaign_activity_log')
+        .select('account_id, created_at')
+        .in('account_id', [...allAccountIds])
+        .gte('created_at', new Date(Date.now() - 2 * 3600 * 1000).toISOString())
+        .order('created_at', { ascending: false })
+      const actionsByNick = new Map()
+      for (const row of recentActions || []) {
+        if (!row.account_id) continue
+        const arr = actionsByNick.get(row.account_id) || []
+        if (arr.length < 10) arr.push(new Date(row.created_at).getTime())
+        actionsByNick.set(row.account_id, arr)
+      }
+      for (const [accId, times] of actionsByNick.entries()) {
+        if (times.length < 2) continue
+        const gaps = []
+        for (let i = 0; i < times.length - 1; i++) gaps.push((times[i] - times[i + 1]) / 1000)
+        const avgGap = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length)
+        const e = riskByNick.get(accId) || {}
+        e.avg_gap_seconds = avgGap
+        e.sample_size = gaps.length
+        riskByNick.set(accId, e)
+      }
+
+      // 3. Hermes-learned patterns for each nick
+      const { data: memRows } = await supabase
+        .from('ai_pilot_memory')
+        .select('account_id, key, value, confidence, evidence_count')
+        .in('account_id', [...allAccountIds])
+        .eq('memory_type', 'checkpoint_pattern')
+        .order('evidence_count', { ascending: false })
+      for (const m of memRows || []) {
+        const e = riskByNick.get(m.account_id) || {}
+        if (!e.patterns) e.patterns = []
+        if (e.patterns.length < 3) {
+          e.patterns.push({
+            key: m.key,
+            cause: m.value?.primary_cause,
+            confidence: m.confidence,
+            evidence_count: m.evidence_count,
+          })
+        }
+        riskByNick.set(m.account_id, e)
+      }
+    } catch (err) {
+      console.warn(`[ORCHESTRATOR] checkpoint_risk compute failed: ${err.message}`)
+    }
+
     nicks = (accounts || []).map(a => {
       const jobStats = jobsByNick.get(a.id) || { done: 0, failed: 0, active: null }
       const idleMs = a.last_used_at ? Date.now() - new Date(a.last_used_at).getTime() : Infinity
       const idleMinutes = isFinite(idleMs) ? Math.floor(idleMs / 60000) : 999
+      const risk = riskByNick.get(a.id) || {}
       return {
         id: a.id,
         username: a.username,
@@ -131,6 +205,12 @@ async function buildOrchestrationContext(campaignId, supabase) {
         active_job: jobStats.active,
         idle_minutes: idleMinutes,
         hermes_score: null, // filled by score service if present
+        checkpoint_risk: {
+          recent_checkpoints_7d: risk.recent_checkpoints_7d || 0,
+          avg_gap_seconds: risk.avg_gap_seconds ?? null,
+          sample_size: risk.sample_size || 0,
+          patterns: risk.patterns || [],
+        },
       }
     })
   }
@@ -289,6 +369,32 @@ async function executeAction(action, campaignId, context, supabase) {
         return { ok: false, detail: `${jobType} for nick already queued <30min` }
       }
 
+      // Rest-state gate: the poller enforces a 45-120min rest after each
+      // 25-45min session. If we assign during rest, the job just sits pending
+      // until rest ends — wasteful + clogs the queue. Use the DB as ground
+      // truth (we don't have a nick_session_state table): if the most recent
+      // done/failed job finished < 45 minutes ago, skip.
+      try {
+        const { data: lastDone } = await supabase
+          .from('jobs')
+          .select('finished_at, status')
+          .eq('payload->>account_id', accId)
+          .in('status', ['done', 'failed'])
+          .order('finished_at', { ascending: false })
+          .limit(1)
+        const last = lastDone?.[0]
+        if (last?.finished_at) {
+          const restedMs = Date.now() - new Date(last.finished_at).getTime()
+          const restedMin = Math.floor(restedMs / 60000)
+          if (restedMin < 45) {
+            return { ok: false, detail: `nick resting (${restedMin}/45 min since last job)` }
+          }
+        }
+      } catch (err) {
+        // Non-fatal — fall through to insert
+        console.warn(`[ORCHESTRATOR] rest-check failed: ${err.message}`)
+      }
+
       // Daily quota: cap creation per (nick, job_type, day) to match agent
       // drain rate. Without this, orchestrator + other crons would keep
       // queuing beyond what the 2-slot agent can process.
@@ -389,12 +495,48 @@ async function executeAction(action, campaignId, context, supabase) {
     }
 
     case 'pause_nick': {
+      // Supports temporary pause via action_detail.duration_hours — writes a
+      // resume_at timestamp so a future cron (or the orchestrator itself) can
+      // re-enable. If no duration, pauses indefinitely (user must manually resume).
+      const hours = Number(action.action_detail?.duration_hours) || null
+      const resumeAt = hours ? new Date(Date.now() + hours * 3600 * 1000).toISOString() : null
+      const updates = { is_active: false }
+      if (resumeAt) updates.notes = `orchestrator_pause_until:${resumeAt} — ${action.reason || ''}`.slice(0, 500)
       const { error } = await supabase
         .from('accounts')
-        .update({ is_active: false })
+        .update(updates)
         .eq('id', action.target_id)
       if (error) return { ok: false, detail: error.message }
-      return { ok: true, detail: 'nick paused (is_active=false)' }
+      return { ok: true, detail: resumeAt ? `paused until ${resumeAt}` : 'paused indefinitely' }
+    }
+
+    case 'decrease_budget': {
+      // Proactive throttle: multiply a specific budget field by a fraction.
+      // action_detail: { task_type: 'comment'|'like'|..., multiplier: 0.5 }
+      // Persists to accounts.daily_budget[task_type].max; new max is max(1, floor(current*multiplier)).
+      // Does NOT reset .used — just caps future creation.
+      const taskType = action.action_detail?.task_type
+      const mult = Number(action.action_detail?.multiplier)
+      if (!taskType || !(mult > 0 && mult <= 1)) {
+        return { ok: false, detail: 'task_type + multiplier (0-1) required' }
+      }
+      const { data: acc, error: readErr } = await supabase
+        .from('accounts')
+        .select('id, daily_budget, username')
+        .eq('id', action.target_id)
+        .single()
+      if (readErr || !acc) return { ok: false, detail: readErr?.message || 'nick not found' }
+      const budget = acc.daily_budget || {}
+      const slot = budget[taskType] || { used: 0, max: 10 }
+      const oldMax = slot.max || 10
+      const newMax = Math.max(1, Math.floor(oldMax * mult))
+      const newBudget = { ...budget, [taskType]: { ...slot, max: newMax } }
+      const { error: upErr } = await supabase
+        .from('accounts')
+        .update({ daily_budget: newBudget })
+        .eq('id', action.target_id)
+      if (upErr) return { ok: false, detail: upErr.message }
+      return { ok: true, detail: `${acc.username} ${taskType}.max ${oldMax} → ${newMax}` }
     }
 
     case 'alert_user': {
@@ -861,6 +1003,7 @@ async function runDailyReview(supabase) {
     quality_gate_updated: applied.quality_gate_updated,
     learning_log_entry: review.learning_log_entry,
     insights: review.insights || [],
+    checkpoint_patterns_applied: review.checkpoint_patterns_applied || [],
   }
 }
 
