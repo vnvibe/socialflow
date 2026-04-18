@@ -382,13 +382,17 @@ module.exports = async (fastify) => {
         .limit(200)
 
       const rows = activity || []
-      const activity_before_death = rows.map(r => ({
-        t: r.created_at?.slice(11, 16) || '',
-        action: r.action_type,
-        target: r.target_name || '',
-        status: r.result_status,
-        details: r.details || {},
-      }))
+      const activity_before_death = rows.map(r => {
+        // pg-supabase returns Date objects; supabase cloud returns ISO strings. Normalize.
+        const iso = r.created_at instanceof Date ? r.created_at.toISOString() : (r.created_at || '')
+        return {
+          t: typeof iso === 'string' ? iso.slice(11, 16) : '',
+          action: r.action_type,
+          target: r.target_name || '',
+          status: r.result_status,
+          details: r.details || {},
+        }
+      })
       const groupsSet = new Set()
       for (const r of rows) if (r.target_name) groupsSet.add(r.target_name)
 
