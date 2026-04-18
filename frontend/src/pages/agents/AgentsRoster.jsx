@@ -317,7 +317,7 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
               key={c.id}
               onClick={() => {
                 setTransferOpen(false)
-                toast.info(`Transfer logic TBD: ${nick.username} → ${c.name}`)
+                toast(`Transfer logic TBD: ${nick.username} → ${c.name}`)
               }}
               className="w-full text-left px-3 py-2 hover-row text-app-primary"
             >
@@ -657,7 +657,7 @@ function NickDetailPanel({ nick, onClose }) {
           <button
             className="btn-ghost"
             onClick={() => {
-              toast.info('Pause nick: TBD')
+              toast('Pause nick: TBD')
             }}
           >
             {nick.is_active ? 'PAUSE NICK' : 'RESUME NICK'}
