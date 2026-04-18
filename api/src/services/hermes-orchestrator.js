@@ -140,12 +140,19 @@ async function buildOrchestrationContext(campaignId, supabase) {
         riskByNick.set(r.account_id, e)
       }
 
-      // 2. Avg gap between last 10 actions (per nick)
+      // 2. Avg gap between last 10 COMMENTS (per nick). We used to average
+      // across all action types, but likes naturally come in quick bursts
+      // (2-5s apart when human scrolls and hearts) — that pulled the gap
+      // below 120s for legitimate healthy behavior and triggered pause_nick
+      // false positives. Comments are the signal that matters for spam
+      // detection anyway, and the agent already enforces 90s minGap between
+      // them, so normal baseline should be 90-180s.
       const { data: recentActions } = await supabase
         .from('campaign_activity_log')
-        .select('account_id, created_at')
+        .select('account_id, action_type, created_at')
         .in('account_id', [...allAccountIds])
-        .gte('created_at', new Date(Date.now() - 2 * 3600 * 1000).toISOString())
+        .in('action_type', ['comment', 'opportunity_comment'])
+        .gte('created_at', new Date(Date.now() - 6 * 3600 * 1000).toISOString())
         .order('created_at', { ascending: false })
       const actionsByNick = new Map()
       for (const row of recentActions || []) {
@@ -160,8 +167,8 @@ async function buildOrchestrationContext(campaignId, supabase) {
         for (let i = 0; i < times.length - 1; i++) gaps.push((times[i] - times[i + 1]) / 1000)
         const avgGap = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length)
         const e = riskByNick.get(accId) || {}
-        e.avg_gap_seconds = avgGap
-        e.sample_size = gaps.length
+        e.avg_comment_gap_seconds = avgGap
+        e.comment_sample_size = gaps.length
         riskByNick.set(accId, e)
       }
 
@@ -207,10 +214,20 @@ async function buildOrchestrationContext(campaignId, supabase) {
         hermes_score: null, // filled by score service if present
         checkpoint_risk: {
           recent_checkpoints_7d: risk.recent_checkpoints_7d || 0,
-          avg_gap_seconds: risk.avg_gap_seconds ?? null,
-          sample_size: risk.sample_size || 0,
+          avg_comment_gap_seconds: risk.avg_comment_gap_seconds ?? null,
+          comment_sample_size: risk.comment_sample_size || 0,
           patterns: risk.patterns || [],
         },
+        // Expose current budget caps so Hermes doesn't emit decrease_budget
+        // when the budget is already at floor (e.g., comment.max=1 → 1 no-op).
+        budget_caps: (() => {
+          const b = a.daily_budget || {}
+          const out = {}
+          for (const k of ['comment', 'like', 'post', 'friend_request', 'join_group']) {
+            if (b[k]?.max != null) out[k] = { used: b[k].used || 0, max: b[k].max }
+          }
+          return out
+        })(),
       }
     })
   }
@@ -529,7 +546,15 @@ async function executeAction(action, campaignId, context, supabase) {
       const budget = acc.daily_budget || {}
       const slot = budget[taskType] || { used: 0, max: 10 }
       const oldMax = slot.max || 10
+      // Guard: don't bother executing when already at or below the minimum floor.
+      // Caller's Hermes should skip this but belt-and-suspenders.
+      if (oldMax <= 1) {
+        return { ok: false, detail: `${acc.username} ${taskType}.max already at ${oldMax}, no-op` }
+      }
       const newMax = Math.max(1, Math.floor(oldMax * mult))
+      if (newMax >= oldMax) {
+        return { ok: false, detail: `${acc.username} ${taskType}.max ${oldMax} → ${newMax} (no reduction, skip)` }
+      }
       const newBudget = { ...budget, [taskType]: { ...slot, max: newMax } }
       const { error: upErr } = await supabase
         .from('accounts')

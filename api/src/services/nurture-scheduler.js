@@ -359,6 +359,37 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
+  // Auto-resume nicks whose orchestrator pause has expired.
+  // pause_nick with duration_hours writes accounts.notes = "orchestrator_pause_until:<iso>".
+  // Without this cron, the is_active=false sticks forever and the nick never
+  // comes back online automatically.
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      const { data: paused } = await supabase
+        .from('accounts')
+        .select('id, username, notes, status')
+        .eq('is_active', false)
+        .like('notes', 'orchestrator_pause_until:%')
+      const now = Date.now()
+      let resumed = 0
+      for (const a of paused || []) {
+        const m = (a.notes || '').match(/orchestrator_pause_until:([^\s—-]+)/)
+        if (!m) continue
+        const pauseUntil = new Date(m[1]).getTime()
+        if (!Number.isFinite(pauseUntil)) continue
+        if (pauseUntil > now) continue // still pausing
+        // Don't resume if the nick actually died since being paused (checkpoint/expired)
+        if (['checkpoint', 'expired', 'disabled', 'banned'].includes(a.status)) continue
+        await supabase.from('accounts').update({ is_active: true, notes: null }).eq('id', a.id)
+        console.log(`[ORCHESTRATOR] auto-resumed ${a.username} (pause expired)`)
+        resumed++
+      }
+      if (resumed > 0) console.log(`[ORCHESTRATOR] auto-resume: ${resumed} nicks back online`)
+    } catch (err) {
+      console.error('[ORCHESTRATOR] auto-resume error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // HERMES_ORCHESTRATOR.md — every 15 minutes, run Hermes Orchestrator on each
   // is_active campaign. Hermes decides: assign idle nicks to jobs, skip stale
   // pending groups, recheck recent pending groups, alert user on checkpoints,
