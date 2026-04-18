@@ -146,8 +146,18 @@ const STATUS_CACHE_TTL = 60000         // 1 min
 const MAX_HOURLY_ACTIONS = 50          // cumulative across all types
 // Randomized ranges — avoid fixed patterns that FB can detect
 const randBetween = (min, max) => Math.floor(min + Math.random() * (max - min))
-const randSessionMax = () => randBetween(25, 45) * 60 * 1000   // 25-45 min
-const randRestMs = () => randBetween(45, 120) * 60 * 1000      // 45-120 min
+const randSessionMax = () => randBetween(25, 45) * 60 * 1000   // 25-45 min session
+// Rest range shortened from 45-120 → 20-60. With only 2-3 healthy nicks the
+// old range meant both were frequently resting at the same time and the agent
+// sat idle 70% of the day. 20-60 keeps human-like randomness but bumps the
+// work ratio from ~30% to ~47%. See MIN_REST_BEFORE_STAGGER_EARLY_RELEASE
+// below for the accompanying smart-stagger path.
+const randRestMs = () => randBetween(20, 60) * 60 * 1000       // 20-60 min rest
+// Smart stagger: if a nick has already rested this long AND another healthy
+// nick is also currently resting, short-circuit the rest so at least one nick
+// stays working. Prevents the "both rest, agent does nothing" pattern that
+// kills throughput with a small nick pool.
+const MIN_REST_BEFORE_STAGGER_EARLY_RELEASE = 15 * 60 * 1000   // 15 min floor
 
 const JOB_ACTION_MAP = {
   post_page: 'post', post_page_graph: 'post', post_group: 'post', post_profile: 'post',
@@ -458,16 +468,32 @@ async function _pollInner() {
         }
       }
 
-      // Per-nick rest period (45-120min random gap)
+      // Per-nick rest period (20-60min random gap).
+      // Smart stagger: if another resting nick exists AND this nick has
+      // already rested >= 15 min, release early. Ensures with 2-3 healthy
+      // nicks we never have ALL of them in rest simultaneously.
       if (accId) {
         const rest = nickRestUntil.get(accId)
         if (rest && Date.now() < rest.until) {
-          const remainMin = Math.round((rest.until - Date.now()) / 60000)
-          if (!nickSessionStart.has(`${accId}_restlog`) || Date.now() - nickSessionStart.get(`${accId}_restlog`) > 300000) {
-            console.log(`[POLLER] Nick ${accId.slice(0,8)} resting (${remainMin}/${rest.durationMin}min)`)
-            nickSessionStart.set(`${accId}_restlog`, Date.now())
+          const restedMs = rest.durationMin * 60000 - (rest.until - Date.now())
+          // Check other nicks also resting
+          let othersResting = 0
+          for (const [otherId, otherRest] of nickRestUntil.entries()) {
+            if (otherId !== accId && otherRest.until > Date.now()) othersResting++
           }
-          continue
+          const canStaggerEarly = othersResting > 0 && restedMs >= MIN_REST_BEFORE_STAGGER_EARLY_RELEASE
+          if (canStaggerEarly) {
+            console.log(`[POLLER] Nick ${accId.slice(0,8)} early-release from rest (${Math.round(restedMs/60000)}min rested, ${othersResting} other nick${othersResting > 1 ? 's' : ''} also resting)`)
+            nickRestUntil.delete(accId)
+            // fall through to the rest of the per-nick gates
+          } else {
+            const remainMin = Math.round((rest.until - Date.now()) / 60000)
+            if (!nickSessionStart.has(`${accId}_restlog`) || Date.now() - nickSessionStart.get(`${accId}_restlog`) > 300000) {
+              console.log(`[POLLER] Nick ${accId.slice(0,8)} resting (${remainMin}/${rest.durationMin}min)`)
+              nickSessionStart.set(`${accId}_restlog`, Date.now())
+            }
+            continue
+          }
         }
         if (rest && Date.now() >= rest.until) nickRestUntil.delete(accId)
       }
