@@ -500,8 +500,10 @@ async function campaignNurture(payload, supabase) {
         // ═══ AI GROUP EVALUATION ═══
         // AI decides if group is relevant — replaces hardcoded keyword/language checks
         // If AI fails → skip this group THIS RUN (not failure, will retry next time)
-        // Cache result in ai_relevance for 7 days
-        const topicKey = topic.toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
+        // Cache result in ai_relevance for 7 days.
+        // Defensive: orchestrator-created jobs historically missed `topic` in
+        // payload → crashed on toLowerCase. Coerce to '' if undefined.
+        const topicKey = String(topic || '').toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50) || 'default'
         const cachedEval = group.ai_relevance?.[topicKey]
         const CACHE_TTL = 7 * 24 * 3600 * 1000
         const cacheValid = cachedEval?.evaluated_at && (Date.now() - new Date(cachedEval.evaluated_at).getTime()) < CACHE_TTL

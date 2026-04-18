@@ -325,8 +325,11 @@ async function buildOrchestrationContext(campaignId, supabase) {
       name: campaign.name,
       owner_id: campaign.owner_id || campaign.created_by || null,
       goal: campaign.goal || campaign.mission || null,
+      topic: campaign.topic || null,
+      mission: campaign.mission || null,
       hermes_context: campaign.hermes_context || null,
       brand_config: campaign.brand_config || null,
+      ad_mode: campaign.ad_mode || 'normal',
       status: campaign.is_active ? 'running' : 'paused',
       running_days: runningDays,
     },
@@ -357,13 +360,18 @@ async function recentJobExists(supabase, { accountId, jobType, windowMinutes = 3
 }
 
 // Build consistent payload for orchestrator-created jobs. Every job MUST carry
-// owner_id so the agent's activity logger can insert into campaign_activity_log
-// (owner_id is NOT NULL in schema). Observed bug: agent flushed null owner_id
-// and the whole batch rolled back.
+// owner_id + topic + mission etc. so the agent handler has the context it
+// needs. Observed bug: orchestrator jobs missed `topic` and campaign-nurture
+// crashed on `topic.toLowerCase()` at line 504 → 0 KPI across every session.
 function orchestratorPayload(context, extras = {}) {
+  const c = context.campaign || {}
   return {
-    campaign_id: context.campaign?.id,
-    owner_id: context.campaign?.owner_id || null,
+    campaign_id: c.id,
+    owner_id: c.owner_id || null,
+    topic: c.topic || null,
+    mission: c.mission || null,
+    brand_config: c.brand_config || null,
+    ad_mode: c.ad_mode || 'normal',
     orchestrator: true,
     ...extras,
   }
