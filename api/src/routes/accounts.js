@@ -73,6 +73,21 @@ module.exports = async (fastify) => {
     }
   })
 
+  // GET /accounts/:id/quota-today — today's daily job creation quota status
+  // Returns { [job_type]: { used, quota, remaining } } for per-nick UI badge.
+  fastify.get('/:id/quota-today', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {
+      return reply.code(403).send({ error: 'No access' })
+    }
+    try {
+      const { getQuotaStatus } = require('../services/nick-quota')
+      const status = await getQuotaStatus(supabase, req.params.id)
+      return status
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // GET /accounts/:id/health-signals — Recent signals for a specific account
   fastify.get('/:id/health-signals', { preHandler: fastify.authenticate }, async (req, reply) => {
     if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {

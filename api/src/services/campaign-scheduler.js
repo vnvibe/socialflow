@@ -309,6 +309,14 @@ async function createScoutJob(campaign, role, busyNickSet = new Set()) {
     ? [...new Set([...(campaign.topic ? [campaign.topic] : []), ...brandKeywords])]
     : null
 
+  // Daily quota gate — match agent drain rate
+  const { checkAndReserve } = require('./nick-quota')
+  const scoutQuota = await checkAndReserve(supabase, { accountId: pickedAccountId, jobType: 'campaign_discover_groups' })
+  if (!scoutQuota.ok) {
+    console.log(`[SCOUT-CRON] ${campaign.name}: nick ${pickedAccountId.slice(0, 8)} quota full (${scoutQuota.count}/${scoutQuota.quota}) — skip`)
+    return false
+  }
+
   const { error } = await supabase.from('jobs').insert({
     type: 'campaign_discover_groups',
     priority: getJobPriority('campaign_discover_groups'),
@@ -382,10 +390,22 @@ async function processMembershipChecks() {
   const queued = new Set((existingChecks || []).map(j => j.payload?.group_row_id).filter(Boolean))
 
   let created = 0
+  const { checkAndReserve } = require('./nick-quota')
   for (const r of pendingRows) {
     if (created >= slotsLeft) break // respect MEMBERSHIP_PENDING_CAP
     const fg = r.fb_groups
     if (!fg || queued.has(fg.id)) continue
+
+    // Per-nick quota check — if the assigned nick has hit its daily cap,
+    // skip this group today (will try again tomorrow).
+    if (r.assigned_nick_id) {
+      const qr = await checkAndReserve(supabase, { accountId: r.assigned_nick_id, jobType: 'check_group_membership' })
+      if (!qr.ok) {
+        console.log(`[MEMBERSHIP-CHECK] nick ${r.assigned_nick_id.slice(0, 8)} quota full (${qr.count}/${qr.quota}) — skip group ${fg.name}`)
+        continue
+      }
+    }
+
     const delayMs = 30 * 1000 + Math.random() * 150 * 1000
     // Audit 2026-04-12: priority 7 (was 3) — membership is janitorial, must
     // never beat user-facing campaign_nurture / friend_request work in poller.

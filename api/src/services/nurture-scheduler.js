@@ -163,6 +163,16 @@ async function processNurtureProfiles() {
         const remainComments = Math.max(0, profile.daily_comments - (profile.today_comments || 0))
         const remainStories = Math.max(0, profile.daily_story_views - (profile.today_stories || 0))
 
+        // Daily quota gate — independent of profile.daily_* KPIs because those
+        // are per-action maxes, not creation budgets. Prevents the every-5-min
+        // cron from piling nurture_feed jobs faster than the agent can run them.
+        const { checkAndReserve } = require('./nick-quota')
+        const nfQuota = await checkAndReserve(supabase, { accountId: acc.id, jobType: 'nurture_feed' })
+        if (!nfQuota.ok) {
+          console.log(`[NURTURE-SCHED] nick ${acc.id.slice(0,8)} nurture_feed quota full (${nfQuota.count}/${nfQuota.quota}) — skip`)
+          continue
+        }
+
         await supabase.from('jobs').insert({
           type: 'nurture_feed',
           priority: 3, // HIGH — main work
@@ -256,6 +266,10 @@ async function scheduleGroupMonitors() {
         // Create monitor job with jitter
         const scheduleDelay = Math.floor(Math.random() * 180) + 30 // 30s-3.5min
         const scheduledAt = new Date(now.getTime() + scheduleDelay * 1000).toISOString()
+
+        const { checkAndReserve: reserveMon } = require('./nick-quota')
+        const monQuota = await reserveMon(supabase, { accountId: acc.id, jobType: 'campaign_group_monitor' })
+        if (!monQuota.ok) continue
 
         await supabase.from('jobs').insert({
           type: 'campaign_group_monitor',
@@ -443,6 +457,15 @@ function initNurtureScheduler() {
       await supabase.from('account_health_signals')
         .delete()
         .lt('detected_at', new Date(Date.now() - 30 * 86400000).toISOString())
+
+      // Daily quota rows: purge >7 days (bounded storage for nick_daily_job_quota)
+      try {
+        const { purgeOld } = require('./nick-quota')
+        const purged = await purgeOld(supabase, { days: 7 })
+        if (purged > 0) console.log(`[CLEANUP] nick_daily_job_quota purged ${purged} old rows`)
+      } catch (qErr) {
+        console.warn(`[CLEANUP] quota purge failed: ${qErr.message}`)
+      }
     } catch (err) {
       console.error('[CLEANUP] Daily cleanup error:', err.message)
     }

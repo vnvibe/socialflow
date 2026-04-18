@@ -13,6 +13,7 @@
  */
 
 const { randomUUID } = require('crypto')
+const { checkAndReserve } = require('./nick-quota')
 
 const HERMES_URL = process.env.HERMES_URL || 'http://127.0.0.1:8100'
 const AGENT_SECRET = process.env.AGENT_SECRET
@@ -288,6 +289,14 @@ async function executeAction(action, campaignId, context, supabase) {
         return { ok: false, detail: `${jobType} for nick already queued <30min` }
       }
 
+      // Daily quota: cap creation per (nick, job_type, day) to match agent
+      // drain rate. Without this, orchestrator + other crons would keep
+      // queuing beyond what the 2-slot agent can process.
+      const quotaRes = await checkAndReserve(supabase, { accountId: accId, jobType })
+      if (!quotaRes.ok) {
+        return { ok: false, detail: `${jobType} daily quota exhausted (${quotaRes.count}/${quotaRes.quota})` }
+      }
+
       // Find the role for this nick in this campaign.
       // pg-supabase wrapper doesn't implement .contains() for arrays, so pull
       // all roles for the campaign and filter in JS.
@@ -351,6 +360,10 @@ async function executeAction(action, campaignId, context, supabase) {
         .in('status', ['pending', 'running', 'claimed'])
       const dup = (existingJobs || []).some(j => j.payload?.group_row_id === action.target_id)
       if (dup) return { ok: false, detail: 'check already queued' }
+
+      // Daily quota on the nick that will run the check
+      const qr = await checkAndReserve(supabase, { accountId, jobType: 'check_group_membership' })
+      if (!qr.ok) return { ok: false, detail: `check_group_membership daily quota exhausted (${qr.count}/${qr.quota})` }
 
       const { error } = await supabase.from('jobs').insert({
         type: 'check_group_membership',
@@ -713,6 +726,27 @@ async function buildReviewContext(supabase) {
     if (content) current_skill_prompts[t] = content
   }
 
+  // Recent checkpoint patterns — so self_reviewer can correlate skill/budget
+  // recommendations with what actually killed nicks lately.
+  let checkpoint_patterns = []
+  try {
+    const since7d = new Date(Date.now() - 7 * 86400000).toISOString()
+    const { data: patterns } = await supabase
+      .from('ai_pilot_memory')
+      .select('key, value, evidence_count, updated_at, account_id')
+      .eq('memory_type', 'checkpoint_pattern')
+      .gte('updated_at', since7d)
+      .order('evidence_count', { ascending: false })
+      .limit(20)
+    checkpoint_patterns = (patterns || []).map(p => ({
+      pattern: p.key,
+      occurrences: p.evidence_count || 1,
+      primary_cause: p.value?.primary_cause,
+      summary: p.value?.summary,
+      recommendations: p.value?.recommendations,
+    }))
+  } catch {}
+
   return {
     date: dateStr,
     calls_summary,
@@ -721,6 +755,7 @@ async function buildReviewContext(supabase) {
     jobs_stats: { ...jobs_stats, success_rate, top_error },
     comment_rejection,
     current_skill_prompts,
+    checkpoint_patterns,
   }
 }
 

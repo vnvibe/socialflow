@@ -352,6 +352,135 @@ module.exports = async (fastify) => {
     }
   })
 
+  // ─── Cookie-death analyzer (agent-auth) ──────────────────
+  // Called by the poller right after it confirms a nick is dead
+  // (checkpoint or session_expired). We pull the last N hours of
+  // campaign_activity_log + budget snapshot and send to Hermes for a
+  // postmortem. The analysis goes into ai_pilot_memory (for self-review
+  // aggregation) + hermes_decisions (for UI display).
+  fastify.post('/cookie-death', { preHandler: agentAuth }, async (req, reply) => {
+    const { account_id, death_type, death_message, window_hours = 2 } = req.body || {}
+    if (!account_id) return reply.code(400).send({ error: 'account_id required' })
+    const sb = fastify.supabase
+    try {
+      // 1. Account metadata
+      const { data: account } = await sb.from('accounts')
+        .select('id, username, created_at, fb_created_at, status, daily_budget')
+        .eq('id', account_id).single()
+      if (!account) return reply.code(404).send({ error: 'account not found' })
+
+      const ageDays = Math.floor((Date.now() - new Date(account.fb_created_at || account.created_at).getTime()) / 86400000)
+      const warmupPhase = ageDays < 7 ? 'week1' : ageDays < 30 ? 'young' : ageDays < 90 ? 'warming' : 'mature'
+
+      // 2. Activity log last N hours
+      const since = new Date(Date.now() - window_hours * 3600 * 1000).toISOString()
+      const { data: activity } = await sb.from('campaign_activity_log')
+        .select('action_type, target_name, target_url, result_status, details, created_at')
+        .eq('account_id', account_id)
+        .gte('created_at', since)
+        .order('created_at', { ascending: true })
+        .limit(200)
+
+      const rows = activity || []
+      const activity_before_death = rows.map(r => ({
+        t: r.created_at?.slice(11, 16) || '',
+        action: r.action_type,
+        target: r.target_name || '',
+        status: r.result_status,
+        details: r.details || {},
+      }))
+      const groupsSet = new Set()
+      for (const r of rows) if (r.target_name) groupsSet.add(r.target_name)
+
+      const input = {
+        nick: { username: account.username, age_days: ageDays, warmup_phase: warmupPhase, status: account.status },
+        death_at: new Date().toISOString(),
+        death_type: death_type || 'UNKNOWN',
+        death_message: (death_message || '').slice(0, 500),
+        activity_before_death,
+        budget_usage_at_death: account.daily_budget || {},
+        groups_visited_in_session: [...groupsSet].slice(0, 20),
+      }
+
+      // 3. Call Hermes
+      const { status, json } = await proxyToHermes('/generate', {
+        messages: [{ role: 'user', content: JSON.stringify(input) }],
+        max_tokens: 1500,
+        temperature: 0.3,
+        task_type: 'cookie_death_analyzer',
+      }, 60000)
+      if (status !== 200) return reply.code(status).send(json)
+
+      // Parse JSON from Hermes output
+      let analysis = null
+      try {
+        const raw = json.text || ''
+        const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
+        const body = fenced ? fenced[1] : raw
+        const start = body.indexOf('{')
+        if (start >= 0) analysis = JSON.parse(body.slice(start, body.lastIndexOf('}') + 1))
+      } catch {}
+      if (!analysis) return reply.code(502).send({ error: 'hermes returned unparseable JSON', raw: json.text?.slice(0, 300) })
+
+      // 4. Persist to ai_pilot_memory (for self-review aggregation)
+      if (analysis.pattern_key) {
+        try {
+          // Check existing
+          const { data: existing } = await sb.from('ai_pilot_memory')
+            .select('id, evidence_count, value')
+            .eq('account_id', account_id)
+            .eq('memory_type', 'checkpoint_pattern')
+            .eq('key', analysis.pattern_key)
+            .maybeSingle()
+          if (existing) {
+            await sb.from('ai_pilot_memory').update({
+              evidence_count: (existing.evidence_count || 1) + 1,
+              value: analysis,
+              updated_at: new Date().toISOString(),
+            }).eq('id', existing.id)
+          } else {
+            await sb.from('ai_pilot_memory').insert({
+              account_id,
+              memory_type: 'checkpoint_pattern',
+              key: analysis.pattern_key,
+              value: analysis,
+              confidence: (analysis.confidence || 5) / 10,
+              evidence_count: 1,
+            })
+          }
+        } catch (memErr) {
+          fastify.log.warn({ err: memErr }, '[COOKIE-DEATH] memory insert failed')
+        }
+      }
+
+      // 5. Persist to hermes_decisions for UI
+      try {
+        await sb.from('hermes_decisions').insert({
+          campaign_id: null,
+          decision_type: 'checkpoint_analysis',
+          action_type: death_type || 'UNKNOWN',
+          target_id: account_id,
+          target_name: account.username,
+          priority: 'high',
+          reason: analysis.summary || analysis.primary_cause,
+          context_summary: JSON.stringify({ activity_count: rows.length, groups: [...groupsSet].slice(0, 10) }),
+          decision: analysis,
+          auto_apply: false,
+          auto_applied: false,
+          outcome: 'success',
+          outcome_detail: analysis.summary || null,
+        })
+      } catch (decErr) {
+        fastify.log.warn({ err: decErr }, '[COOKIE-DEATH] decision insert failed')
+      }
+
+      return { ok: true, analysis, activity_count: rows.length }
+    } catch (err) {
+      fastify.log.error({ err }, '[COOKIE-DEATH] failed')
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // ─── Orchestrator routes ─────────────────────────────────
   // POST /ai-hermes/orchestrate/:campaign_id — one-shot run
   const orchestrator = require('../services/hermes-orchestrator')

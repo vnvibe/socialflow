@@ -33,6 +33,28 @@ function OverviewTab({ campaign, campaignId }) {
     refetchInterval: 60000,
   })
 
+  // Per-nick daily job quota usage — batched client-side since each account
+  // needs its own GET /accounts/:id/quota-today call. Quota matches agent
+  // drain rate; once a nick hits quota, schedulers stop creating jobs for it.
+  const { data: quotaMap = {} } = useQuery({
+    queryKey: ['campaigns', campaignId, 'nick-quotas', kpi?.rows?.map(r => r.account_id).join(',')],
+    queryFn: async () => {
+      const rows = kpi?.rows || []
+      if (!rows.length) return {}
+      const entries = await Promise.all(rows.map(async (r) => {
+        try {
+          const q = (await api.get(`/accounts/${r.account_id}/quota-today`)).data || {}
+          const totalUsed = Object.values(q).reduce((s, v) => s + (v.used || 0), 0)
+          const totalQuota = Object.values(q).reduce((s, v) => s + (v.quota || 0), 0)
+          return [r.account_id, { used: totalUsed, total: totalQuota, detail: q }]
+        } catch { return [r.account_id, null] }
+      }))
+      return Object.fromEntries(entries)
+    },
+    enabled: !!(kpi?.rows?.length),
+    refetchInterval: 60000,
+  })
+
   const roles = campaign?.campaign_roles || []
   const totalNicks = roles.reduce((s, r) => s + (r.account_ids?.length || 0), 0)
 
@@ -198,6 +220,7 @@ function OverviewTab({ campaign, campaignId }) {
               <span className="w-24 text-right">Comments</span>
               <span className="w-20 text-right">FR</span>
               <span className="w-20 text-right">Groups</span>
+              <span className="w-20 text-right" title="Jobs created today (all types) vs daily quota">Quota</span>
               <span className="w-16 text-right">Status</span>
             </div>
             {kpi.rows.slice(0, 10).map((row, i) => (
@@ -225,6 +248,19 @@ function OverviewTab({ campaign, campaignId }) {
                 </span>
                 <span className="w-20 text-right text-app-muted font-mono-ui">
                   {row.done_group_joins || 0}/{row.target_group_joins || 0}
+                </span>
+                <span
+                  className="w-20 text-right font-mono-ui"
+                  style={{
+                    color: quotaMap[row.account_id]
+                      ? (quotaMap[row.account_id].used / Math.max(1, quotaMap[row.account_id].total) > 0.8 ? 'var(--warn)' : 'var(--text-muted)')
+                      : 'var(--text-dim)'
+                  }}
+                  title={quotaMap[row.account_id]?.detail ? Object.entries(quotaMap[row.account_id].detail).map(([k, v]) => `${k}: ${v.used}/${v.quota}`).join('\n') : 'chưa có quota'}
+                >
+                  {quotaMap[row.account_id]
+                    ? `${quotaMap[row.account_id].used}/${quotaMap[row.account_id].total}`
+                    : '—'}
                 </span>
                 <span className={`w-16 text-right ${row.kpi_met ? 'text-hermes' : 'text-app-muted'}`}>
                   {row.kpi_met ? '✓ met' : '...'}
@@ -1026,6 +1062,7 @@ function HermesTab({ campaignId }) {
             <option value="">Tất cả</option>
             <option value="orchestration">Orchestration</option>
             <option value="self_improvement">Self-improvement</option>
+            <option value="checkpoint_analysis">Nick chết (phân tích)</option>
             <option value="reporter">Report</option>
           </select>
         </div>

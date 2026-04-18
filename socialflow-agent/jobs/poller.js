@@ -780,6 +780,28 @@ async function executeJob(job) {
       // Invalidate status cache immediately
       accountStatusCache.delete(job.payload.account_id)
 
+      // Fire-and-forget cookie-death postmortem — Hermes reads the last 2h of
+      // activity log + budget snapshot and stores a `checkpoint_pattern`
+      // memory + a `checkpoint_analysis` decision row. Poller does NOT wait
+      // for the result (analyzer runs ~10-30s).
+      try {
+        const API_URL = process.env.API_URL || process.env.API_BASE_URL
+        const AGENT_KEY = process.env.AGENT_SECRET_KEY
+        if (API_URL && AGENT_KEY) {
+          fetch(`${API_URL}/ai-hermes/cookie-death`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Agent-Key': AGENT_KEY },
+            body: JSON.stringify({
+              account_id: job.payload.account_id,
+              death_type: classified.type,
+              death_message: err.message.slice(0, 500),
+              window_hours: 2,
+            }),
+          }).then(r => r.ok && console.log(`[COOKIE-DEATH] postmortem fired for ${job.payload.account_id?.slice(0,8)}`))
+            .catch(e => console.warn(`[COOKIE-DEATH] fire failed: ${e.message}`))
+        }
+      } catch (e) { console.warn(`[COOKIE-DEATH] dispatch failed: ${e.message}`) }
+
       // Auto-queue health check to try refreshing cookie (only for SESSION_EXPIRED, not CHECKPOINT)
       if (classified.type === 'SESSION_EXPIRED') {
         try {
