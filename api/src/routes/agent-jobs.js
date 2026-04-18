@@ -25,7 +25,59 @@ module.exports = async (fastify) => {
   // Agent does local filtering (cooldowns, budgets, KPI gates, etc.)
   fastify.get('/pending', { preHandler: agentAuth }, async (req, reply) => {
     const { user_id, slots = 10, exclude_user_ids } = req.query
+    const pool = supabase._pool || null
 
+    // Fair scheduling: 1 job per nick, sorted by least-recently-active.
+    // Without this, nicks with big backlogs (e.g. Việt with 37 pending)
+    // monopolize the 2 agent slots, starving other nicks (Diệu Hiền with
+    // 6 pending waits forever). Rotation ensures every active nick gets
+    // a turn within one poll cycle.
+    if (pool) {
+      const args = []
+      const where = [`j.status = 'pending'`, `j.scheduled_at <= now()`]
+      if (user_id) {
+        args.push(user_id)
+        where.push(`j.created_by = $${args.length}`)
+      } else if (exclude_user_ids) {
+        const ids = exclude_user_ids.split(',').filter(Boolean)
+        if (ids.length > 0) {
+          const placeholders = ids.map(id => { args.push(id); return `$${args.length}` }).join(',')
+          where.push(`j.created_by NOT IN (${placeholders})`)
+        }
+      }
+      args.push(parseInt(slots))
+      const sql = `
+        WITH nick_activity AS (
+          SELECT
+            payload->>'account_id' AS account_id,
+            MAX(COALESCE(started_at, finished_at, created_at)) AS last_activity
+          FROM jobs
+          WHERE payload ? 'account_id'
+          GROUP BY payload->>'account_id'
+        ),
+        one_per_nick AS (
+          SELECT DISTINCT ON (j.payload->>'account_id')
+            j.*,
+            COALESCE(na.last_activity, '1970-01-01'::timestamptz) AS _last_activity
+          FROM jobs j
+          LEFT JOIN nick_activity na ON na.account_id = j.payload->>'account_id'
+          WHERE ${where.join(' AND ')}
+          ORDER BY j.payload->>'account_id' NULLS FIRST, j.priority ASC, j.scheduled_at ASC
+        )
+        SELECT * FROM one_per_nick
+        ORDER BY _last_activity ASC, priority ASC, scheduled_at ASC
+        LIMIT $${args.length}
+      `
+      try {
+        const { rows } = await pool.query(sql, args)
+        return rows
+      } catch (err) {
+        fastify.log.error({ err }, '[AGENT-JOBS] Fair-pending query failed')
+        // fall through to legacy path below
+      }
+    }
+
+    // Legacy fallback (when _pool unavailable or SQL fails)
     let query = supabase
       .from('jobs')
       .select('*')
@@ -35,11 +87,9 @@ module.exports = async (fastify) => {
       .order('scheduled_at', { ascending: true })
       .limit(parseInt(slots))
 
-    // Scope to specific user's jobs
     if (user_id) {
       query = query.eq('created_by', user_id)
     } else if (exclude_user_ids) {
-      // Comma-separated list of user IDs to exclude
       const ids = exclude_user_ids.split(',').filter(Boolean)
       if (ids.length > 0) {
         query = query.not('created_by', 'in', `(${ids.join(',')})`)

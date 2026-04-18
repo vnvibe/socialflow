@@ -155,23 +155,39 @@ async function processNurtureProfiles() {
           if (elapsed < Math.max(effectiveGap, 90)) continue // hard minimum 90 phút
         }
 
-        // 8. Create nurture_feed job with scheduling jitter
-        const scheduleDelay = Math.floor(Math.random() * 300) + 60 // 1-6 phút delay
-        const scheduledAt = new Date(now.getTime() + scheduleDelay * 1000).toISOString()
-
-        const remainReacts = Math.max(0, profile.daily_reacts - (profile.today_reacts || 0))
-        const remainComments = Math.max(0, profile.daily_comments - (profile.today_comments || 0))
-        const remainStories = Math.max(0, profile.daily_story_views - (profile.today_stories || 0))
-
-        // Daily quota gate — independent of profile.daily_* KPIs because those
-        // are per-action maxes, not creation budgets. Prevents the every-5-min
-        // cron from piling nurture_feed jobs faster than the agent can run them.
-        const { checkAndReserve } = require('./nick-quota')
+        // 8. Create nurture_feed job — spread scheduled_at evenly across active hours
+        //    (avoids dumping all day's quota as "do it NOW" which then starves
+        //    other nicks because agent picks oldest-first).
+        //    Gap = (active_window_hours * 60) / daily_quota, then stagger
+        //    behind any already-pending nurture_feed for the same nick.
+        const { checkAndReserve, getDefaultQuota } = require('./nick-quota')
         const nfQuota = await checkAndReserve(supabase, { accountId: acc.id, jobType: 'nurture_feed' })
         if (!nfQuota.ok) {
           console.log(`[NURTURE-SCHED] nick ${acc.id.slice(0,8)} nurture_feed quota full (${nfQuota.count}/${nfQuota.quota}) — skip`)
           continue
         }
+
+        const dailyQuota = getDefaultQuota('nurture_feed') || 4
+        const gapMinutes = Math.floor((12 * 60) / dailyQuota) // 12h window / quota
+        let pendingAhead = 0
+        try {
+          const pool = supabase._pool
+          if (pool) {
+            const { rows: cRows } = await pool.query(
+              `SELECT COUNT(*)::int AS c FROM jobs WHERE status='pending' AND type='nurture_feed' AND payload->>'account_id'=$1`,
+              [acc.id]
+            )
+            pendingAhead = cRows?.[0]?.c || 0
+          }
+        } catch { /* count is best-effort */ }
+
+        const jitterSec = Math.floor(Math.random() * 240) + 60 // 1-5 min
+        const spacedSec = pendingAhead * gapMinutes * 60
+        const scheduledAt = new Date(now.getTime() + (spacedSec + jitterSec) * 1000).toISOString()
+
+        const remainReacts = Math.max(0, profile.daily_reacts - (profile.today_reacts || 0))
+        const remainComments = Math.max(0, profile.daily_comments - (profile.today_comments || 0))
+        const remainStories = Math.max(0, profile.daily_story_views - (profile.today_stories || 0))
 
         await supabase.from('jobs').insert({
           type: 'nurture_feed',

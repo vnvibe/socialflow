@@ -86,17 +86,38 @@ async function getQuotaStatus(supabase, accountId, vnDate) {
        WHERE account_id = $1 AND date = $2`,
       [accountId, date]
     )
+    // Also count jobs done/pending/failed today per type — gives the UI a real
+    // KPI (target vs actual completions), not just "created count".
+    const vnDayStartSql = `date_trunc('day', (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')) AT TIME ZONE 'Asia/Ho_Chi_Minh'`
+    const { rows: jobRows } = await supabase._pool.query(
+      `SELECT type, status, COUNT(*)::int AS c
+       FROM jobs
+       WHERE payload->>'account_id' = $1 AND created_at >= ${vnDayStartSql}
+       GROUP BY type, status`,
+      [accountId]
+    )
+    const byType = {}
+    for (const r of jobRows) {
+      if (!byType[r.type]) byType[r.type] = { done: 0, pending: 0, failed: 0, running: 0, cancelled: 0, claimed: 0 }
+      byType[r.type][r.status] = r.c
+    }
     const out = {}
-    // Seed with defaults so UI can show quota even for types that haven't fired yet
     for (const [type, quota] of Object.entries(DEFAULT_QUOTAS)) {
-      out[type] = { used: 0, quota, remaining: quota }
+      const j = byType[type] || {}
+      out[type] = {
+        used: 0,
+        quota,
+        remaining: quota,
+        done: j.done || 0,
+        pending: (j.pending || 0) + (j.claimed || 0) + (j.running || 0),
+        failed: j.failed || 0,
+      }
     }
     for (const r of rows) {
-      out[r.job_type] = {
-        used: r.created_count,
-        quota: r.quota,
-        remaining: Math.max(0, r.quota - r.created_count),
-      }
+      if (!out[r.job_type]) out[r.job_type] = { used: 0, quota: r.quota, remaining: r.quota, done: 0, pending: 0, failed: 0 }
+      out[r.job_type].used = r.created_count
+      out[r.job_type].quota = r.quota
+      out[r.job_type].remaining = Math.max(0, r.quota - r.created_count)
     }
     return out
   } catch (err) {

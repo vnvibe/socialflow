@@ -530,6 +530,20 @@ function NickDetailPanel({ nick, onClose }) {
     refetchInterval: 10000,
   })
 
+  const { data: quotaToday = {} } = useQuery({
+    queryKey: ['nick-quota', nick?.id],
+    enabled: !!nick,
+    queryFn: async () => {
+      try {
+        const res = await api.get(`/accounts/${nick.id}/quota-today`)
+        return res.data || {}
+      } catch {
+        return {}
+      }
+    },
+    refetchInterval: 15000,
+  })
+
   // 7-day bar chart data
   const last7Days = useMemo(() => {
     const days = []
@@ -602,6 +616,40 @@ function NickDetailPanel({ nick, onClose }) {
                 <div className="text-[9px] text-app-primary">{d.count}</div>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Daily KPI — target vs done today */}
+        <div className="mb-4">
+          <div className="text-[10px] uppercase text-app-muted mb-2">KPI hôm nay (done / target)</div>
+          <div style={{ border: '1px solid var(--border)' }}>
+            {Object.keys(quotaToday).length === 0 ? (
+              <div className="p-3 text-app-muted text-center">No quota data</div>
+            ) : (
+              Object.entries(quotaToday)
+                .filter(([, v]) => v.quota > 0)
+                .map(([type, v]) => {
+                  const done = v.done || 0
+                  const pending = v.pending || 0
+                  const target = v.quota || 0
+                  const pctDone = target > 0 ? Math.min(100, (done / target) * 100) : 0
+                  const ok = done >= target
+                  return (
+                    <div key={type} className="flex items-center gap-3 px-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+                      <div className="text-app-primary flex-1 min-w-0 truncate">{type}</div>
+                      <div className="w-24 h-2" style={{ background: 'var(--bg-base)' }}>
+                        <div className="h-full" style={{ width: `${pctDone}%`, background: ok ? 'var(--hermes)' : 'var(--warn)' }} />
+                      </div>
+                      <div className={`w-16 text-right ${ok ? 'text-hermes' : 'text-app-primary'}`}>
+                        {done}/{target}
+                      </div>
+                      <div className="w-10 text-right text-app-muted">
+                        {pending > 0 ? `+${pending}` : ''}
+                      </div>
+                    </div>
+                  )
+                })
+            )}
           </div>
         </div>
 
