@@ -440,7 +440,7 @@ module.exports = async (fastify) => {
             await sb.from('ai_pilot_memory').update({
               evidence_count: (existing.evidence_count || 1) + 1,
               value: analysis,
-              updated_at: new Date().toISOString(),
+              last_updated_at: new Date().toISOString(),
             }).eq('id', existing.id)
           } else {
             await sb.from('ai_pilot_memory').insert({

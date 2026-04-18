@@ -733,9 +733,9 @@ async function buildReviewContext(supabase) {
     const since7d = new Date(Date.now() - 7 * 86400000).toISOString()
     const { data: patterns } = await supabase
       .from('ai_pilot_memory')
-      .select('key, value, evidence_count, updated_at, account_id')
+      .select('key, value, evidence_count, last_updated_at, account_id')
       .eq('memory_type', 'checkpoint_pattern')
-      .gte('updated_at', since7d)
+      .gte('last_updated_at', since7d)
       .order('evidence_count', { ascending: false })
       .limit(20)
     checkpoint_patterns = (patterns || []).map(p => ({
