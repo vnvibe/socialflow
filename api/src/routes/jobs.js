@@ -3,7 +3,26 @@ module.exports = async (fastify) => {
 
   // GET /jobs - List jobs with filters
   fastify.get('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { status, type, limit = 50, offset = 0 } = req.query
+    const { status, type, account_id, limit = 50, offset = 0 } = req.query
+
+    if (account_id) {
+      // Fallback path: pg-supabase wrapper doesn't support payload->>'account_id' filter,
+      // so drop to raw SQL via pool when caller wants jobs for a specific nick.
+      const pool = supabase._pool || null
+      if (pool) {
+        const parts = [`SELECT * FROM jobs WHERE created_by = $1 AND payload->>'account_id' = $2`]
+        const args = [req.user.id, account_id]
+        if (status) { args.push(status); parts.push(`AND status = $${args.length}`) }
+        if (type) { args.push(type); parts.push(`AND type = $${args.length}`) }
+        parts.push(`ORDER BY created_at DESC LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}`)
+        try {
+          const { rows } = await pool.query(parts.join(' '), args)
+          return rows
+        } catch (err) {
+          return reply.code(500).send({ error: err.message })
+        }
+      }
+    }
 
     let query = supabase
       .from('jobs')

@@ -521,8 +521,8 @@ function NickDetailPanel({ nick, onClose }) {
     enabled: !!nick,
     queryFn: async () => {
       try {
-        const res = await api.get(`/jobs?limit=50`)
-        return asArray(res.data).filter(j => j.payload?.account_id === nick.id).slice(0, 10)
+        const res = await api.get(`/jobs?limit=10&account_id=${nick.id}`)
+        return asArray(res.data)
       } catch {
         return []
       }
