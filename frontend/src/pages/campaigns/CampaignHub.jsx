@@ -274,56 +274,191 @@ function OverviewTab({ campaign, campaignId }) {
   )
 }
 
-// ─── Tab: Agents (campaign roles + accounts) ───────────────
+// ─── Tab: Agents — unified view (assignments + today KPI from Hermes) ─────
+// Source of truth merges three signals so the list is always accurate:
+//   1. campaign_roles[].account_ids  — explicit assignments (manual mode)
+//   2. campaign.account_ids          — top-level assignment (AI_PILOT mode)
+//   3. nick_kpi_daily rows (today)   — nicks Hermes has actually touched,
+//      even if no role row exists yet
+// Per-nick today KPI comes from /campaigns/:id/kpi-today (the same endpoint
+// the Overview KPI table uses) — do NOT introduce a separate per-nick stats
+// query, keep one source so numbers stay consistent across tabs.
 function AgentsTab({ campaign }) {
+  const qc = useQueryClient()
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  const campaignId = campaign?.id
   const roles = campaign?.campaign_roles || []
-  const allAccountIds = [...new Set(roles.flatMap(r => r.account_ids || []))]
+  const rolesAccountIds = roles.flatMap(r => r.account_ids || [])
+  const topLevelAccountIds = campaign?.account_ids || []
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts', 'all'],
     queryFn: async () => asArray((await api.get('/accounts')).data),
   })
 
+  const { data: kpiToday } = useQuery({
+    queryKey: ['campaigns', campaignId, 'kpi-agents'],
+    enabled: !!campaignId,
+    queryFn: async () => {
+      try { return (await api.get(`/campaigns/${campaignId}/kpi-today`)).data } catch { return null }
+    },
+    refetchInterval: 30000,
+  })
+
+  const kpiRows = kpiToday?.rows || []
+  const kpiByAccount = useMemo(() => Object.fromEntries(kpiRows.map(r => [r.account_id, r])), [kpiRows])
+
+  const allAccountIds = useMemo(() => {
+    const s = new Set([...rolesAccountIds, ...topLevelAccountIds, ...kpiRows.map(r => r.account_id)])
+    return [...s].filter(Boolean)
+  }, [rolesAccountIds.join(','), topLevelAccountIds.join(','), kpiRows.length])
+
   const assignedAccounts = accounts.filter(a => allAccountIds.includes(a.id))
+  const unassignedAccounts = accounts.filter(a => !allAccountIds.includes(a.id))
+
+  const saveAccounts = useMutation({
+    mutationFn: async (newIds) => {
+      await api.put(`/campaigns/${campaignId}`, { account_ids: newIds })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['campaigns', campaignId] })
+      qc.invalidateQueries({ queryKey: ['campaigns', campaignId, 'kpi-agents'] })
+      toast.success('Cập nhật agents')
+    },
+    onError: (err) => toast.error(`Lỗi: ${err?.response?.data?.error || err.message}`),
+  })
+
+  const addAgent = (acc) => {
+    const merged = [...new Set([...topLevelAccountIds, ...rolesAccountIds, acc.id])]
+    saveAccounts.mutate(merged)
+    setPickerOpen(false)
+  }
+
+  const removeAgent = (acc) => {
+    if (!confirm(`Gỡ ${acc.username} khỏi chiến dịch?`)) return
+    const merged = [...new Set([...topLevelAccountIds, ...rolesAccountIds])].filter(id => id !== acc.id)
+    saveAccounts.mutate(merged)
+  }
 
   return (
     <div className="overflow-auto p-6 font-mono-ui">
-      <div className="text-[10px] uppercase tracking-wider text-app-muted mb-3">
-        Assigned agents ({assignedAccounts.length})
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[10px] uppercase tracking-wider text-app-muted">
+          Assigned agents ({assignedAccounts.length}) — KPI hôm nay từ Hermes
+        </div>
+        <button
+          className="btn-hermes text-[11px] px-3 py-1"
+          onClick={() => setPickerOpen(true)}
+        >
+          + THÊM AGENT
+        </button>
       </div>
+
       {assignedAccounts.length === 0 ? (
         <div
           className="p-6 text-sm text-app-muted text-center"
           style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
         >
-          No agents assigned to this mission yet. Edit campaign to assign nicks to roles.
+          Chưa có agent. Bấm "Thêm agent" để Hermes bắt đầu phân việc.
         </div>
       ) : (
         <div style={{ border: '1px solid var(--border)' }}>
+          <div className="flex items-center gap-3 px-4 py-2 text-[10px] uppercase text-app-muted" style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border)' }}>
+            <span className="flex-1">Agent</span>
+            <span className="w-28 hidden md:inline">Role</span>
+            <span className="w-20">Status</span>
+            <span className="w-16 text-right">Done</span>
+            <span className="w-16 text-right">Target</span>
+            <span className="w-12 text-right">%</span>
+            <span className="w-8"></span>
+          </div>
           {assignedAccounts.map((acc) => {
             const accRoles = roles.filter(r => r.account_ids?.includes(acc.id))
+            const k = kpiByAccount[acc.id]
+            const done = k?.total_done || 0
+            const target = k?.total_target || 0
+            const pct = k?.progress_pct || 0
             return (
               <div
                 key={acc.id}
-                className="flex items-center gap-4 px-4 py-3 text-xs"
+                className="flex items-center gap-3 px-4 py-2 text-xs"
                 style={{ borderBottom: '1px solid var(--border)' }}
               >
                 <span className="flex-1 text-app-primary truncate">
                   {acc.username || acc.id.slice(0, 8)}
                 </span>
-                <span className="text-app-muted truncate max-w-[200px]">
-                  {accRoles.map(r => r.role_type || r.name).filter(Boolean).join(', ') || '—'}
+                <span className="w-28 text-app-muted truncate hidden md:inline">
+                  {accRoles.map(r => r.role_type || r.name).filter(Boolean).join(', ') || 'hermes'}
                 </span>
-                <span className={
+                <span className={`w-20 truncate ${
                   acc.status === 'healthy' ? 'text-hermes' :
                   acc.status === 'at_risk' ? 'text-warn' :
                   acc.status === 'checkpoint' ? 'text-danger' : 'text-app-muted'
-                }>
+                }`}>
                   ● {acc.status || '—'}
                 </span>
+                <span className="w-16 text-right text-app-primary">{done}</span>
+                <span className="w-16 text-right text-app-muted">{target}</span>
+                <span className={`w-12 text-right ${pct >= 80 ? 'text-hermes' : 'text-app-muted'}`}>
+                  {pct}%
+                </span>
+                <button
+                  className="w-8 text-danger hover:opacity-80"
+                  onClick={() => removeAgent(acc)}
+                  title="Gỡ agent khỏi campaign"
+                >
+                  ×
+                </button>
               </div>
             )
           })}
+        </div>
+      )}
+
+      {pickerOpen && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={() => setPickerOpen(false)}
+        >
+          <div
+            className="w-full max-w-md max-h-[80vh] flex flex-col"
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div className="text-app-primary text-sm">Thêm agent vào chiến dịch</div>
+              <button onClick={() => setPickerOpen(false)} className="text-app-muted hover:text-app-primary">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              {unassignedAccounts.length === 0 ? (
+                <div className="p-6 text-center text-app-muted text-xs">
+                  Tất cả nick đã được gán cho chiến dịch này.
+                </div>
+              ) : (
+                unassignedAccounts.map((acc) => (
+                  <button
+                    key={acc.id}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left text-xs hover-row"
+                    style={{ borderBottom: '1px solid var(--border)' }}
+                    onClick={() => addAgent(acc)}
+                    disabled={saveAccounts.isPending}
+                  >
+                    <span className="flex-1 text-app-primary truncate">{acc.username || acc.id.slice(0, 8)}</span>
+                    <span className={
+                      acc.status === 'healthy' ? 'text-hermes' :
+                      acc.status === 'checkpoint' ? 'text-danger' : 'text-app-muted'
+                    }>
+                      ● {acc.status || '—'}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1531,6 +1666,27 @@ export default function CampaignHub() {
     refetchInterval: 30000,
   })
 
+  // Consolidated KPI source — same data as OverviewTab.
+  // Keep it at the parent so the header badges + Overview agree.
+  const { data: kpiTodayHeader } = useQuery({
+    queryKey: ['campaigns', id, 'kpi-header'],
+    enabled: !!campaign,
+    queryFn: async () => {
+      try { return (await api.get(`/campaigns/${id}/kpi-today`)).data } catch { return null }
+    },
+    refetchInterval: 30000,
+  })
+  const kpiTodayTotals = useMemo(() => {
+    const rows = kpiTodayHeader?.rows || []
+    return {
+      done: rows.reduce((s, r) => s + (r.total_done || 0), 0),
+      target: rows.reduce((s, r) => s + (r.total_target || 0), 0),
+      comments: rows.reduce((s, r) => s + (r.done_comments || 0), 0),
+      likes: rows.reduce((s, r) => s + (r.done_likes || 0), 0),
+      frs: rows.reduce((s, r) => s + (r.done_friend_requests || 0), 0),
+    }
+  }, [kpiTodayHeader])
+
   const toggleStatus = useMutation({
     mutationFn: async (newStatus) => {
       await api.put(`/campaigns/${id}`, { status: newStatus })
@@ -1582,9 +1738,16 @@ export default function CampaignHub() {
 
   const isRunning = status === 'running' || status === 'active'
   const rolesCount = campaign.campaign_roles?.length ?? campaign.roles_count ?? 0
-  const nicksCount = (campaign.campaign_roles || []).reduce(
-    (sum, r) => sum + (r.account_ids?.length || 0), 0
-  )
+  // Agents = union of role assignments + top-level account_ids (AI_PILOT mode
+  // often sets only account_ids, leaving campaign_roles empty until Hermes
+  // creates orchestrated roles — the badge showed 0 for those campaigns).
+  const nicksCount = useMemo(() => {
+    const s = new Set([
+      ...((campaign.campaign_roles || []).flatMap(r => r.account_ids || [])),
+      ...(campaign.account_ids || []),
+    ])
+    return s.size
+  }, [campaign.campaign_roles, campaign.account_ids])
 
   return (
     <div className="flex flex-col h-full">
@@ -1668,13 +1831,20 @@ export default function CampaignHub() {
           </div>
         )}
 
-        {/* Stats row */}
+        {/* Stats row — today's KPI consolidated from /campaigns/:id/kpi-today
+            (the same endpoint Overview + Agents tabs use). Single source → no
+            drift between header, tabs, or reports. */}
         <div className="flex items-center gap-8 mt-4">
           <DenseStat value={rolesCount} label="Roles" />
           <DenseStat value={nicksCount} label="Agents" color="hermes" />
-          <DenseStat value={campaign.total_posts ?? 0} label="Posts" />
-          <DenseStat value={campaign.total_comments ?? 0} label="Comments" />
-          <DenseStat value={campaign.total_leads ?? 0} label="Leads" />
+          <DenseStat
+            value={`${kpiTodayTotals.done}/${kpiTodayTotals.target}`}
+            label="Done hôm nay"
+            color="hermes"
+          />
+          <DenseStat value={kpiTodayTotals.comments} label="Comments" />
+          <DenseStat value={kpiTodayTotals.likes} label="Likes" />
+          <DenseStat value={kpiTodayTotals.frs} label="Kết bạn" />
         </div>
       </div>
 
