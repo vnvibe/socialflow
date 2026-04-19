@@ -386,7 +386,21 @@ async function executeAction(action, campaignId, context, supabase) {
       const groupId = action.action_detail?.group_id || null
       const nick = (context.nicks || []).find(n => n.id === accId)
       if (!nick) return { ok: false, detail: 'nick not found in context' }
+      if (nick.is_active === false) return { ok: false, detail: 'nick is paused (is_active=false)' }
       if (nick.active_job) return { ok: false, detail: 'nick already has active job' }
+
+      // Global pending cap — if schedulers have already queued MAX for this
+      // nick across ALL campaigns, don't add more. Orchestrator runs per
+      // campaign so without this it would happily stack jobs the agent
+      // can't drain in time.
+      try {
+        const { getNickPendingCounts, MAX_PENDING_PER_NICK } = require('../lib/nick-lock')
+        const counts = await getNickPendingCounts([accId])
+        const pending = counts.get(accId) || 0
+        if (pending >= MAX_PENDING_PER_NICK) {
+          return { ok: false, detail: `nick at pending cap (${pending}/${MAX_PENDING_PER_NICK})` }
+        }
+      } catch { /* non-fatal — fall through */ }
 
       // Dedup: if a same-type job for this nick is already in-flight within
       // the last 30 minutes, skip silently. The in-flight one covers the need.

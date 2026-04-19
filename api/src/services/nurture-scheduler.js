@@ -1,6 +1,6 @@
 const cron = require('node-cron')
 const { supabase } = require('../lib/supabase')
-const { getBusyNicks } = require('../lib/nick-lock')
+const { getBusyNicks, getNickPendingCounts, MAX_PENDING_PER_NICK } = require('../lib/nick-lock')
 
 // Age-based max sessions per day
 function getMaxSessions(ageDays, profileTarget) {
@@ -87,6 +87,7 @@ async function processNurtureProfiles() {
     // Batch check which nicks are already busy (campaign or nurture jobs)
     const allAccountIds = profiles.map(p => p.accounts.id)
     const busyNicks = await getBusyNicks(allAccountIds)
+    const pendingCounts = await getNickPendingCounts(allAccountIds)
 
     for (const profile of profiles) {
       try {
@@ -94,6 +95,14 @@ async function processNurtureProfiles() {
 
         // 0. Nick lock: skip if nick has ANY active job (campaign or nurture)
         if (busyNicks.has(acc.id)) {
+          continue
+        }
+
+        // Global cap: stop queueing once the nick already has the max
+        // across all campaigns + types. Agent only pulls 1 at a time, no
+        // point stacking more.
+        const pending = pendingCounts.get(acc.id) || 0
+        if (pending >= MAX_PENDING_PER_NICK) {
           continue
         }
 
@@ -212,6 +221,7 @@ async function processNurtureProfiles() {
           scheduled_at: scheduledAt,
           created_by: profile.owner_id,
         })
+        pendingCounts.set(acc.id, (pendingCounts.get(acc.id) || 0) + 1)
 
         // Update last_session_at immediately to prevent double-scheduling
         await supabase.from('nurture_profiles').update({

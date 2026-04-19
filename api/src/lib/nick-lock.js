@@ -108,4 +108,41 @@ async function getBusyNicksFallback(accountIds) {
   return busySet
 }
 
-module.exports = { isNickBusy, getBusyNicks }
+/**
+ * Return a Map<accountId, count> of pending/claimed/running jobs per nick.
+ * Used by schedulers to enforce a global per-nick pending cap — prevents
+ * multi-campaign schedulers from piling 5+ jobs onto the same nick within
+ * a single cycle. Agent only drains 1 job at a time per nick anyway, so
+ * queueing more is wasted ordering work.
+ */
+async function getNickPendingCounts(accountIds) {
+  if (!accountIds?.length) return new Map()
+  const sb = getClient()
+  const counts = new Map()
+  const CHUNK = 10
+  for (let i = 0; i < accountIds.length; i += CHUNK) {
+    const chunk = accountIds.slice(i, i + CHUNK)
+    const orConditions = chunk.map(id => `payload->>account_id.eq.${id}`).join(',')
+    const { data: rows } = await sb
+      .from('jobs')
+      .select('payload')
+      .in('status', ['pending', 'claimed', 'running'])
+      .or(orConditions)
+    for (const j of rows || []) {
+      const accId = j.payload?.account_id
+      if (!accId) continue
+      counts.set(accId, (counts.get(accId) || 0) + 1)
+    }
+  }
+  return counts
+}
+
+/**
+ * Cap a nick's total pending jobs across all types / campaigns.
+ * Raised slightly above the 2-slot agent concurrency to leave a little
+ * buffer for checks (check_health / check_group_membership) to sneak
+ * through without blocking user-facing nurture work.
+ */
+const MAX_PENDING_PER_NICK = 3
+
+module.exports = { isNickBusy, getBusyNicks, getNickPendingCounts, MAX_PENDING_PER_NICK }

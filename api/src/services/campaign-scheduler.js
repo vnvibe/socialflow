@@ -1,7 +1,7 @@
 const cron = require('node-cron')
 const { CronExpressionParser } = require('cron-parser')
 const { supabase: _sbFromLib } = require('../lib/supabase')
-const { getBusyNicks } = require('../lib/nick-lock')
+const { getBusyNicks, getNickPendingCounts, MAX_PENDING_PER_NICK } = require('../lib/nick-lock')
 const { collectPerformanceData, evaluatePostStrategy, getOptimalScheduleTime, MIN_POSTS_FOR_AI } = require('./post-strategy')
 const { remember, recall, formatMemoriesForPrompt } = require('./ai-memory')
 
@@ -814,8 +814,14 @@ async function executeRoleCampaign(campaign) {
 
   // ── Nick lock: batch check which accounts are busy (nurture or other jobs) ──
   let busyNickSet = new Set()
+  let pendingCounts = new Map()
   try {
     busyNickSet = await getBusyNicks([...activeAccountSet])
+    // Global per-nick pending cap across all types/campaigns. Without this,
+    // iterating multiple campaigns in one cron can pile 4+ jobs onto the
+    // same nick — agent only drains 1 at a time so the rest sit for hours
+    // and block the quota for the day.
+    pendingCounts = await getNickPendingCounts([...activeAccountSet])
   } catch (err) {
     console.warn(`[SCHEDULER] Nick lock check failed: ${err.message} — proceeding without lock`)
   }
@@ -908,6 +914,12 @@ async function executeRoleCampaign(campaign) {
   }
 
   for (const role of sortedRoles) {
+    // Scout runs on its own 4h cron (processScoutCron). Creating scout jobs
+    // here too means we'd queue discover_groups every minute — agent drains
+    // maybe 1/day, the rest pile up and eat the daily quota. One source is
+    // enough.
+    if (role.role_type === 'scout') continue
+
     let accountIds = (role.account_ids || []).filter(id => activeAccountSet.has(id))
     // Phase 16: further filter by wave selection (if enabled)
     if (waveFilteredNickSet) {
@@ -955,6 +967,17 @@ async function executeRoleCampaign(campaign) {
 
       // Nick lock: skip if nick is busy with nurture or other job
       if (busyNickSet.has(accountId)) {
+        jobsSkipped++
+        continue
+      }
+
+      // Global pending cap — don't stack >MAX_PENDING_PER_NICK for any nick
+      // even if they're for different campaigns. Prevents the multi-campaign
+      // pile-up where A, B, C each queue work per cron tick and one nick
+      // ends up with a 6-deep backlog nobody can drain.
+      const pending = pendingCounts.get(accountId) || 0
+      if (pending >= MAX_PENDING_PER_NICK) {
+        console.log(`[SCHEDULER] Nick ${accountId.slice(0,8)} at cap (${pending}/${MAX_PENDING_PER_NICK} pending) — skip ${jobType}`)
         jobsSkipped++
         continue
       }
@@ -1017,7 +1040,10 @@ async function executeRoleCampaign(campaign) {
         created_by: campaign.owner_id,
       })
 
-      if (!error) jobsCreated++
+      if (!error) {
+        jobsCreated++
+        pendingCounts.set(accountId, (pendingCounts.get(accountId) || 0) + 1)
+      }
     }
 
     // Stagger between roles
