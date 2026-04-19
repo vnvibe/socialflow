@@ -511,6 +511,17 @@ async function processMembershipChecks() {
     .limit(100)
   const queued = new Set((existingChecks || []).map(j => j.payload?.group_row_id).filter(Boolean))
 
+  // Resolve owner_id per campaign so the job's created_by is set.
+  // Without this, fair-scheduler's `created_by = user_id` filter drops
+  // these jobs and the agent sits idle with a pile of work it can't see.
+  const campaignIds = [...new Set(pendingRows.map(r => r.campaign_id).filter(Boolean))]
+  const ownerByCampaign = {}
+  if (campaignIds.length) {
+    const { data: campRows } = await supabase
+      .from('campaigns').select('id, owner_id').in('id', campaignIds)
+    for (const c of campRows || []) ownerByCampaign[c.id] = c.owner_id
+  }
+
   let created = 0
   const { checkAndReserve } = require('./nick-quota')
   for (const r of pendingRows) {
@@ -541,9 +552,11 @@ async function processMembershipChecks() {
         group_name: fg.name,
         account_id: r.assigned_nick_id,
         campaign_id: r.campaign_id,
+        owner_id: ownerByCampaign[r.campaign_id] || null,
       },
       status: 'pending',
       scheduled_at: new Date(Date.now() + delayMs).toISOString(),
+      created_by: ownerByCampaign[r.campaign_id] || null,
     })
     if (!error) created++
   }

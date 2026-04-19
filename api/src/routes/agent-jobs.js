@@ -37,7 +37,12 @@ module.exports = async (fastify) => {
       const where = [`j.status = 'pending'`, `j.scheduled_at <= now()`]
       if (user_id) {
         args.push(user_id)
-        where.push(`j.created_by = $${args.length}`)
+        // Match either created_by OR payload.owner_id — some schedulers
+        // (particularly orchestrator-produced jobs) leave created_by NULL
+        // but always set payload.owner_id. Without this OR, those jobs
+        // get filtered out and the agent sits idle while their nicks
+        // have pending work.
+        where.push(`(j.created_by = $${args.length} OR j.payload->>'owner_id' = $${args.length})`)
       } else if (exclude_user_ids) {
         const ids = exclude_user_ids.split(',').filter(Boolean)
         if (ids.length > 0) {
