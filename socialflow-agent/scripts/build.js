@@ -71,6 +71,20 @@ try {
 
   execSync(cmd, { cwd: ROOT, stdio: 'inherit', shell: true })
   console.log('\n[OK] Build complete!')
+
+  // Rename packager's default "SocialFlow Agent-win32-x64" folder to
+  // "win-unpacked" so the output path is stable across rebuilds.
+  // Otherwise old builds pile up and existing shortcuts point to stale
+  // binaries. Delete any prior win-unpacked first to avoid mv conflicts.
+  const packagerOut = path.join(ROOT, 'dist', 'SocialFlow Agent-win32-x64')
+  const stableOut = path.join(ROOT, 'dist', 'win-unpacked')
+  if (fs.existsSync(packagerOut)) {
+    if (fs.existsSync(stableOut)) {
+      fs.rmSync(stableOut, { recursive: true, force: true })
+    }
+    fs.renameSync(packagerOut, stableOut)
+    console.log('[OK] Renamed → dist/win-unpacked (stable path)')
+  }
 } catch (err) {
   console.error('\n[ERROR] Build failed:', err.message)
   // Clean up config.js to not leave secrets in source
@@ -83,7 +97,7 @@ fs.unlinkSync(CONFIG_PATH)
 console.log('[OK] Cleaned up lib/config.js from source')
 
 // 5. Show result
-const distDir = path.join(ROOT, 'dist', 'SocialFlow Agent-win32-x64')
+const distDir = path.join(ROOT, 'dist', 'win-unpacked')
 if (fs.existsSync(distDir)) {
   const exePath = path.join(distDir, 'SocialFlow Agent.exe')
   if (fs.existsSync(exePath)) {
