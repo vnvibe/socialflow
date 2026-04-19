@@ -11,6 +11,10 @@ app.decorate('supabase', supabase)
 
 // Plugins
 app.register(require('./plugins/cors'))
+// gzip/brotli on every JSON response. Agent + frontend save 60-80% of
+// bandwidth + transfer time over internet. threshold=1024 avoids gzip
+// overhead on tiny payloads.
+app.register(require('@fastify/compress'), { global: true, threshold: 1024 })
 app.register(require('./plugins/auth'))
 app.register(require('./plugins/r2'))
 app.register(require('./plugins/cache'))
