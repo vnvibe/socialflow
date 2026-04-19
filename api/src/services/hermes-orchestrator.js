@@ -477,9 +477,30 @@ async function executeAction(action, campaignId, context, supabase) {
     }
 
     case 'recheck_group': {
-      const accountId = action.action_detail?.account_id
-        || (context.nicks || []).find(n => n.status === 'healthy')?.id
+      // Validate accountId against context.nicks so LLM can't accidentally
+      // hand us a user_id (owner_id) instead of an account UUID — we've seen
+      // the LLM do this, and it caused the handler to error with
+      // 'account_id and fb_group_id required' and FK violations on
+      // job_failures (account_id not in accounts table).
+      const nickIds = new Set((context.nicks || []).map(n => n.id))
+      const candidate = action.action_detail?.account_id
+      let accountId = (candidate && nickIds.has(candidate)) ? candidate : null
+      if (!accountId) {
+        accountId = (context.nicks || []).find(n => n.status === 'healthy')?.id
+          || (context.nicks || [])[0]?.id
+      }
       if (!accountId) return { ok: false, detail: 'no healthy nick available to recheck from' }
+
+      // Handler needs fb_group_id (the FB-side id) AND group_row_id (our uuid).
+      // Resolve fb_group_id from fb_groups using the target_id (a group_row_id).
+      const { data: grp } = await supabase
+        .from('fb_groups')
+        .select('id, fb_group_id, url, name')
+        .eq('id', action.target_id)
+        .single()
+      if (!grp?.fb_group_id) {
+        return { ok: false, detail: `fb_group_id not found for group ${action.target_id}` }
+      }
 
       // Dedup: skip if a pending membership check already exists for this group.
       // Keep the per-group dedup (not just per-nick) because membership checks
@@ -504,6 +525,9 @@ async function executeAction(action, campaignId, context, supabase) {
         payload: orchestratorPayload(context, {
           account_id: accountId,
           group_row_id: action.target_id,
+          fb_group_id: grp.fb_group_id,
+          group_url: grp.url || null,
+          group_name: grp.name || null,
         }),
         created_by: context.campaign?.owner_id || null,
       })

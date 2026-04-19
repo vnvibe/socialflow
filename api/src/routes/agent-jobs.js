@@ -273,8 +273,33 @@ module.exports = async (fastify) => {
 
     if (!job_id) return reply.code(400).send({ error: 'job_id required' })
 
+    // Validate account_id/campaign_id against accounts/campaigns tables
+    // before insert — orchestrator sometimes emits jobs with a user_id in
+    // the account_id slot (LLM mix-up), and without this guard the FK
+    // constraint kills the failure record, masking the real bug.
+    let safeAccountId = account_id || null
+    let safeCampaignId = campaign_id || null
+    try {
+      const pool = supabase._pool
+      if (pool && safeAccountId) {
+        const { rows } = await pool.query('SELECT 1 FROM accounts WHERE id = $1 LIMIT 1', [safeAccountId])
+        if (!rows.length) safeAccountId = null
+      }
+      if (pool && safeCampaignId) {
+        const { rows } = await pool.query('SELECT 1 FROM campaigns WHERE id = $1 LIMIT 1', [safeCampaignId])
+        if (!rows.length) safeCampaignId = null
+      }
+    } catch {
+      // On DB error, fall through — insert will still either succeed or
+      // surface its own error below. Don't let validation failure block
+      // diagnostics.
+    }
+
     const { error } = await supabase.from('job_failures').insert({
-      job_id, account_id, campaign_id, error_type, error_message,
+      job_id,
+      account_id: safeAccountId,
+      campaign_id: safeCampaignId,
+      error_type, error_message,
       error_stack: error_stack?.substring(0, 2000),
       handler_name, page_url, attempt,
       will_retry: will_retry || false,
