@@ -1,4 +1,4 @@
-const { extractCUserId, generateFingerprint } = require('../services/facebook/fb-auth')
+const { extractCUserId, generateFingerprint, normalizeCookieInput } = require('../services/facebook/fb-auth')
 const { fetchPersonalInbox, replyPersonalMessage } = require('../services/facebook/fb-inbox')
 const { getAccessibleIds, canAccess } = require('../lib/access-check')
 const { buildInitialBudget } = require('../services/warmup-budget')
@@ -169,10 +169,17 @@ module.exports = async (fastify) => {
 
   // POST /accounts - Add account (save only, no validation)
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { cookie_string, username, browser_type, proxy_id, notes, fb_created_at, daily_budget } = req.body
-    if (!cookie_string) return reply.code(400).send({ error: 'cookie_string required' })
+    const { cookie_string: rawCookie, username, browser_type, proxy_id, notes, fb_created_at, daily_budget } = req.body
+    if (!rawCookie) return reply.code(400).send({ error: 'cookie_string required' })
 
-    const fbUserId = extractCUserId(cookie_string)
+    const normalized = normalizeCookieInput(rawCookie)
+    if (!normalized.ok) {
+      return reply.code(400).send({
+        error: `Cookie không hợp lệ (${normalized.reason}). Cần có cả c_user và xs. Paste cookie header "c_user=...; xs=..." hoặc JSON export từ EditThisCookie.`
+      })
+    }
+    const cookie_string = normalized.cookieString
+    const fbUserId = normalized.fbUserId || extractCUserId(cookie_string)
     const fingerprint = generateFingerprint(fbUserId)
 
     // Build warmup-aware budget from the nick's real FB age (fb_created_at).
@@ -659,10 +666,17 @@ module.exports = async (fastify) => {
 
   // POST /accounts/:id/update-cookie - Update cookie + trigger health check + auto-assign
   fastify.post('/:id/update-cookie', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { cookie_string } = req.body
-    if (!cookie_string) return reply.code(400).send({ error: 'cookie_string required' })
+    const { cookie_string: rawCookie } = req.body
+    if (!rawCookie) return reply.code(400).send({ error: 'cookie_string required' })
 
-    const fbUserId = extractCUserId(cookie_string)
+    const normalized = normalizeCookieInput(rawCookie)
+    if (!normalized.ok) {
+      return reply.code(400).send({
+        error: `Cookie không hợp lệ (${normalized.reason}). Cần có cả c_user và xs. Paste cookie header "c_user=...; xs=..." hoặc JSON export từ EditThisCookie.`
+      })
+    }
+    const cookie_string = normalized.cookieString
+    const fbUserId = normalized.fbUserId
 
     const { data, error } = await supabase.from('accounts').update({
       cookie_string,
@@ -962,9 +976,15 @@ module.exports = async (fastify) => {
     if (!cookies?.length) return reply.code(400).send({ error: 'cookies array required' })
 
     const results = []
-    for (const cookie_string of cookies) {
+    for (const rawCookie of cookies) {
       try {
-        const fbUserId = extractCUserId(cookie_string)
+        const normalized = normalizeCookieInput(rawCookie)
+        if (!normalized.ok) {
+          results.push({ ok: false, error: `invalid_cookie:${normalized.reason}` })
+          continue
+        }
+        const cookie_string = normalized.cookieString
+        const fbUserId = normalized.fbUserId
         const fingerprint = generateFingerprint(fbUserId)
 
         const { data, error } = await supabase.from('accounts').insert({

@@ -95,6 +95,72 @@ function extractCUserId(cookieString) {
   return match ? match[1] : null
 }
 
+/**
+ * Normalize cookie input into a clean "name=value; name=value" string.
+ *
+ * Accepts three shapes users tend to paste:
+ *   1. Plain cookie header  — "c_user=123; xs=abc; datr=..."
+ *   2. EditThisCookie JSON  — '[{"name":"c_user","value":"123",...},...]'
+ *   3. A messy concat of (1) + (2) — what kills parsing in session-pool.js
+ *
+ * Returns { ok, cookieString, reason, fbUserId } where ok=false signals the
+ * input has no usable auth cookies (caller should reject).
+ */
+function normalizeCookieInput(input) {
+  if (!input || typeof input !== 'string') return { ok: false, reason: 'empty' }
+  const parsed = {}
+
+  // Extract any JSON array portion first — user may have pasted a mix.
+  const jsonMatch = input.match(/\[\s*\{[\s\S]*\}\s*\]/)
+  if (jsonMatch) {
+    try {
+      const arr = JSON.parse(jsonMatch[0])
+      if (Array.isArray(arr)) {
+        for (const c of arr) {
+          if (c && typeof c.name === 'string' && c.value !== undefined) {
+            parsed[c.name] = String(c.value)
+          }
+        }
+      }
+    } catch { /* ignore — fall back to regex on plain section */ }
+  }
+
+  // Plain cookie-header portion = everything except the JSON chunk.
+  const plain = jsonMatch ? input.replace(jsonMatch[0], ' ') : input
+  for (const pair of plain.split(/[;\n]/)) {
+    const eq = pair.indexOf('=')
+    if (eq <= 0) continue
+    const name = pair.slice(0, eq).trim()
+    const value = pair.slice(eq + 1).trim()
+    if (!name || !value) continue
+    // Only keep name tokens that look like a real cookie name (no spaces,
+    // no JSON punctuation sneaking through).
+    if (!/^[A-Za-z0-9_\-]+$/.test(name)) continue
+    // Don't overwrite a JSON-parsed value with a corrupted plain fragment.
+    if (parsed[name]) continue
+    parsed[name] = value
+  }
+
+  if (!parsed.c_user || !/^\d+$/.test(parsed.c_user)) {
+    return { ok: false, reason: 'missing_c_user' }
+  }
+  if (!parsed.xs || parsed.xs.length < 10) {
+    return { ok: false, reason: 'missing_xs' }
+  }
+
+  // Preserve the common FB cookie ordering so downstream looks familiar.
+  const priorityOrder = ['sb', 'datr', 'ps_l', 'ps_n', 'c_user', 'xs', 'fr', 'presence', 'wd', 'locale']
+  const ordered = []
+  for (const k of priorityOrder) if (parsed[k] !== undefined) ordered.push(`${k}=${parsed[k]}`)
+  for (const [k, v] of Object.entries(parsed)) if (!priorityOrder.includes(k)) ordered.push(`${k}=${v}`)
+
+  return {
+    ok: true,
+    cookieString: ordered.join('; '),
+    fbUserId: parsed.c_user,
+  }
+}
+
 function generateFingerprint(seed) {
   const hash = require('crypto').createHash('md5').update(seed || '').digest('hex')
   const viewports = [
@@ -118,4 +184,4 @@ function generateFingerprint(seed) {
   }
 }
 
-module.exports = { getFbDtsg, validateCookie, getDtsgWithRefresh, FB_HEADERS, buildAxiosProxy, getDefaultUA, extractCUserId, generateFingerprint }
+module.exports = { getFbDtsg, validateCookie, getDtsgWithRefresh, FB_HEADERS, buildAxiosProxy, getDefaultUA, extractCUserId, generateFingerprint, normalizeCookieInput }
