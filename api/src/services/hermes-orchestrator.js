@@ -75,13 +75,20 @@ async function buildOrchestrationContext(campaignId, supabase) {
     .single()
   if (!campaign) throw new Error(`Campaign ${campaignId} not found`)
 
-  // Roles + nicks assigned
+  // Roles + nicks assigned. AI_PILOT campaigns can have account_ids at the
+  // campaign level WITHOUT any campaign_roles rows (Hermes orchestrates
+  // roles implicitly). Fall back to campaign.account_ids so the context
+  // isn't empty — otherwise every assign_job/recheck_group fails with
+  // "nick not found in context" and only skip_group ever succeeds.
   const { data: roles } = await supabase
     .from('campaign_roles')
     .select('id, name, role_type, account_ids, is_active')
     .eq('campaign_id', campaignId)
   const allAccountIds = new Set()
   for (const r of roles || []) (r.account_ids || []).forEach(id => allAccountIds.add(id))
+  if (allAccountIds.size === 0) {
+    for (const id of campaign.account_ids || []) allAccountIds.add(id)
+  }
 
   let nicks = []
   if (allAccountIds.size > 0) {
