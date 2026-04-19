@@ -37,7 +37,7 @@ module.exports = async (fastify) => {
 
   // PUT /ai/settings - Update AI settings (admin only)
   fastify.put('/settings', { preHandler: fastify.requireAdmin }, async (req, reply) => {
-    const { providers, defaults, token_budgets, fallback_chain } = req.body
+    const { providers, defaults, token_budgets, fallback_chain, task_models } = req.body
 
     const { data, error } = await supabase
       .from('ai_settings')
@@ -47,6 +47,7 @@ module.exports = async (fastify) => {
         ...(defaults && { defaults }),
         ...(token_budgets && { token_budgets }),
         ...(fallback_chain && { fallback_chain }),
+        ...(task_models !== undefined && { task_models }),
         updated_at: new Date().toISOString()
       })
       .select()

@@ -731,7 +731,10 @@ function calculateNextRun(campaign) {
 async function processRoleCampaigns() {
   const now = new Date().toISOString()
 
-  // Find campaigns with topic (role-based) that are running and due
+  // Find campaigns with topic (role-based) that are running and due.
+  // hermes_central=true campaigns are OWNED by the orchestrator — the 1-min
+  // role scheduler deliberately leaves them alone so there's exactly one
+  // source of truth for pacing, dedup, and KPI balance.
   const { data: campaigns } = await supabase
     .from('campaigns')
     .select('*, campaign_roles(*)')
@@ -743,6 +746,10 @@ async function processRoleCampaigns() {
   if (!campaigns?.length) return
 
   for (const campaign of campaigns) {
+    if (campaign.hermes_central) {
+      console.log(`[SCHEDULER] Skip ${campaign.name || campaign.id}: hermes_central=true (orchestrator owns pacing)`)
+      continue
+    }
     try {
       console.log(`[SCHEDULER] Executing role campaign: ${campaign.name || campaign.id}`)
       await executeRoleCampaign(campaign)

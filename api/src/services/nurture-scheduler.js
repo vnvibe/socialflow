@@ -89,12 +89,32 @@ async function processNurtureProfiles() {
     const busyNicks = await getBusyNicks(allAccountIds)
     const pendingCounts = await getNickPendingCounts(allAccountIds)
 
+    // If any running campaign has hermes_central=true and this nick is in it,
+    // the orchestrator owns nurture pacing — don't let the blind 5-min cron
+    // race the Hermes tick. Build a Set of nicks under orchestrator control.
+    const { data: centralCampaigns } = await supabase
+      .from('campaigns')
+      .select('account_ids')
+      .eq('hermes_central', true)
+      .eq('status', 'running')
+    const centralNicks = new Set()
+    for (const c of centralCampaigns || []) {
+      for (const id of c.account_ids || []) centralNicks.add(id)
+    }
+
     for (const profile of profiles) {
       try {
         const acc = profile.accounts
 
         // 0. Nick lock: skip if nick has ANY active job (campaign or nurture)
         if (busyNicks.has(acc.id)) {
+          continue
+        }
+
+        // If this nick is under Hermes-central pacing, let the orchestrator
+        // decide. Skip silently — the 15-min orchestrator tick will queue
+        // nurture via assign_job when it deems the nick ready.
+        if (centralNicks.has(acc.id)) {
           continue
         }
 
@@ -427,6 +447,30 @@ function initNurtureScheduler() {
       await runAllRunningCampaigns(supabase)
     } catch (err) {
       console.error('[ORCHESTRATOR] 15-min cron error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
+  // Extra 5-min orchestrator tick JUST for hermes_central campaigns. These
+  // campaigns opted into Hermes as sole coordinator — the dumb schedulers
+  // skip them, so without a faster tick their nicks would only get work
+  // every 15 min and throughput would tank. 5 min matches the nurture
+  // cadence the schedulers provided for non-central campaigns.
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const { data: centrals } = await supabase
+        .from('campaigns')
+        .select('id, name')
+        .eq('hermes_central', true)
+        .eq('status', 'running')
+        .eq('is_active', true)
+      if (!centrals?.length) return
+      const { runOrchestration } = require('./hermes-orchestrator')
+      for (const c of centrals) {
+        try { await runOrchestration(c.id, supabase) }
+        catch (err) { console.error(`[ORCHESTRATOR-CENTRAL] ${c.name || c.id}: ${err.message}`) }
+      }
+    } catch (err) {
+      console.error('[ORCHESTRATOR-CENTRAL] 5-min cron error:', err.message)
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 

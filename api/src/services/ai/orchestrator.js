@@ -10,6 +10,10 @@ class AIOrchestrator {
     this.defaults = userSettings.defaults || {}
     this.budgets = userSettings.token_budgets || {}
     this.fallbackChain = userSettings.fallback_chain || ['hermes', 'deepseek', 'openai', 'gemini']
+    // Per-task (function_name) provider+model override. Lets the user pin a
+    // specific model per skill (e.g. cheap deepseek for relevance_review,
+    // stronger model for comment_gen) without editing code.
+    this.taskModels = userSettings.task_models || {}
 
     // Auto-inject Hermes as an available provider if not already configured
     // (Hermes is a local service, no API key needed — uses AGENT_SECRET from env)
@@ -118,6 +122,21 @@ class AIOrchestrator {
   }
 
   getFunctionConfig(functionName) {
+    // User-level per-task override takes highest priority. Lets the admin
+    // pin specific (provider, model) per skill without touching code.
+    const override = this.taskModels?.[functionName]
+    if (override && (override.provider || override.model)) {
+      const base = (this.defaults[functionName] || this._builtinDefault(functionName))
+      return {
+        ...base,
+        ...(override.provider && { provider: override.provider }),
+        ...(override.model && { model: override.model }),
+      }
+    }
+    return this.defaults[functionName] || this._builtinDefault(functionName)
+  }
+
+  _builtinDefault(functionName) {
     // Hermes handles SocialFlow-specific operations (self-learning skills);
     // DeepSeek/Gemini handle general-purpose tasks
     const DEFAULTS = {
@@ -139,8 +158,18 @@ class AIOrchestrator {
       content_ideas:  { provider: 'gemini',   model: 'gemini-1.5-flash', max_tokens: 1500 },
       // Images via fal.ai
       image_gen:      { provider: 'fal', model: 'fal-ai/flux/schnell' },
+      // Orchestrator-family skills (reasoning over campaign state).
+      // Pinned to Hermes because these rely on skill prompts living on the
+      // Hermes server — swapping providers here would lose the self-learning
+      // memory that the skill queries. User can still override the MODEL
+      // (deepseek-chat / gpt-4o-mini / …) via task_models.
+      orchestrator:   { provider: 'hermes', model: 'deepseek-chat', max_tokens: 2000 },
+      self_reviewer:  { provider: 'hermes', model: 'deepseek-chat', max_tokens: 1500 },
+      reporter:       { provider: 'hermes', model: 'deepseek-chat', max_tokens: 1000 },
+      group_evaluator:{ provider: 'hermes', model: 'deepseek-chat', max_tokens: 400 },
+      cookie_death_analyzer: { provider: 'hermes', model: 'deepseek-chat', max_tokens: 800 },
     }
-    return this.defaults[functionName] || DEFAULTS[functionName] || DEFAULTS.caption_gen
+    return DEFAULTS[functionName] || DEFAULTS.caption_gen
   }
 }
 
@@ -183,6 +212,10 @@ async function getOrchestratorForUser(userId, supabase) {
   return new AIOrchestrator({
     ...adminSettings,
     providers: mergedProviders,
+    task_models: {
+      ...(adminSettings.task_models || {}),
+      ...(userSettings.task_models || {}),
+    },
   })
 }
 

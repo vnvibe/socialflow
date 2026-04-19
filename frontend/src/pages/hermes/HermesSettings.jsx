@@ -1047,8 +1047,136 @@ function ReportsSection() {
 // ───────────────────────────────────────────────────────────
 // Main page
 // ───────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────
+// SECTION: Per-task model override
+// User picks (provider, model) per skill/function so, e.g., relevance_review
+// can run on cheap deepseek while comment_gen uses gpt-4o-mini. Saves to
+// ai_settings.task_models; orchestrator.call() reads it every call.
+// ───────────────────────────────────────────────────────────
+const TASK_PRESETS = [
+  { fn: 'relevance_review', label: 'Đánh giá bài viết', desc: 'Chấm điểm bài có đáng comment không' },
+  { fn: 'comment_gen',      label: 'Sinh comment',       desc: 'Viết nội dung comment tự nhiên' },
+  { fn: 'quality_gate',     label: 'Gate chất lượng comment', desc: 'Duyệt/reject comment trước khi post' },
+  { fn: 'group_eval',       label: 'Đánh giá nhóm mới',  desc: 'Score nhóm mới phát hiện' },
+  { fn: 'profile_eval',     label: 'Đánh giá profile',   desc: 'Scan thành viên trước kết bạn' },
+  { fn: 'orchestrator',     label: 'Orchestrator',       desc: 'Ra quyết định điều phối chiến dịch' },
+  { fn: 'self_reviewer',    label: 'Self-review hàng ngày', desc: 'Review & cải thiện skills' },
+  { fn: 'reporter',         label: 'Báo cáo',            desc: 'Tổng hợp KPI + narrative' },
+  { fn: 'cookie_death_analyzer', label: 'Phân tích cookie-death', desc: 'Tìm nguyên nhân nick chết' },
+  { fn: 'caption_gen',      label: 'Viết caption',       desc: 'Caption cho post content' },
+  { fn: 'ai_pilot',         label: 'AI Pilot (plan)',    desc: 'Lên kế hoạch chiến dịch' },
+]
+const PROVIDER_OPTIONS = ['', 'hermes', 'deepseek', 'openai', 'anthropic', 'gemini', 'groq', 'kimi']
+
+function PerTaskModelSection() {
+  const qc = useQueryClient()
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['ai-settings'],
+    queryFn: async () => (await api.get('/ai/settings')).data,
+  })
+  const [draft, setDraft] = useState({})
+  useEffect(() => {
+    if (settings?.task_models) setDraft(settings.task_models)
+  }, [settings])
+
+  const save = useMutation({
+    mutationFn: async (task_models) => api.put('/ai/settings', { task_models }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ai-settings'] })
+      toast.success('Đã lưu per-task model')
+    },
+    onError: (err) => toast.error(err?.response?.data?.error || err.message),
+  })
+
+  const setField = (fn, key, value) => {
+    setDraft((d) => {
+      const next = { ...d }
+      const row = { ...(next[fn] || {}) }
+      if (value === '') delete row[key]
+      else row[key] = value
+      if (Object.keys(row).length === 0) delete next[fn]
+      else next[fn] = row
+      return next
+    })
+  }
+
+  const providers = settings?.providers || {}
+  const providerKeys = Object.keys(providers).filter(k => providers[k]?.enabled)
+  const providerList = providerKeys.length ? ['', ...providerKeys] : PROVIDER_OPTIONS
+
+  if (isLoading) return <div className="p-6 text-app-muted">Đang tải…</div>
+
+  return (
+    <div className="p-6 font-mono-ui text-xs max-w-4xl">
+      <div className="mb-4">
+        <div className="text-app-primary text-sm mb-1">Per-task model override</div>
+        <div className="text-app-muted text-[11px] leading-relaxed">
+          Ghi đè (provider, model) cho từng loại tác vụ. Để trống = dùng default.
+          Áp dụng cho TẤT CẢ chiến dịch (user-level). Orchestrator đọc mỗi lần gọi.
+        </div>
+      </div>
+
+      <div style={{ border: '1px solid var(--border)' }}>
+        <div
+          className="flex items-center gap-3 px-3 py-2 text-[10px] uppercase text-app-muted"
+          style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border)' }}
+        >
+          <div className="w-52">Tác vụ</div>
+          <div className="w-32">Provider</div>
+          <div className="flex-1">Model</div>
+        </div>
+        {TASK_PRESETS.map(({ fn, label, desc }) => {
+          const row = draft[fn] || {}
+          return (
+            <div
+              key={fn}
+              className="flex items-center gap-3 px-3 py-2"
+              style={{ borderBottom: '1px solid var(--border)' }}
+            >
+              <div className="w-52">
+                <div className="text-app-primary">{label}</div>
+                <div className="text-app-dim text-[10px]">{desc} · <span className="text-app-muted">{fn}</span></div>
+              </div>
+              <select
+                value={row.provider || ''}
+                onChange={(e) => setField(fn, 'provider', e.target.value)}
+                className="w-32 px-2 py-1 font-mono-ui text-xs"
+                style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+              >
+                {providerList.map(p => <option key={p} value={p}>{p || '(default)'}</option>)}
+              </select>
+              <input
+                type="text"
+                value={row.model || ''}
+                onChange={(e) => setField(fn, 'model', e.target.value)}
+                placeholder="(default model)"
+                className="flex-1 px-2 py-1 font-mono-ui text-xs"
+                style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+              />
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          className="btn-hermes"
+          disabled={save.isPending}
+          onClick={() => save.mutate(draft)}
+        >
+          {save.isPending ? 'Đang lưu…' : 'Lưu cấu hình'}
+        </button>
+        <div className="text-app-muted text-[11px]">
+          Hiện đang override: {Object.keys(draft).length} / {TASK_PRESETS.length} tác vụ
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const SECTIONS = [
   { key: 'model',     label: 'Model' },
+  { key: 'per_task',  label: 'Per-task model' },
   { key: 'skills',    label: 'Skills' },
   { key: 'quality',   label: 'Quality' },
   { key: 'fallback',  label: 'Fallback' },
@@ -1096,6 +1224,7 @@ export default function HermesSettings() {
 
       <div className="flex-1 overflow-auto">
         {section === 'model'     && <ModelSection />}
+        {section === 'per_task'  && <PerTaskModelSection />}
         {section === 'skills'    && <SkillsSection />}
         {section === 'quality'   && <QualityGateSection />}
         {section === 'fallback'  && <FallbackSection />}

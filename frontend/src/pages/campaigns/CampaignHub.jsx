@@ -274,6 +274,39 @@ function OverviewTab({ campaign, campaignId }) {
   )
 }
 
+// Compact toggle in the campaign header. When ON, the dumb schedulers stop
+// touching this campaign — only the Hermes orchestrator decides when to
+// queue jobs. Gives the user a one-click 'let Hermes run it' switch.
+function HermesCentralToggle({ campaign }) {
+  const qc = useQueryClient()
+  const active = !!campaign?.hermes_central
+  const mut = useMutation({
+    mutationFn: async (val) => api.put(`/campaigns/${campaign.id}`, { hermes_central: val }),
+    onSuccess: (_, val) => {
+      qc.invalidateQueries({ queryKey: ['campaigns', campaign.id] })
+      qc.invalidateQueries({ queryKey: ['campaigns'] })
+      toast.success(val ? 'Hermes-central: ON' : 'Hermes-central: OFF')
+    },
+    onError: (err) => toast.error(err?.response?.data?.error || err.message),
+  })
+  return (
+    <button
+      onClick={() => mut.mutate(!active)}
+      disabled={mut.isPending}
+      title={active
+        ? 'Hermes đang điều phối đơn: schedulers không tạo job cho campaign này'
+        : 'Bật để Hermes làm trung tâm điều phối (tắt scheduler)'}
+      className="btn-ghost font-mono-ui text-[11px] uppercase tracking-wider"
+      style={{
+        borderColor: active ? 'var(--hermes)' : 'var(--border)',
+        color: active ? 'var(--hermes)' : 'var(--text-muted)',
+      }}
+    >
+      🧠 {active ? 'Hermes ON' : 'Hermes OFF'}
+    </button>
+  )
+}
+
 // ─── Tab: Agents — unified view (assignments + today KPI from Hermes) ─────
 // Source of truth merges three signals so the list is always accurate:
 //   1. campaign_roles[].account_ids  — explicit assignments (manual mode)
@@ -1790,6 +1823,7 @@ export default function CampaignHub() {
           <span className={`font-mono-ui text-[11px] uppercase tracking-wider ${statusColor}`}>
             ● {status}
           </span>
+          <HermesCentralToggle campaign={campaign} />
           {isRunning ? (
             <button
               onClick={() => toggleStatus.mutate('paused')}

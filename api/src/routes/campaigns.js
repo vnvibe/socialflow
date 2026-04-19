@@ -551,6 +551,7 @@ module.exports = async (fastify) => {
       'kpi_config', // Phase 11
       'wave_config', // Phase 16
       'goal', 'hermes_context', 'status', // Hermes upgrade
+      'hermes_central',                    // Hermes-central coordinator toggle
     ]
     const updates = {}
     for (const key of allowed) {
