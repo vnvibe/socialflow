@@ -113,6 +113,12 @@ export default function CommandCenter() {
     refetchInterval: 15000,
   })
 
+  const { data: health } = useQuery({
+    queryKey: ['hermes-health'],
+    queryFn: async () => (await api.get('/ai-hermes/health-summary')).data,
+    refetchInterval: 15000,
+  })
+
   // Per-campaign KPI today — /campaigns list now includes today_done/target.
   const runningCampaigns = campaigns.filter(c => c.status === 'running' || c.status === 'active')
   const pausedCampaigns = campaigns.filter(c => c.status === 'paused')
@@ -219,6 +225,50 @@ export default function CommandCenter() {
           color={failedTodayJobs.length > 0 ? 'danger' : 'primary'}
         />
       </div>
+
+      {/* Hermes health banner — shown only when unhealthy so it reads as an
+          alert, not as chrome. Surfaces the exact billing / quota error text
+          so user knows what to fix instead of guessing. */}
+      {health && !health.hermes_online && (
+        <div
+          className="px-6 py-2 font-mono-ui text-xs"
+          style={{
+            background: 'color-mix(in srgb, var(--danger) 15%, var(--bg-base))',
+            borderBottom: '1px solid var(--border)',
+            color: 'var(--danger)',
+          }}
+        >
+          ⚠ HERMES OFFLINE — LLM backend không phản hồi.{' '}
+          {health.recent_error_samples?.[0]?.error && (
+            <span className="text-app-primary ml-2">
+              "{health.recent_error_samples[0].error.substring(0, 120)}"
+            </span>
+          )}
+        </div>
+      )}
+      {health?.hermes_online && health?.llm_billing_blocked && (
+        <div
+          className="px-6 py-2 font-mono-ui text-xs flex items-center gap-3"
+          style={{
+            background: 'color-mix(in srgb, var(--warn) 15%, var(--bg-base))',
+            borderBottom: '1px solid var(--border)',
+            color: 'var(--warn)',
+          }}
+        >
+          <span>⚠ LLM PROVIDER BỊ CHẶN BILLING — Hermes live nhưng LLM upstream trả lỗi thanh toán/quota.</span>
+          {health.fallback_chain && (
+            <span className="text-app-muted">
+              fallback: {health.fallback_chain.filter(p => health.configured_providers?.includes(p)).join(' → ') || '(không có provider thay thế)'}
+            </span>
+          )}
+          <button
+            onClick={() => nav('/hermes/settings')}
+            className="ml-auto text-app-primary underline"
+          >
+            Cấu hình provider →
+          </button>
+        </div>
+      )}
 
       {/* Campaign strip */}
       <div

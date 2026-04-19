@@ -114,6 +114,90 @@ module.exports = async (fastify) => {
     }
   })
 
+  // GET /ai-hermes/health-summary — consolidated health for the dashboard
+  // Surfaces LLM-provider billing/quota failures (402, 429, 401) so the user
+  // knows WHY Hermes is silent. Without this widget 'Hermes đéo làm gì'
+  // looks like a mystery; in reality it's almost always an upstream billing
+  // issue we can show directly.
+  fastify.get('/health-summary', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const pool = fastify.supabase._pool
+    const result = {
+      hermes_online: false,
+      hermes_model: null,
+      total_calls_recent: 0,
+      total_errors_recent: 0,
+      recent_error_samples: [],
+      llm_billing_blocked: false,
+      configured_providers: [],
+      last_successful_call_at: null,
+      last_failed_call_at: null,
+    }
+
+    // (1) Ping Hermes /status
+    try {
+      const { status, json } = await getStatus()
+      if (status === 200) {
+        result.hermes_online = json.status === 'ONLINE'
+        result.hermes_model = json.model
+        result.total_calls_recent = json.total_calls || 0
+        result.total_errors_recent = json.total_errors || 0
+      }
+    } catch { /* offline */ }
+
+    // (2) Recent hermes_calls for error diagnostics
+    try {
+      if (pool) {
+        const since = new Date(Date.now() - 3600 * 1000).toISOString()
+        const { rows } = await pool.query(
+          `SELECT ok, error, task_type, created_at
+           FROM hermes_calls
+           WHERE created_at > $1
+           ORDER BY created_at DESC
+           LIMIT 200`,
+          [since]
+        )
+        const errors = rows.filter(r => !r.ok)
+        const samples = errors.slice(0, 5).map(r => ({
+          at: r.created_at,
+          task: r.task_type,
+          error: (r.error || '').substring(0, 200),
+        }))
+        result.recent_error_samples = samples
+
+        // Detect billing-blocked: any error mentioning 402 / Insufficient /
+        // Payment / Balance. If we see this pattern, surface it prominently.
+        const billingPatterns = /402|Insufficient Balance|Payment Required|insufficient_quota|quota exceeded|billing/i
+        result.llm_billing_blocked = samples.some(s => billingPatterns.test(s.error))
+
+        const lastOk = rows.find(r => r.ok)
+        const lastFail = rows.find(r => !r.ok)
+        result.last_successful_call_at = lastOk?.created_at || null
+        result.last_failed_call_at = lastFail?.created_at || null
+      }
+    } catch (err) {
+      req.log.warn({ err: err.message }, '[HERMES-HEALTH] hermes_calls query failed')
+    }
+
+    // (3) Provider config from ai_settings (so UI can show which fallbacks
+    //     are configured). Mask keys.
+    try {
+      const { data: settings } = await fastify.supabase
+        .from('ai_settings')
+        .select('providers, fallback_chain')
+        .eq('id', process.env.ADMIN_USER_ID || '274868cf-742d-4d8a-89e8-bf1c37766b77')
+        .single()
+      if (settings) {
+        const providers = settings.providers || {}
+        result.configured_providers = Object.entries(providers)
+          .filter(([, v]) => v?.enabled && v?.api_key)
+          .map(([k]) => k)
+        result.fallback_chain = settings.fallback_chain || ['hermes', 'deepseek', 'openai', 'gemini']
+      }
+    } catch { /* soft */ }
+
+    return result
+  })
+
   fastify.get('/agent/status', { preHandler: agentAuth }, async (req, reply) => {
     try {
       const { status, json } = await getStatus()

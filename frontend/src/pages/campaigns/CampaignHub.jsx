@@ -274,6 +274,47 @@ function OverviewTab({ campaign, campaignId }) {
   )
 }
 
+// Manual trigger — fires runOrchestration synchronously and surfaces the
+// summary so the user gets instant feedback (instead of waiting up to 15
+// minutes for the cron). Shows action count + health score in the toast.
+function HermesRunNowButton({ campaignId }) {
+  const qc = useQueryClient()
+  const mut = useMutation({
+    mutationFn: async () => (await api.post(`/ai-hermes/orchestrate/${campaignId}`)).data,
+    onSuccess: (data) => {
+      const actions = (data?.actions || []).length
+      const auto = (data?.actions || []).filter(a => a.outcome === 'success').length
+      toast.success(
+        `Hermes chạy xong — health ${data?.health_score ?? '?'}, ${actions} actions, ${auto} auto-applied`,
+        { duration: 5000 }
+      )
+      qc.invalidateQueries({ queryKey: ['campaigns', campaignId] })
+      qc.invalidateQueries({ queryKey: ['hermes-decisions'] })
+    },
+    onError: (err) => {
+      const msg = err?.response?.data?.error || err.message || 'Unknown'
+      // Surface LLM billing errors prominently — user almost certainly wants
+      // to know their DeepSeek ran out rather than blame 'Hermes broken'
+      if (/402|Insufficient|Payment|billing/i.test(msg)) {
+        toast.error('LLM hết tiền — check provider billing ở /hermes/settings', { duration: 8000 })
+      } else {
+        toast.error(`Hermes lỗi: ${msg.substring(0, 150)}`, { duration: 6000 })
+      }
+    },
+  })
+  return (
+    <button
+      className="btn-ghost font-mono-ui text-[11px] uppercase tracking-wider"
+      onClick={() => mut.mutate()}
+      disabled={mut.isPending}
+      title="Trigger Hermes orchestrator immediately (bypass cron)"
+      style={{ borderColor: 'var(--hermes)', color: 'var(--hermes)' }}
+    >
+      {mut.isPending ? '🧠 đang chạy…' : '🧠 RUN HERMES'}
+    </button>
+  )
+}
+
 // Compact toggle in the campaign header. When ON, the dumb schedulers stop
 // touching this campaign — only the Hermes orchestrator decides when to
 // queue jobs. Gives the user a one-click 'let Hermes run it' switch.
@@ -1824,6 +1865,7 @@ export default function CampaignHub() {
             ● {status}
           </span>
           <HermesCentralToggle campaign={campaign} />
+          <HermesRunNowButton campaignId={id} />
           {isRunning ? (
             <button
               onClick={() => toggleStatus.mutate('paused')}

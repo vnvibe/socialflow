@@ -5,6 +5,11 @@ const { createFal } = require('./providers/fal')
 const { createHermes } = require('./providers/hermes')
 
 class AIOrchestrator {
+  // Process-wide circuit breaker: provider_name → deadUntilMs. Shared
+  // across all AIOrchestrator instances so one 402 on a cron call marks
+  // the provider dead for every subsequent call in the same process.
+  static _deadProviders = new Map()
+
   constructor(userSettings) {
     this.providers = userSettings.providers || {}
     this.defaults = userSettings.defaults || {}
@@ -37,6 +42,16 @@ class AIOrchestrator {
       const providerConfig = this.providers[providerName]
       if (!providerConfig?.enabled || !providerConfig?.api_key) continue
 
+      // Circuit breaker — if a provider failed with a billing/quota error
+      // in the last 5 minutes, skip it on the next call instead of paying
+      // latency for the same 402 again. User must either top up OR we
+      // eventually retry.
+      if (AIOrchestrator._deadProviders.has(providerName)) {
+        const deadUntil = AIOrchestrator._deadProviders.get(providerName)
+        if (Date.now() < deadUntil) continue
+        AIOrchestrator._deadProviders.delete(providerName)
+      }
+
       // Strict mode: if Hermes is the intended provider, never fall back.
       if (strictHermes && providerName !== 'hermes') {
         console.warn(`[ORCHESTRATOR] ${functionName} strict-Hermes: refusing fallback to ${providerName} (last err: ${lastErr?.status || lastErr?.message || 'n/a'})`)
@@ -50,7 +65,18 @@ class AIOrchestrator {
         lastErr = err
         const reason = err.status ? `HTTP ${err.status}` : (err.name === 'AbortError' ? 'timeout' : err.message)
         console.warn(`[ORCHESTRATOR] ${functionName} via ${providerName} failed: ${reason}`)
-        if (err.status === 429 || err.status >= 500 || err.name === 'AbortError') continue
+        // Billing / auth failures — mark provider dead for 5 min so we
+        // don't burn latency on the known-broken one. 402 = payment,
+        // 401 = bad key, body-level 'Insufficient Balance' (DeepSeek) /
+        // 'insufficient_quota' (OpenAI) / 'billing' (generic).
+        const bodyErr = String(err.message || '')
+        const billingHit = err.status === 402 || err.status === 401 ||
+          /Insufficient|Payment|billing|insufficient_quota/i.test(bodyErr)
+        if (billingHit) {
+          AIOrchestrator._deadProviders.set(providerName, Date.now() + 5 * 60 * 1000)
+          console.warn(`[ORCHESTRATOR] ${providerName} marked dead 5min (${reason})`)
+        }
+        if (err.status === 429 || err.status >= 500 || err.name === 'AbortError' || billingHit) continue
         throw err
       }
     }
