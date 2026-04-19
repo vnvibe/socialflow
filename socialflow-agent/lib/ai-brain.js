@@ -15,13 +15,27 @@
  */
 
 const axios = require('axios')
+const https = require('https')
+const http = require('http')
 
 const API_URL = process.env.API_URL || 'http://localhost:3000'
 // Auth priority: AGENT_SECRET_KEY (stable, no expiry) > SERVICE_ROLE > user JWT (expires)
 const AUTH_TOKEN = process.env.AGENT_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.AGENT_USER_TOKEN || ''
 
+// Shared keep-alive agents — each /ai/generate call would otherwise
+// cost a fresh TLS handshake (~200-300ms). A campaign-nurture run fires
+// 5-10 AI calls so reusing the socket shaves seconds off per job.
+const httpsKeepAlive = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSockets: 10 })
+const httpKeepAlive  = new http.Agent({  keepAlive: true, keepAliveMsecs: 30000, maxSockets: 10 })
+const aiClient = axios.create({
+  timeout: 60000,
+  httpsAgent: httpsKeepAlive,
+  httpAgent: httpKeepAlive,
+})
+
 const headers = (ownerId) => ({
   'Content-Type': 'application/json',
+  'Connection': 'keep-alive',
   ...(AUTH_TOKEN && { Authorization: `Bearer ${AUTH_TOKEN}` }),
   ...(ownerId && { 'x-user-id': ownerId }),
 })
@@ -245,7 +259,7 @@ Trả về JSON array:
 CHỈ trả về JSON, không giải thích.`
 
   try {
-    const res = await axios.post(`${API_URL}/ai/generate`, {
+    const res = await aiClient.post(`${API_URL}/ai/generate`, {
       function_name: 'relevance_review',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 400,
@@ -376,7 +390,7 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
   // AI quality check for longer comments
   if (comment.length > 20) {
     try {
-      const res = await axios.post(`${API_URL}/ai/generate`, {
+      const res = await aiClient.post(`${API_URL}/ai/generate`, {
         function_name: 'caption_gen',
         provider: 'deepseek',
         messages: [{
@@ -502,7 +516,7 @@ priority: high nếu score >= 8, medium nếu 6-7, low nếu < 6
 Chỉ trả JSON, không giải thích.`
 
   try {
-    const res = await axios.post(`${API_URL}/ai/generate`, {
+    const res = await aiClient.post(`${API_URL}/ai/generate`, {
       function_name: 'profile_eval',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 150,
@@ -667,7 +681,7 @@ VÍ DỤ SAI (chung chung, copy-paste được):
 Chỉ trả về COMMENT, không giải thích.`
 
   try {
-    const res = await axios.post(`${API_URL}/ai/generate`, {
+    const res = await aiClient.post(`${API_URL}/ai/generate`, {
       function_name: 'caption_gen',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 120,
@@ -837,7 +851,7 @@ Chỉ include bài có score >= ${threshold}. Nếu không có bài nào, trả 
 Chỉ trả JSON, không giải thích thêm.`
 
   try {
-    const res = await axios.post(`${API_URL}/ai/generate`, {
+    const res = await aiClient.post(`${API_URL}/ai/generate`, {
       function_name: 'relevance_review',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1500,
@@ -943,7 +957,7 @@ Trả về JSON array (không markdown):
 [{"question":"...","answer":"..."}]`
 
   try {
-    const res = await axios.post(`${API_URL}/ai/generate`, {
+    const res = await aiClient.post(`${API_URL}/ai/generate`, {
       function_name: 'caption_gen',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 400,

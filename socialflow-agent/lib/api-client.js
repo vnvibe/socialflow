@@ -8,6 +8,8 @@
  * Auth: X-Agent-Key header (must match AGENT_SECRET in API .env).
  */
 const axios = require('axios')
+const https = require('https')
+const http = require('http')
 
 const API_URL = process.env.API_URL || process.env.API_BASE_URL || 'https://103-142-24-60.sslip.io'
 const AGENT_KEY = process.env.AGENT_SECRET_KEY
@@ -18,13 +20,34 @@ if (!AGENT_KEY) {
   console.warn('[API-CLIENT] AGENT_SECRET_KEY not set — /agent-jobs calls will 401')
 }
 
+// Keep-alive agents reuse the TCP+TLS connection across requests.
+// For HTTPS over internet each new connection costs 200-300ms of handshake;
+// with keepalive the second-and-later request on the same socket saves it
+// entirely. Poller fires 10-50 requests per minute → significant win.
+const httpsKeepAlive = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 20,
+  maxFreeSockets: 10,
+  timeout: 15000,
+})
+const httpKeepAlive = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 20,
+  maxFreeSockets: 10,
+})
+
 const client = axios.create({
   baseURL: `${API_URL}/agent-jobs`,
   timeout: 15000,
+  httpsAgent: httpsKeepAlive,
+  httpAgent: httpKeepAlive,
   headers: {
     'X-Agent-Key': AGENT_KEY || '',
     'X-Agent-Id': AGENT_ID,
     ...(AGENT_USER_ID ? { 'X-Agent-User-Id': AGENT_USER_ID } : {}),
+    'Connection': 'keep-alive',
   },
 })
 
@@ -174,7 +197,9 @@ async function heartbeat({ agentId = AGENT_ID, hostname, platform, userId, stats
 const rootClient = axios.create({
   baseURL: API_URL,
   timeout: 10000,
-  headers: { 'X-Agent-Key': AGENT_KEY || '', 'X-Agent-Id': AGENT_ID },
+  httpsAgent: httpsKeepAlive,
+  httpAgent: httpKeepAlive,
+  headers: { 'X-Agent-Key': AGENT_KEY || '', 'X-Agent-Id': AGENT_ID, 'Connection': 'keep-alive' },
 })
 async function getRuntimeConfig() {
   try {
