@@ -22,10 +22,13 @@ const STATUS_COLOR = {
 function CampaignCard({ campaign, onClick, onEdit, onDelete }) {
   const plan = campaign.plan_summary || campaign.description || campaign.mission || ''
   const status = campaign.status || 'draft'
-  const rolesCount = campaign.roles_count ?? campaign.role_count ?? 0
-  const nicksCount = campaign.nicks_count ?? campaign.assigned_accounts_count ?? 0
-  const todayPosts = campaign.posts_today ?? 0
-  const todayComments = campaign.comments_today ?? 0
+  const rolesCount = campaign.roles_count ?? campaign.campaign_roles?.length ?? 0
+  const nicksCount = campaign.nicks_count ?? (() => {
+    const roleNicks = (campaign.campaign_roles || []).flatMap(r => r.account_ids || [])
+    return new Set([...roleNicks, ...(campaign.account_ids || [])]).size
+  })()
+  const todayDone = campaign.today_done ?? 0
+  const todayTarget = campaign.today_target ?? 0
 
   return (
     <div
@@ -90,7 +93,9 @@ function CampaignCard({ campaign, onClick, onEdit, onDelete }) {
         <div className="flex-1" />
         <div className="font-mono-ui text-xs">
           <span className="text-app-muted">today </span>
-          <span className="text-hermes">{todayPosts + todayComments}</span>
+          <span className={todayDone >= todayTarget && todayTarget > 0 ? 'text-hermes' : 'text-app-primary'}>
+            {todayDone}{todayTarget > 0 ? `/${todayTarget}` : ''}
+          </span>
         </div>
       </div>
     </div>

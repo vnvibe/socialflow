@@ -161,6 +161,44 @@ module.exports = async (fastify) => {
       .order('created_at', { ascending: false })
 
     if (error) return reply.code(500).send({ error: error.message })
+
+    // Enrich with today's consolidated stats so the Mission Board doesn't
+    // show hardcoded zeros. Source = nick_kpi_daily (the same table
+    // /campaigns/:id/kpi-today reads) — keeps every view in sync.
+    try {
+      const pool = supabase._pool
+      if (pool && data?.length) {
+        const ids = data.map(c => c.id)
+        const { rows: statRows } = await pool.query(
+          `SELECT campaign_id,
+                  COALESCE(SUM(done_likes),0)::int +
+                  COALESCE(SUM(done_comments),0)::int +
+                  COALESCE(SUM(done_friend_requests),0)::int +
+                  COALESCE(SUM(done_group_joins),0)::int AS total_done,
+                  COALESCE(SUM(target_likes),0)::int +
+                  COALESCE(SUM(target_comments),0)::int +
+                  COALESCE(SUM(target_friend_requests),0)::int +
+                  COALESCE(SUM(target_group_joins),0)::int AS total_target,
+                  COUNT(DISTINCT account_id)::int AS nicks_with_kpi
+           FROM nick_kpi_daily
+           WHERE campaign_id = ANY($1::uuid[]) AND date = CURRENT_DATE
+           GROUP BY campaign_id`,
+          [ids]
+        )
+        const statMap = Object.fromEntries(statRows.map(r => [r.campaign_id, r]))
+        for (const c of data) {
+          const s = statMap[c.id] || {}
+          c.today_done = s.total_done || 0
+          c.today_target = s.total_target || 0
+          const roleNicks = (c.campaign_roles || []).flatMap(r => r.account_ids || [])
+          c.nicks_count = new Set([...roleNicks, ...(c.account_ids || [])]).size
+          c.roles_count = c.campaign_roles?.length || 0
+        }
+      }
+    } catch (err) {
+      req.log.warn({ err: err.message }, '[CAMPAIGNS] stats enrichment failed')
+    }
+
     return data
   })
 
