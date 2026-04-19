@@ -838,6 +838,7 @@ function ExecutionTab({ campaignId }) {
 // Icon map — keep in sync with ACTION_LABELS below.
 const ACTION_ICON = {
   like: '❤️',
+  react: '❤️',
   comment: '💬',
   opportunity_comment: '💬',
   join_group: '👥',
@@ -847,9 +848,15 @@ const ACTION_ICON = {
   ai_evaluate_posts: '🧠',
   ai_evaluate_group: '🧠',
   cookie_saved: '🍪',
+  check_group_membership: '🔍',
+  membership_approved: '✅',
+  membership_rejected: '🚫',
+  membership_pending: '⏳',
+  comment_rejected: '🛑',
 }
 const ACTION_LABEL = {
   like: 'đã like bài',
+  react: 'đã thả react',
   comment: 'đã comment bài',
   opportunity_comment: 'đã comment (ad)',
   join_group: 'đã tham gia nhóm',
@@ -859,15 +866,23 @@ const ACTION_LABEL = {
   ai_evaluate_posts: 'AI đánh giá bài',
   ai_evaluate_group: 'AI đánh giá nhóm',
   cookie_saved: 'đã lưu cookie',
+  check_group_membership: 'check trạng thái join',
+  membership_approved: 'được duyệt vào nhóm',
+  membership_rejected: 'bị từ chối vào nhóm',
+  membership_pending: 'đang chờ duyệt vào nhóm',
+  comment_rejected: 'comment bị quality-gate từ chối',
 }
 const FILTERABLE_TYPES = [
   { value: '',                    label: 'Tất cả' },
   { value: 'comment',             label: 'Comment' },
   { value: 'opportunity_comment', label: 'Comment (AD)' },
   { value: 'like',                label: 'Like' },
+  { value: 'react',               label: 'React' },
   { value: 'post',                label: 'Post' },
   { value: 'join_group',          label: 'Join Group' },
-  { value: 'friend_request',      label: 'Friend Request' },
+  { value: 'friend_request',      label: 'Kết bạn' },
+  { value: 'check_group_membership', label: 'Check pending' },
+  { value: 'visit_group',         label: 'Vào nhóm' },
 ]
 
 function fmtTime(iso) {
