@@ -146,22 +146,43 @@ async function evaluatePosts({ posts, campaign, nick, group, topic, maxPicks, ow
   const brandDescription = brand?.brand_description || brand?.product_description || ''
   let adSection = ''
   if (brandName) {
+    const brandDomain = brand?.brand_domain || brand?.domain || brandDescription || brandName
     adSection = `
 === THƯƠNG HIỆU CỦA CHÚNG TA ===
 Tên: ${brandName}
 ${brandDescription ? `Mô tả: ${brandDescription}` : ''}
+${brand?.brand_domain ? `Lĩnh vực: ${brand.brand_domain}` : ''}
 
 Với MỖI bài, đánh giá THÊM:
-- "ad_opportunity": true nếu bài viết đang HỎI / TÌM KIẾM / THAN PHIỀN về vấn đề mà ${brandName} giải quyết được
-- "ad_reason": 1 câu giải thích tại sao đây là cơ hội (hoặc tại sao không)
-- "comment_angle": nếu ad_opportunity=true → gợi ý GÓC comment tự nhiên nhất
-  Ví dụ: "suggest brand như người đã dùng thật", "chia sẻ kinh nghiệm dùng brand cho vấn đề tương tự"
+- "ad_opportunity": true CHỈ KHI cả 2 điều kiện:
+    (a) Bài đang HỎI/TÌM/THAN PHIỀN về VẤN ĐỀ THỰC SỰ THUỘC LĨNH VỰC "${brandDomain}"
+    (b) Sản phẩm ${brandName} GIẢI QUYẾT TRỰC TIẾP vấn đề đó
+- "ad_reason": 1 câu — nêu chính xác câu/cụm trong bài cho thấy đúng lĩnh vực
+- "comment_angle": nếu ad_opportunity=true → góc comment BÁM vấn đề của bài
 - "lead_potential": true nếu TÁC GIẢ có vẻ là KHÁCH TIỀM NĂNG
 
-QUAN TRỌNG về ad_opportunity:
-- ✅ TRUE: "ai rcm vps giá oke", "vps lag quá", "đang tìm host cho website", "dùng cái nào tốt"
-- ❌ FALSE: "share kinh nghiệm cá nhân", "hỏi về code", "bài quảng cáo của người khác", "thông báo sự kiện"
-- KHÔNG dùng keyword matching — đánh giá theo NGỮ CẢNH thực sự
+=== QUY TẮC CHỐNG QUẢNG CÁO LẠC CHỦ ĐỀ (RẤT QUAN TRỌNG) ===
+Nếu tên thương hiệu "${brandName}" TÌNH CỜ trùng/xuất hiện trong:
+- Tên nhóm "${group?.name || ''}"
+- Topic chung của nhóm
+- Một sản phẩm/tool KHÁC có tên tương tự
+→ ĐÓ KHÔNG PHẢI ad_opportunity. KHÔNG bị đánh lừa bởi keyword match.
+
+Bài viết phải có TÍN HIỆU VẤN ĐỀ trong lĩnh vực "${brandDomain}" thì mới ad_opportunity=true.
+
+✅ TRUE (đúng lĩnh vực ${brandDomain}):
+  - "ai rcm vps giá oke", "vps lag quá", "host website chỗ nào ngon"
+  - "server die hoài", "cần deploy app mà không biết chọn hosting"
+
+❌ FALSE (sai lĩnh vực — tuyệt đối không mention brand):
+  - "hỏi cách làm video AI bằng Veo3/Gemini" → lĩnh vực video, không phải hosting
+  - "xin chỗ học ${brandName}" khi ${brandName} trong ngữ cảnh đang được hiểu là tool khác
+  - "giới thiệu bản thân", "tuyển thành viên", "khoe thành tựu"
+  - "bài quảng cáo của người khác"
+  - "thông báo sự kiện/meetup"
+  - Bài hỏi TUTORIAL/HƯỚNG DẪN/CHỖ HỌC → ad_opportunity=false (ta không bán khóa học)
+
+Nếu không chắc chắn 100% bài đúng lĩnh vực "${brandDomain}" → ad_opportunity=false.
 `
   }
 
@@ -276,7 +297,7 @@ CHỈ trả về JSON, không giải thích.`
  * Scores: naturalness, relevance, value-add
  * Only approve if average >= 7
  */
-async function qualityGateComment({ comment, postText, group, topic, nick, ownerId, threadComments }) {
+async function qualityGateComment({ comment, postText, group, topic, nick, ownerId, threadComments, brandConfig }) {
   if (!comment || comment.length < 3) return { approved: false, reason: 'too_short' }
 
   // Fix 4: collapse the post + thread into a single corpus so the gate can check
@@ -286,6 +307,9 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
 
   // Quick heuristic checks (no AI needed)
   const lower = comment.toLowerCase()
+  const postLower = (postText || '').toLowerCase()
+  const threadLower = threadStr.toLowerCase()
+  const haystack = `${postLower} ${threadLower}`
 
   // Reject obvious template/generic/bot-like comments
   const genericPatterns = [
@@ -301,6 +325,9 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
     /thấy (nó |nó )?xử lý (rất )?(mượt|tốt|nhanh)/i,  // bot review
     /rất (hay|bổ ích|hữu ích|tuyệt vời)/i,  // generic praise
     /mình (cũng )?hay dùng .+ (cho |để )/i,  // bán hàng gián tiếp
+    /mò mãi không ra/i,                             // mẫu spam "chuyển sang mua"
+    /chuyển sang (mua|dùng) .+ (cho đỡ|luôn)/i,     // ad shoe-in
+    /mua .+ có sẵn .+ chạy luôn/i,                  // VPS spam pattern
   ]
   if (genericPatterns.some(p => p.test(comment.trim()))) {
     return { approved: false, reason: 'generic_template', score: 2 }
@@ -312,6 +339,37 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
     const topicMentions = topicWords.filter(w => lower.includes(w)).length
     if (topicMentions >= 3) {
       return { approved: false, reason: 'too_promotional', score: 3 }
+    }
+  }
+
+  // AD-DRIFT GUARD: if comment mentions brand but the post has ZERO signal
+  // in brand's domain, it's a shoehorned pitch — reject. The nurture flow
+  // already gates ad_opportunity in the scorer, but LLMs occasionally inject
+  // the brand name anyway ("mua VPS có sẵn OpenClaw" posted into a
+  // video-AI tutorial thread is the canonical failure mode).
+  if (brandConfig?.brand_name) {
+    const brandName = String(brandConfig.brand_name).toLowerCase()
+    const productName = String(brandConfig.product_name || '').toLowerCase()
+    const domain = String(brandConfig.brand_domain || brandConfig.product_description || '').toLowerCase()
+
+    const mentionsBrand =
+      (brandName && lower.includes(brandName)) ||
+      (productName && productName.length > 2 && lower.includes(productName))
+
+    if (mentionsBrand) {
+      // Build a small set of domain signal terms from the brand's domain/description
+      const domainWords = domain
+        .split(/[\s,.;:()\-/]+/)
+        .filter(w => w.length > 3 && !['the', 'and', 'vps', 'dịch', 'chúng', 'của'].includes(w))
+        .slice(0, 12)
+      // Generic hosting domain signals (backup if brand_domain is blank)
+      const defaultSignals = ['vps', 'server', 'host', 'hosting', 'deploy', 'domain', 'ssh', 'cloud', 'dedicated', 'bandwidth', 'website', 'cpanel', 'docker']
+      const signals = domainWords.length > 0 ? [...domainWords, ...defaultSignals] : defaultSignals
+      const postHasDomainSignal = signals.some(w => haystack.includes(w))
+
+      if (!postHasDomainSignal) {
+        return { approved: false, reason: 'ad_drift_off_domain', score: 2 }
+      }
     }
   }
 
@@ -495,10 +553,15 @@ async function generateSmartComment({ postText, postAuthor, group, campaign, nic
     : ''
 
   // Determine if this comment should include soft advertising
-  const shouldSoftAd = adConfig?.enabled && hasAdOpportunity && Math.random() * 100 < (adConfig.ad_frequency || 30)
+  // Lowered default ad_frequency 30→15: previous default shoehorned product
+  // into too many comments, including off-topic ones (e.g. VPS brand name
+  // appeared in group about AI-video tools → bot inserted VPS pitch into
+  // a post asking how to learn video generation — pure spam).
+  const shouldSoftAd = adConfig?.enabled && hasAdOpportunity && Math.random() * 100 < (adConfig.ad_frequency || 15)
 
   let adDirective = ''
   if (shouldSoftAd) {
+    const brandDomain = adConfig.brand_domain || adConfig.domain || adConfig.product_description || ''
     const ctaExamples = {
       question: `"Bạn đã thử ${adConfig.product_name} chưa? Mình dùng thấy khá ổn"`,
       suggestion: `"Nếu cần mình gợi ý ${adConfig.product_name}, mình dùng thấy OK"`,
@@ -506,19 +569,29 @@ async function generateSmartComment({ postText, postAuthor, group, campaign, nic
     }
     adDirective = `
 === QUẢNG CÁO NHẸ (SOFT MENTION) ===
-Bài viết này là CƠ HỘI quảng cáo nhẹ sản phẩm.
+Bài viết này ĐÃ ĐƯỢC ĐÁNH GIÁ là CƠ HỘI hợp lệ (ad_opportunity=true).
 Thương hiệu: ${adConfig.brand_name || ''}
 Sản phẩm: ${adConfig.product_name}
 Mô tả: ${adConfig.product_description || ''}
+${brandDomain ? `Lĩnh vực sản phẩm: ${brandDomain}` : ''}
 
 CÁCH CHÈN — chọn 1 trong các kiểu:
 ${ctaExamples[adConfig.cta_style] || ctaExamples.experience}
+
+=== KIỂM TRA LẦN CUỐI TRƯỚC KHI MENTION ===
+Trước khi nhắc ${adConfig.product_name}, tự hỏi:
+1. Vấn đề trong bài có THỰC SỰ thuộc lĩnh vực "${brandDomain}" không?
+2. Bài có đang hỏi về TUTORIAL/CÁCH LÀM/HỌC cái gì khác không? (nếu có → KHÔNG mention)
+3. Tên brand có bị trùng với 1 tool/sản phẩm khác đang được nhắc trong bài không? (nếu có → KHÔNG mention, comment bình thường)
+
+NẾU KHÔNG CHẮC 100% ĐÚNG LĨNH VỰC → comment bình thường, KHÔNG nhắc sản phẩm.
 
 QUY TẮC QUẢNG CÁO NHẸ:
 - PHẢI trả lời đúng nội dung bài viết TRƯỚC, rồi mới mention sản phẩm
 - Mention tự nhiên như chia sẻ kinh nghiệm cá nhân, KHÔNG quảng cáo lộ liễu
 - TUYỆT ĐỐI KHÔNG dùng link, URL, hashtag, số điện thoại
 - KHÔNG nói "mua ngay", "liên hệ", "inbox" — chỉ gợi ý nhẹ nhàng
+- KHÔNG dùng cụm "mò mãi không ra", "chuyển sang mua X cho đỡ lằng nhằng", "mua X chạy luôn" — là mẫu spam đã bị FB flag
 - Nếu bài viết KHÔNG phù hợp để mention → BỎ QUA, comment bình thường
 `
   }

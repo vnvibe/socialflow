@@ -1286,6 +1286,7 @@ async function campaignNurture(payload, supabase) {
                   group: { name: group.name },
                   topic, nick: { username: account.username },
                   ownerId: payload.owner_id,
+                  brandConfig, // enables ad-drift rejection when brand name appears in off-domain posts
                 })
                 if (!gate.approved) {
                   console.log(`[NURTURE] ❌ Quality gate REJECTED: "${commentText.substring(0, 50)}..." (score: ${gate.score}, reason: ${gate.reason})`)
