@@ -166,6 +166,26 @@ async function heartbeat({ agentId = AGENT_ID, hostname, platform, userId, stats
   }
 }
 
+/**
+ * GET /agent/config — runtime knobs (rest/session/timeout/viewport)
+ * controlled from Hermes settings UI. Uses a separate axios instance
+ * because the route lives outside /agent-jobs.
+ */
+const rootClient = axios.create({
+  baseURL: API_URL,
+  timeout: 10000,
+  headers: { 'X-Agent-Key': AGENT_KEY || '', 'X-Agent-Id': AGENT_ID },
+})
+async function getRuntimeConfig() {
+  try {
+    const { data } = await rootClient.get('/agent/runtime')
+    return data?.effective || null
+  } catch (err) {
+    console.warn(`[API-CLIENT] getRuntimeConfig failed: ${err.message}`)
+    return null
+  }
+}
+
 module.exports = {
   API_URL,
   AGENT_ID,
@@ -180,4 +200,5 @@ module.exports = {
   getAccountStatus,
   getExcludedUserIds,
   heartbeat,
+  getRuntimeConfig,
 }

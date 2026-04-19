@@ -1174,9 +1174,154 @@ function PerTaskModelSection() {
   )
 }
 
+// ───────────────────────────────────────────────────────────
+// SECTION: Agent Playwright runtime (Hermes-controlled)
+// Pulls GET /agent/runtime, PUTs the edited override back. Agent re-reads
+// the config every 5 min, so tuning here takes effect on the next tick
+// without rebuilding the Wails binary.
+// ───────────────────────────────────────────────────────────
+const RUNTIME_FIELDS = [
+  { group: 'Rest / session (phút)' },
+  { k: 'rest_min_minutes',    label: 'Rest min',    type: 'number', step: 1, unit: 'min', hint: 'Khoảng nghỉ tối thiểu giữa 2 session của 1 nick' },
+  { k: 'rest_max_minutes',    label: 'Rest max',    type: 'number', step: 1, unit: 'min', hint: 'Khoảng nghỉ tối đa — jitter uniform [min, max]' },
+  { k: 'session_min_minutes', label: 'Session min', type: 'number', step: 1, unit: 'min', hint: '1 session = 1 lượt mở browser làm việc' },
+  { k: 'session_max_minutes', label: 'Session max', type: 'number', step: 1, unit: 'min', hint: 'Agent force nghỉ khi chạy quá mức này' },
+  { group: 'Timeout Playwright (ms)' },
+  { k: 'navigation_timeout_ms', label: 'Navigation', type: 'number', step: 1000, unit: 'ms', hint: 'page.goto / waitForNavigation' },
+  { k: 'action_timeout_ms',     label: 'Action',     type: 'number', step: 500,  unit: 'ms', hint: 'click / type / waitForSelector' },
+  { group: 'Viewport + UA' },
+  { k: 'viewport_width',  label: 'Viewport W', type: 'number', step: 1, unit: 'px' },
+  { k: 'viewport_height', label: 'Viewport H', type: 'number', step: 1, unit: 'px' },
+  { k: 'user_agent',      label: 'User agent (null = auto)', type: 'text' },
+  { k: 'default_language', label: 'Default lang', type: 'text' },
+  { group: 'Concurrency' },
+  { k: 'max_concurrent',      label: 'Max concurrent nicks', type: 'number', step: 1, hint: 'Số nick chạy song song trong agent' },
+  { k: 'poll_interval_ms',    label: 'Poll interval',        type: 'number', step: 500, unit: 'ms' },
+  { k: 'heartbeat_interval_ms', label: 'Heartbeat interval', type: 'number', step: 1000, unit: 'ms' },
+  { group: 'Warm-up gate' },
+  { k: 'enable_warmup_gate',     label: 'Bật warmup gate',       type: 'bool' },
+  { k: 'warmup_join_block_days', label: 'Chặn join_group đến ngày', type: 'number', step: 1, unit: 'ngày', hint: 'Nick <N ngày không được join nhóm mới' },
+]
+
+function AgentPlaywrightSection() {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['agent-runtime'],
+    queryFn: async () => (await api.get('/agent/runtime')).data,
+  })
+  const [draft, setDraft] = useState({})
+  useEffect(() => {
+    if (data?.effective) setDraft(data.effective)
+  }, [data])
+
+  const save = useMutation({
+    mutationFn: async (payload) => api.put('/agent/runtime', payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent-runtime'] })
+      toast.success('Đã lưu. Agent đồng bộ trong vòng 5 phút.')
+    },
+    onError: (err) => toast.error(err?.response?.data?.error || err.message),
+  })
+
+  const reset = () => {
+    if (data?.defaults) setDraft({ ...data.defaults })
+  }
+
+  const setField = (k, v) => setDraft((d) => ({ ...d, [k]: v }))
+  const defaults = data?.defaults || {}
+
+  if (isLoading) return <div className="p-6 text-app-muted">Đang tải…</div>
+
+  return (
+    <div className="p-6 font-mono-ui text-xs max-w-3xl">
+      <div className="mb-4">
+        <div className="text-app-primary text-sm mb-1">Agent Playwright runtime</div>
+        <div className="text-app-muted text-[11px] leading-relaxed">
+          Hermes điều khiển hành vi Playwright từ đây — không phải đổi code rồi build lại agent.
+          Agent pull cấu hình mới mỗi 5 phút, hoặc đá restart để áp ngay.
+        </div>
+      </div>
+
+      <div style={{ border: '1px solid var(--border)' }}>
+        {RUNTIME_FIELDS.map((row, idx) => {
+          if (row.group) {
+            return (
+              <div
+                key={`g-${idx}`}
+                className="px-3 py-2 text-[10px] uppercase text-app-muted"
+                style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border)' }}
+              >
+                {row.group}
+              </div>
+            )
+          }
+          const value = draft[row.k]
+          const defVal = defaults[row.k]
+          const changed = value !== defVal && value !== undefined
+          return (
+            <div
+              key={row.k}
+              className="flex items-center gap-3 px-3 py-2"
+              style={{ borderBottom: '1px solid var(--border)' }}
+            >
+              <div className="w-48">
+                <div className="text-app-primary">{row.label}</div>
+                {row.hint && <div className="text-app-dim text-[10px]">{row.hint}</div>}
+              </div>
+              {row.type === 'bool' ? (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!value}
+                    onChange={(e) => setField(row.k, e.target.checked)}
+                  />
+                  <span className="text-app-muted">{value ? 'Bật' : 'Tắt'}</span>
+                </label>
+              ) : (
+                <input
+                  type={row.type === 'number' ? 'number' : 'text'}
+                  step={row.step || 1}
+                  value={value === null || value === undefined ? '' : value}
+                  onChange={(e) => {
+                    let v = e.target.value
+                    if (row.type === 'number') v = v === '' ? null : Number(v)
+                    setField(row.k, v)
+                  }}
+                  placeholder={defVal === null ? '(auto)' : String(defVal ?? '')}
+                  className="flex-1 px-2 py-1 font-mono-ui text-xs"
+                  style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                />
+              )}
+              {row.unit && <span className="w-10 text-app-muted">{row.unit}</span>}
+              {changed && <span className="w-6 text-warn" title="Khác default">•</span>}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          className="btn-hermes"
+          disabled={save.isPending}
+          onClick={() => save.mutate(draft)}
+        >
+          {save.isPending ? 'Đang lưu…' : 'Lưu cấu hình'}
+        </button>
+        <button className="btn-ghost" onClick={reset} disabled={save.isPending}>
+          Reset về default
+        </button>
+        <div className="text-app-muted text-[11px]">
+          Agent sync mỗi ~5 phút
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const SECTIONS = [
   { key: 'model',     label: 'Model' },
   { key: 'per_task',  label: 'Per-task model' },
+  { key: 'agent_pw',  label: 'Agent Playwright' },
   { key: 'skills',    label: 'Skills' },
   { key: 'quality',   label: 'Quality' },
   { key: 'fallback',  label: 'Fallback' },
@@ -1225,6 +1370,7 @@ export default function HermesSettings() {
       <div className="flex-1 overflow-auto">
         {section === 'model'     && <ModelSection />}
         {section === 'per_task'  && <PerTaskModelSection />}
+        {section === 'agent_pw'  && <AgentPlaywrightSection />}
         {section === 'skills'    && <SkillsSection />}
         {section === 'quality'   && <QualityGateSection />}
         {section === 'fallback'  && <FallbackSection />}

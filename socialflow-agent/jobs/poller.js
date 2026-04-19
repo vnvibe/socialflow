@@ -144,15 +144,19 @@ const groupVisitLog = new Map()        // fb_group_id → [{ nickId, ts }]
 const BUDGET_CACHE_TTL = 60000         // 1 min
 const STATUS_CACHE_TTL = 60000         // 1 min
 const MAX_HOURLY_ACTIONS = 50          // cumulative across all types
-// Randomized ranges — avoid fixed patterns that FB can detect
+// Randomized ranges — avoid fixed patterns that FB can detect.
+// Windows come from the Hermes runtime config (see agentRuntime below) so
+// the admin can tune them from the Hermes Settings UI. The initial values
+// below are defaults; fetchAndApplyRuntime() refreshes them every 5 min.
 const randBetween = (min, max) => Math.floor(min + Math.random() * (max - min))
-const randSessionMax = () => randBetween(25, 45) * 60 * 1000   // 25-45 min session
-// Rest range shortened from 45-120 → 20-60. With only 2-3 healthy nicks the
-// old range meant both were frequently resting at the same time and the agent
-// sat idle 70% of the day. 20-60 keeps human-like randomness but bumps the
-// work ratio from ~30% to ~47%. See MIN_REST_BEFORE_STAGGER_EARLY_RELEASE
-// below for the accompanying smart-stagger path.
-const randRestMs = () => randBetween(20, 60) * 60 * 1000       // 20-60 min rest
+const agentRuntime = {
+  rest_min_minutes: 20,
+  rest_max_minutes: 60,
+  session_min_minutes: 25,
+  session_max_minutes: 45,
+}
+const randSessionMax = () => randBetween(agentRuntime.session_min_minutes, agentRuntime.session_max_minutes) * 60 * 1000
+const randRestMs = () => randBetween(agentRuntime.rest_min_minutes, agentRuntime.rest_max_minutes) * 60 * 1000
 // Smart stagger: if a nick has already rested this long AND another healthy
 // nick is also currently resting, short-circuit the rest so at least one nick
 // stays working. Prevents the "both rest, agent does nothing" pattern that
@@ -1167,11 +1171,35 @@ async function checkSharedPostSwarm() {
   }
 }
 
+async function syncRuntimeConfig() {
+  const remote = await apiClient.getRuntimeConfig()
+  if (!remote || typeof remote !== 'object') return
+  let changed = false
+  for (const k of Object.keys(agentRuntime)) {
+    if (remote[k] !== undefined && remote[k] !== null && remote[k] !== agentRuntime[k]) {
+      agentRuntime[k] = remote[k]
+      changed = true
+    }
+  }
+  if (changed) {
+    console.log(`[POLLER] Hermes runtime config synced: rest=${agentRuntime.rest_min_minutes}-${agentRuntime.rest_max_minutes}min, session=${agentRuntime.session_min_minutes}-${agentRuntime.session_max_minutes}min`)
+  }
+}
+
 function startPoller() {
   const userInfo = AGENT_USER_ID ? ` | user: ${process.env.AGENT_USER_EMAIL || AGENT_USER_ID}` : ''
   const totalGB = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1)
   const freeGB = (os.freemem() / 1024 / 1024 / 1024).toFixed(1)
   console.log(`[POLLER] Starting — max ${MAX_CONCURRENT} concurrent nicks (auto-scale, ${freeGB}/${totalGB}GB RAM), Realtime+Polling hybrid${userInfo}`)
+
+  // Pull Hermes-controlled runtime config now + every 5 min.
+  // User tweaks rest/session/timeout from /hermes/settings → Agent Playwright
+  // and the agent picks up the new values on the next sync without a restart.
+  syncRuntimeConfig().catch(() => {})
+  const runtimeInterval = setInterval(() => {
+    syncRuntimeConfig().catch(() => {})
+  }, 5 * 60 * 1000)
+
   recoverStaleJobs().then(() => poll())
   const pollInterval = setInterval(poll, POLL_MS)
   const recoverInterval = setInterval(recoverStaleJobs, 2 * 60 * 1000)
@@ -1216,6 +1244,7 @@ function startPoller() {
     clearInterval(pollInterval)
     clearInterval(recoverInterval)
     clearInterval(opportunityInterval)
+    clearInterval(runtimeInterval)
     if (realtimeChannel) {
       try { await supabase.removeChannel(realtimeChannel) } catch {}
     }
