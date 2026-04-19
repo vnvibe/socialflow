@@ -46,11 +46,33 @@ async function ensurePlaywright() {
   }
 
   return new Promise((resolve) => {
-    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-    const child = spawn(npx, ['playwright', 'install', 'chromium'], {
+    // Windows Electron packaged apps sometimes launch with a minimal env
+    // missing SystemRoot / ComSpec / PATH — `shell: true` then tries to
+    // locate cmd.exe via those vars and throws `spawn cmd.exe ENOENT`.
+    // Reconstruct a safe env before spawning.
+    const safeEnv = { ...process.env }
+    if (process.platform === 'win32') {
+      safeEnv.SystemRoot = safeEnv.SystemRoot || 'C:\\Windows'
+      safeEnv.ComSpec = safeEnv.ComSpec || 'C:\\Windows\\System32\\cmd.exe'
+      safeEnv.PATH = safeEnv.PATH || `${safeEnv.SystemRoot}\\System32;${safeEnv.SystemRoot}`
+      if (!safeEnv.PATH.toLowerCase().includes('system32')) {
+        safeEnv.PATH = `${safeEnv.SystemRoot}\\System32;${safeEnv.PATH}`
+      }
+    }
+    safeEnv.PLAYWRIGHT_BROWSERS_PATH = path.join(appRoot, '.browsers')
+
+    // Prefer node_modules/.bin/npx.cmd (shipped with app) over PATH lookup
+    // so spawn doesn't need shell resolution. Falls back to 'npx.cmd' in
+    // PATH if the bundled one is missing.
+    const localNpx = path.join(appRoot, 'node_modules', '.bin',
+      process.platform === 'win32' ? 'npx.cmd' : 'npx')
+    const npxCmd = fs.existsSync(localNpx) ? localNpx
+      : (process.platform === 'win32' ? 'npx.cmd' : 'npx')
+
+    const child = spawn(npxCmd, ['playwright', 'install', 'chromium'], {
       cwd: appRoot,
-      env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: path.join(appRoot, '.browsers') },
-      shell: true,
+      env: safeEnv,
+      shell: false,
     })
 
     child.stdout.on('data', (d) => addLog(d.toString().trim(), 'info'))
