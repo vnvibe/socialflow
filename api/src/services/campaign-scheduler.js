@@ -229,10 +229,15 @@ async function reevaluateStaleGroups() {
 
 // ─── Auto-apply Hermes Review for enabled campaigns ──────────────────────
 async function processAutoApplyReviews() {
+  // Skip hermes_central campaigns — orchestrator already emits
+  // decrease_budget / pause_nick / alert_user actions on its own tick, so
+  // running the review-apply loop on top would double-apply the same
+  // decision and fight with itself.
   const { data: campaigns } = await supabase
     .from('campaigns')
     .select('id, name, owner_id, auto_apply_percent, auto_apply_last_run_at')
     .eq('auto_apply_enabled', true)
+    .eq('hermes_central', false)
     .gt('auto_apply_percent', 0)
     .limit(50)
 
@@ -325,11 +330,15 @@ async function processAutoApplyReviews() {
 }
 
 // ─── Phase 7: Scout cron (independent of campaign cron) ──────────────────
+// Skipped entirely for hermes_central campaigns — the orchestrator emits
+// assign_job(type=campaign_discover_groups) when it decides scout is due,
+// giving it the same dedup + quota gating as nurture work.
 async function processScoutCron() {
   const { data: campaigns } = await supabase
     .from('campaigns')
-    .select('id, name, topic, owner_id, brand_config, ad_mode, campaign_active_days, campaign_roles(id, role_type, is_active, account_ids, mission, parsed_plan, config, feeds_into, read_from, meta)')
+    .select('id, name, topic, owner_id, brand_config, ad_mode, campaign_active_days, hermes_central, campaign_roles(id, role_type, is_active, account_ids, mission, parsed_plan, config, feeds_into, read_from, meta)')
     .eq('is_active', true)
+    .eq('hermes_central', false)
     .or('status.eq.running,status.eq.active,status.is.null')
     .limit(200)
 
@@ -489,10 +498,21 @@ async function processMembershipChecks() {
   }
   const slotsLeft = MEMBERSHIP_PENDING_CAP - (backlogCount || 0)
 
+  // Skip hermes_central campaigns — the orchestrator's recheck_group action
+  // covers this work with full campaign context (and dedups via
+  // has_check_job). Without this skip, the 2-hour cron would race Hermes
+  // decisions made 15-5 min earlier for the same group.
+  const { data: centralCampaigns } = await supabase
+    .from('campaigns')
+    .select('id')
+    .eq('hermes_central', true)
+    .eq('is_active', true)
+  const centralCampaignIds = new Set((centralCampaigns || []).map(c => c.id))
+
   // Only verify groups that belong to an ACTIVE campaign via campaign_groups
   // junction. Orphaned fb_groups (no junction row) are ignored — they'll get
   // picked up when scout reuse logic attaches them to a campaign.
-  const { data: pendingRows } = await supabase
+  const { data: pendingRowsRaw } = await supabase
     .from('campaign_groups')
     .select('group_id, campaign_id, assigned_nick_id, fb_groups!inner(id, fb_group_id, url, name, pending_approval, is_member)')
     .eq('status', 'active')
@@ -500,6 +520,7 @@ async function processMembershipChecks() {
     .eq('fb_groups.is_member', false)
     .limit(Math.max(slotsLeft, 1) * 4) // fetch a bit more so dedup still has room to pick
 
+  const pendingRows = (pendingRowsRaw || []).filter(r => !centralCampaignIds.has(r.campaign_id))
   if (!pendingRows?.length) return
 
   // Dedup: skip groups that already have a pending check queued
