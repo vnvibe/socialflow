@@ -104,7 +104,6 @@ export default function ReplyModal({ post, onClose }) {
       }).catch(() => {}) // best effort
 
       queryClient.invalidateQueries({ queryKey: ['comment-jobs'] })
-      queryClient.invalidateQueries({ queryKey: ['comment-logs'] })
       toast.success('Da tao job comment! Agent se thuc hien.')
       onClose()
     } catch (err) {
