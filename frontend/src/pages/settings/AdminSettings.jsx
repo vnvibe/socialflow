@@ -5,13 +5,12 @@ import { Eye, EyeOff, Save, Loader2, CheckCircle, AlertCircle, Plus, Trash2, Che
 import toast from 'react-hot-toast'
 import useAuthStore from '../../store/auth.store'
 import api from '../../lib/api'
-import AISettings from './AISettings'
 import ProxyManager from './ProxyManager'
 import UserManager from './UserManager'
 import FacebookSettings from './FacebookSettings'
 
+// 'ai' tab moved to /hermes/settings (full Per-task model + Skills editor)
 const tabs = [
-  { key: 'ai', label: 'AI' },
   { key: 'facebook', label: 'Facebook' },
   { key: 'storage', label: 'Lưu trữ (R2)' },
   { key: 'apify', label: 'Apify' },
@@ -493,7 +492,6 @@ export default function AdminSettings() {
 
       {/* Tab content */}
       {activeTab === 'facebook' && <FacebookSettings />}
-      {activeTab === 'ai' && <AISettings />}
       {activeTab === 'storage' && <StorageTab />}
       {activeTab === 'apify' && <ApifyTab />}
       {activeTab === 'proxies' && <ProxyManager />}

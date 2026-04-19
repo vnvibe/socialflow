@@ -45,11 +45,11 @@ class ErrorBoundary extends Component {
   static getDerivedStateFromError(error) { return { error } }
   render() {
     if (this.state.error) return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
+      <div className="flex items-center justify-center h-screen" style={{ background: 'var(--bg-base)' }}>
         <div className="text-center p-8">
-          <p className="text-red-500 font-medium mb-2">Đã xảy ra lỗi không mong muốn</p>
-          <p className="text-gray-500 text-sm mb-4">{this.state.error?.message}</p>
-          <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-500 text-white rounded text-sm">Tải lại trang</button>
+          <p className="text-danger font-medium mb-2">Đã xảy ra lỗi không mong muốn</p>
+          <p className="text-app-muted text-sm mb-4">{this.state.error?.message}</p>
+          <button onClick={() => window.location.reload()} className="btn-hermes">Tải lại trang</button>
         </div>
       </div>
     )
@@ -59,7 +59,7 @@ class ErrorBoundary extends Component {
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuthStore()
-  if (loading) return <div className="flex items-center justify-center h-screen"><div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>
+  if (loading) return <div className="flex items-center justify-center h-screen" style={{ background: 'var(--bg-base)' }}><div className="animate-spin w-8 h-8 border-4 border-t-transparent rounded-full" style={{ borderColor: 'var(--hermes)', borderTopColor: 'transparent' }} /></div>
   if (!user) return <Navigate to="/login" />
   return children
 }
@@ -132,7 +132,7 @@ export default function App() {
                 <Route path="/settings/admin" element={<AdminSettings />} />
                 <Route path="/settings/websites" element={<WebsiteSettings />} />
                 <Route path="/websites/:id/report" element={<WebsiteReport />} />
-                <Route path="/settings/ai" element={<Navigate to="/settings/admin" />} />
+                <Route path="/settings/ai" element={<Navigate to="/hermes/settings" />} />
                 <Route path="/settings/proxies" element={<Navigate to="/settings/admin" />} />
                 <Route path="/settings/users" element={<Navigate to="/settings/admin" />} />
               </Routes>
