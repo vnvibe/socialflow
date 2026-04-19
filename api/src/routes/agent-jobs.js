@@ -41,10 +41,10 @@ module.exports = async (fastify) => {
         // (particularly orchestrator-produced jobs) leave created_by NULL
         // but always set payload.owner_id. Without this OR, those jobs
         // get filtered out and the agent sits idle while their nicks
-        // have pending work. Cast $N::uuid explicitly — Postgres infers
-        // the param as text (because of the json ->> branch) and then
-        // uuid = text errors out.
-        where.push(`(j.created_by = $${args.length}::uuid OR j.payload->>'owner_id' = $${args.length})`)
+        // have pending work. Cast j.created_by::text (not the param) —
+        // pg infers the param type from the first usage site, so mixing
+        // ::uuid + json ->> on the same $N crashes with 'text = uuid'.
+        where.push(`(j.created_by::text = $${args.length} OR j.payload->>'owner_id' = $${args.length})`)
       } else if (exclude_user_ids) {
         const ids = exclude_user_ids.split(',').filter(Boolean)
         if (ids.length > 0) {
