@@ -3,6 +3,19 @@ const path = require('path')
 const { fork, execSync, spawn } = require('child_process')
 const fs = require('fs')
 
+// Global safety net — never let a child-process ENOENT crash the whole
+// Electron main process. We log and swallow; individual handlers already
+// surface the error to the UI. Prevents the "A JavaScript error occurred
+// in the main process" dialog.
+process.on('uncaughtException', (err) => {
+  try { addLog(`[UNCAUGHT] ${err && err.message ? err.message : err}`, 'error') } catch {}
+  console.error('[UNCAUGHT]', err)
+})
+process.on('unhandledRejection', (reason) => {
+  try { addLog(`[UNHANDLED REJECTION] ${reason && reason.message ? reason.message : reason}`, 'error') } catch {}
+  console.error('[UNHANDLED REJECTION]', reason)
+})
+
 let mainWindow = null
 let tray = null
 let agentProcess = null
@@ -61,18 +74,33 @@ async function ensurePlaywright() {
     }
     safeEnv.PLAYWRIGHT_BROWSERS_PATH = path.join(appRoot, '.browsers')
 
-    // Prefer node_modules/.bin/npx.cmd (shipped with app) over PATH lookup
-    // so spawn doesn't need shell resolution. Falls back to 'npx.cmd' in
-    // PATH if the bundled one is missing.
-    const localNpx = path.join(appRoot, 'node_modules', '.bin',
-      process.platform === 'win32' ? 'npx.cmd' : 'npx')
-    const npxCmd = fs.existsSync(localNpx) ? localNpx
-      : (process.platform === 'win32' ? 'npx.cmd' : 'npx')
+    // Use fork() instead of spawn('npx.cmd') — .cmd files on Windows
+    // REQUIRE cmd.exe as interpreter even with shell:false, and packaged
+    // Electron apps often launch with a stripped env where cmd.exe can't
+    // be located. fork() runs a Node script directly in the current
+    // Electron's Node runtime → no shell, no .cmd wrapper needed.
+    const playwrightCli = path.join(appRoot, 'node_modules', 'playwright', 'cli.js')
+    if (!fs.existsSync(playwrightCli)) {
+      addLog(`Playwright CLI not found at ${playwrightCli}`, 'error')
+      return resolve(false)
+    }
 
-    const child = spawn(npxCmd, ['playwright', 'install', 'chromium'], {
+    const child = fork(playwrightCli, ['install', 'chromium'], {
       cwd: appRoot,
       env: safeEnv,
-      shell: false,
+      silent: true,  // pipe stdout/stderr so we can stream install progress
+    })
+
+    // MUST attach 'error' listener — if fork itself fails (missing binary,
+    // permissions), Node emits 'error' async. Without this handler,
+    // Electron catches it as Uncaught Exception and shows the scary JS
+    // error dialog.
+    child.on('error', (err) => {
+      addLog(`Chromium install fork failed: ${err.message}`, 'error')
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('setup-progress', null)
+      }
+      resolve(false)
     })
 
     child.stdout.on('data', (d) => addLog(d.toString().trim(), 'info'))
@@ -117,10 +145,27 @@ function startAgent() {
     }
   }
 
+  // Same safe-env treatment as ensurePlaywright — the forked agent spawns
+  // powershell + taskkill on boot (killZombieChromium), needs SystemRoot.
+  const forkEnv = { ...process.env, ...envVars }
+  if (process.platform === 'win32') {
+    forkEnv.SystemRoot = forkEnv.SystemRoot || 'C:\\Windows'
+    forkEnv.ComSpec = forkEnv.ComSpec || 'C:\\Windows\\System32\\cmd.exe'
+    const sys32 = `${forkEnv.SystemRoot}\\System32`
+    if (!forkEnv.PATH || !forkEnv.PATH.toLowerCase().includes('system32')) {
+      forkEnv.PATH = `${sys32};${forkEnv.PATH || ''}`
+    }
+  }
+
   agentProcess = fork(agentPath, [], {
     cwd: appRoot,
-    env: { ...process.env, ...envVars },
+    env: forkEnv,
     silent: true,
+  })
+
+  agentProcess.on('error', (err) => {
+    addLog(`Agent fork failed: ${err.message}`, 'error')
+    agentProcess = null
   })
 
   agentProcess.stdout.on('data', (data) => {
