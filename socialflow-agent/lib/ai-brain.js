@@ -279,20 +279,36 @@ CHỈ trả về JSON, không giải thích.`
     const match = text.match(/\[[\s\S]*\]/)
     if (match) {
       const results = JSON.parse(match[0])
-      // Audit 2026-04-12: threshold 5→3. In 24h with threshold=5, AI scored
-      // every single post 2-3 → 0 comments all day across all nicks. Score 3
-      // means "loosely related, can react" which is still natural group behavior.
-      // The prompt's QUY TẮC section still bans generic/vague comments, so
-      // quality is guarded by AI judgment, not a hard numeric cutoff.
-      const filtered = results
-        .filter(r => r.score >= 3 && r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
+      // 2-tier picker — DeepSeek is too strict about campaign-topic match
+      // (scores 1 for any post not mentioning the topic directly, even
+      // ordinary group chatter). Separate "topic-relevant" from "warmup-
+      // engagement" instead of using a single threshold:
+      //
+      //   Tier 1 (topic-relevant): score>=5, action!='skip' → up to maxPicks
+      //   Tier 2 (warmup-only):    score 1-4, action!='skip' → 1 post max,
+      //     flagged with warmup_only=true so the caller knows to write a
+      //     generic group-native comment (NO brand mention, NO ad angle)
+      //
+      // Without Tier 2, nicks in off-topic groups (Đà Nẵng general, crypto,
+      // AI community) find 0 posts every session → 0 comments → KPI miss.
+      // With Tier 2, we still comment but limit to 1 safe post per group
+      // and never push brand so it looks like natural user activity.
+      const eligible = results
+        .filter(r => r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
         .filter(r => r.action !== 'skip')
-        .sort((a, b) => b.score - a.score)
-        .slice(0, maxPicks || 2)
+        .sort((a, b) => (b.score || 0) - (a.score || 0))
 
-      if (filtered.length > 0) return filtered
+      const tier1 = eligible.filter(r => (r.score || 0) >= 5).slice(0, maxPicks || 2)
+      if (tier1.length > 0) return tier1
 
-      console.log(`[AI-BRAIN] No posts scored >= 3 and non-ad — skipping group (no comment)`)
+      // Warmup fallback — 1 post only, flagged so comment gen skips brand
+      const tier2 = eligible.slice(0, 1).map(r => ({ ...r, warmup_only: true, ad_opportunity: false }))
+      if (tier2.length > 0) {
+        console.log(`[AI-BRAIN] No topic-relevant posts; picking 1 warmup-mode post (score=${tier2[0].score}) for generic engagement`)
+        return tier2
+      }
+
+      console.log(`[AI-BRAIN] All posts marked skip or flagged as ads — skipping group entirely`)
       return []
     }
   } catch (err) {
