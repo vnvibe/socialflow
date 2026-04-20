@@ -1,9 +1,20 @@
-// Load config: config.env > .env > lib/config.js
+// Load config: .env (dev) > lib/config.js (packaged build)
+// In packaged mode there's no .env — build script embeds credentials
+// into lib/config.js. Copy them to process.env so downstream modules
+// (api-client, supabase wrapper, poller) that read process.env see
+// them consistently.
 const path = require('path')
 const fs = require('fs')
 const { execSync } = require('child_process')
 const envFile = fs.existsSync(path.join(__dirname, 'config.env')) ? 'config.env' : '.env'
 require('dotenv').config({ path: path.join(__dirname, envFile) })
+
+try {
+  const cfg = require('./lib/config')
+  for (const [k, v] of Object.entries(cfg)) {
+    if (v && !process.env[k]) process.env[k] = String(v)
+  }
+} catch { /* dev mode, no config.js */ }
 const { startPoller, getStopPoller, getPool } = require('./jobs/poller')
 const os = require('os')
 
@@ -17,15 +28,21 @@ function killZombieChromium() {
   try {
     const profileDir = path.join(os.homedir(), '.socialflow', 'profiles')
     if (process.platform === 'win32') {
-      // Use PowerShell (wmic removed in Win11) to find Chromium with our profile dir
+      // Electron-packaged subprocesses sometimes launch with a PATH that
+      // excludes the PowerShell + System32 directories. Use absolute paths
+      // so execSync doesn't fail with "'powershell' is not recognized".
+      const sysRoot = process.env.SystemRoot || 'C:\\Windows'
+      const psExe = `${sysRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+      const taskkillExe = `${sysRoot}\\System32\\taskkill.exe`
+
       const escaped = profileDir.replace(/\\/g, '\\\\')
       const result = execSync(
-        `powershell -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escaped}*' } | Select-Object -ExpandProperty ProcessId"`,
+        `"${psExe}" -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escaped}*' } | Select-Object -ExpandProperty ProcessId"`,
         { encoding: 'utf8', timeout: 8000 }
       ).trim()
       const pids = result.split(/\r?\n/).map(s => s.trim()).filter(s => /^\d+$/.test(s))
       for (const pid of pids) {
-        try { execSync(`taskkill /F /PID ${pid}`, { timeout: 3000, stdio: 'ignore' }) } catch {}
+        try { execSync(`"${taskkillExe}" /F /PID ${pid}`, { timeout: 3000, stdio: 'ignore' }) } catch {}
       }
       if (pids.length) console.log(`[CLEANUP] Killed ${pids.length} zombie Chromium process(es)`)
     } else {
@@ -42,7 +59,7 @@ async function main() {
   console.log('  SocialFlow Agent starting...')
   console.log('========================================')
 
-  // Check Supabase connection with retry
+  // Verify API + DB reachability via the REST proxy (no more Supabase).
   const { supabase } = require('./lib/supabase')
   let connected = false
   for (let i = 1; i <= MAX_CONNECT_RETRIES; i++) {
@@ -51,17 +68,17 @@ async function main() {
       connected = true
       break
     }
-    console.warn(`[WARN] Supabase connect failed (attempt ${i}/${MAX_CONNECT_RETRIES}): ${error.message}`)
+    console.warn(`[WARN] VPS DB connect failed (attempt ${i}/${MAX_CONNECT_RETRIES}): ${error.message}`)
     if (i < MAX_CONNECT_RETRIES) {
       console.log(`[AGENT] Retrying in ${CONNECT_RETRY_DELAY / 1000}s...`)
       await new Promise(r => setTimeout(r, CONNECT_RETRY_DELAY))
     }
   }
   if (!connected) {
-    console.error('[ERROR] Cannot connect to Supabase after all retries. Exiting.')
+    console.error('[ERROR] Cannot connect to VPS API after all retries. Exiting.')
     process.exit(1)
   }
-  console.log('[OK] Supabase connected')
+  console.log('[OK] VPS DB reachable (via /agent-db proxy)')
 
   // Start heartbeat (via REST — audit 2026-04-14)
   const { config } = require('./lib/supabase')
