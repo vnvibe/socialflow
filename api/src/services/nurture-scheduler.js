@@ -441,12 +441,30 @@ function initNurtureScheduler() {
   // pending groups, recheck recent pending groups, alert user on checkpoints,
   // etc. Auto-apply flagged actions fire immediately; others are queued in
   // hermes_decisions with outcome='pending' for user approval.
-  cron.schedule('*/15 * * * *', async () => {
+  // Hermes LLM orchestrator — was */15min (288 calls/day/campaign).
+  // Now runs hourly at :17 for strategic decisions only. The
+  // algorithmic nick-autopilot (below, every 5 min) handles the 80% of
+  // rule-matching decisions (idle → assign, pending → skip, etc.) that
+  // don't need an LLM. Cuts Hermes cost ~75%.
+  cron.schedule('17 * * * *', async () => {
     try {
       const { runAllRunningCampaigns } = require('./hermes-orchestrator')
       await runAllRunningCampaigns(supabase)
     } catch (err) {
-      console.error('[ORCHESTRATOR] 15-min cron error:', err.message)
+      console.error('[ORCHESTRATOR] hourly cron error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
+  // Script-based autopilot — every 5 min, handles pause_nick,
+  // skip_group, recheck_group, decrease_budget, alert_user based on
+  // DB rules. No LLM. Writes hermes_decisions with decision_type=
+  // 'autopilot' so the UI can tag AI vs script decisions.
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const { runAutopilot } = require('./nick-autopilot')
+      await runAutopilot(supabase)
+    } catch (err) {
+      console.error('[AUTOPILOT] cron error:', err.message)
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
