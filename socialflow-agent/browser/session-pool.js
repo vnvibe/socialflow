@@ -169,9 +169,9 @@ async function getPage(account, opts = {}) {
 
 /**
  * Đánh dấu session idle (KHÔNG đóng) + trim tabs xuống 1.
- * Khi handler xong, đóng mọi tab phụ (popup, FB ads interstitial, v.v.)
- * còn sót lại, giữ 1 tab chính về about:blank để job sau reuse được ngay
- * mà không dính state của job cũ.
+ * Đóng mọi tab phụ (popup, FB ads interstitial) còn sót, giữ 1 tab chính.
+ * KHÔNG park về about:blank — nhìn như đang đứng, gây khó chịu thị giác.
+ * DOM của trang cũ sẽ tự giải phóng khi job sau gọi page.goto().
  */
 async function releaseSession(accountId) {
   const session = sessions.get(accountId)
@@ -179,15 +179,8 @@ async function releaseSession(accountId) {
   session.lastUsed = Date.now()
   try {
     const pages = session.context.pages()
-    if (pages.length > 1) {
-      for (let i = 1; i < pages.length; i++) {
-        try { await pages[i].close() } catch {}
-      }
-    }
-    // Park the primary tab on about:blank so next job starts from a clean
-    // URL and the DOM from previous run doesn't leak memory until then.
-    if (pages[0]) {
-      try { await pages[0].goto('about:blank', { waitUntil: 'commit', timeout: 3000 }) } catch {}
+    for (let i = 1; i < pages.length; i++) {
+      try { await pages[i].close() } catch {}
     }
   } catch {}
 }
