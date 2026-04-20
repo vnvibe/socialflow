@@ -23,11 +23,14 @@ let isQuitting = false
 let logs = []
 const MAX_LOGS = 500
 
-// Paths
+// Paths — using __dirname consistently resolves through asar. The old
+// path.join(process.resourcesPath, 'app') variant didn't, because the
+// packaged app lives at resources/app.asar (a file), not resources/app
+// (a folder). __dirname inside the asar evaluates to
+// resources/app.asar/electron and going up one gives us the asar root
+// that Electron's fs layer correctly reads inside.
 const isPackaged = !process.defaultApp
-const appRoot = isPackaged
-  ? path.join(process.resourcesPath, 'app')
-  : path.join(__dirname, '..')
+const appRoot = path.join(__dirname, '..')
 
 function addLog(line, type = 'info') {
   const entry = { time: new Date().toISOString(), text: line, type }

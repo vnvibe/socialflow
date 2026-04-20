@@ -71,6 +71,10 @@ try {
     '--overwrite',
     '--ignore="(dist|debug|\\.env$|^/nul$|\\.git|package-lock|scripts)"',
     '--icon=electron/icon.ico',
+    // asar=false so agent.js + node_modules stay unpacked. fork() and
+    // spawn() can't read files inside app.asar; this keeps the fork
+    // path (Playwright install + agent.js) working.
+    '--asar=false',
   ].join(' ')
 
   execSync(cmd, { cwd: ROOT, stdio: 'inherit', shell: true })
