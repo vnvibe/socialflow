@@ -499,6 +499,102 @@ function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc
 }
 
 // ─── Nick detail slide-out panel ───────────────────────────
+// Hermes/autopilot diagnosis row. Shows cause + plan; for bumps and
+// actionable alerts, exposes Áp dụng / Bỏ qua buttons that hit the
+// existing /ai-hermes/decisions/:id/approve|reject endpoints.
+function DiagnosisRow({ decision, nickId }) {
+  const qc = useQueryClient()
+  const payload = typeof decision.decision === 'string'
+    ? (() => { try { return JSON.parse(decision.decision) } catch { return {} } })()
+    : (decision.decision || {})
+  const isBump = decision.decision_type === 'capability_bump'
+  const isShortfall = decision.decision_type === 'kpi_shortfall'
+  const canApply = isBump  // shortfall is informational only
+
+  const approve = useMutation({
+    mutationFn: async () => (await api.patch(`/ai-hermes/decisions/${decision.id}/approve`)).data,
+    onSuccess: (data) => {
+      toast.success(data?.detail || 'Áp dụng xong')
+      qc.invalidateQueries({ queryKey: ['nick-kpi-status', nickId] })
+    },
+    onError: (err) => toast.error(err?.response?.data?.error || err.message),
+  })
+  const reject = useMutation({
+    mutationFn: async () => (await api.patch(`/ai-hermes/decisions/${decision.id}/reject`)).data,
+    onSuccess: () => {
+      toast.success('Đã đóng')
+      qc.invalidateQueries({ queryKey: ['nick-kpi-status', nickId] })
+    },
+    onError: (err) => toast.error(err?.response?.data?.error || err.message),
+  })
+
+  return (
+    <div
+      className="px-3 py-2"
+      style={{
+        background: isBump ? 'color-mix(in srgb, var(--hermes) 10%, var(--bg-base))' : 'color-mix(in srgb, var(--warn) 10%, var(--bg-base))',
+        borderBottom: '1px solid var(--border)',
+      }}
+    >
+      <div className="flex items-start gap-2">
+        <span className={isBump ? 'text-hermes' : 'text-warn'}>{isBump ? '⬆' : '⚠'}</span>
+        <div className="flex-1">
+          <div className="text-app-primary text-[12px]">{decision.reason}</div>
+          {payload.plan && isShortfall && (
+            <div className="text-[10px] text-app-muted mt-1">
+              <span className="text-app-primary">Plan: </span>{payload.plan}
+            </div>
+          )}
+          {Array.isArray(payload.per_action_plan) && payload.per_action_plan.length > 0 && (
+            <div className="text-[10px] text-app-muted mt-1 space-y-0.5">
+              {payload.per_action_plan.map((p, i) => (
+                <div key={i}>
+                  <span className="text-warn">• {p.label}</span>
+                  <span className="text-app-dim"> {p.done}/{p.target}</span>
+                  <span className="text-app-muted"> → {p.plan}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {isBump && payload.streak_days && (
+            <div className="text-[10px] text-app-muted mt-1">
+              {payload.streak_days} ngày liên tiếp đạt KPI · đề xuất +{payload.bump_pct || 20}% target
+            </div>
+          )}
+          {(canApply || isShortfall) && decision.outcome !== 'user_approved' && decision.outcome !== 'user_rejected' && (
+            <div className="flex items-center gap-2 mt-2">
+              {canApply && (
+                <button
+                  className="px-2 py-0.5 text-[10px] font-mono-ui uppercase tracking-wider text-hermes hover:opacity-80"
+                  style={{ border: '1px solid var(--hermes)' }}
+                  disabled={approve.isPending}
+                  onClick={() => approve.mutate()}
+                >
+                  {approve.isPending ? 'Đang áp dụng…' : 'Áp dụng'}
+                </button>
+              )}
+              <button
+                className="px-2 py-0.5 text-[10px] font-mono-ui uppercase tracking-wider text-app-muted hover:text-app-primary"
+                style={{ border: '1px solid var(--border)' }}
+                disabled={reject.isPending}
+                onClick={() => reject.mutate()}
+              >
+                {reject.isPending ? '…' : 'Đóng'}
+              </button>
+            </div>
+          )}
+          {(decision.outcome === 'user_approved' || decision.outcome === 'user_rejected') && (
+            <div className="text-[10px] text-app-dim mt-1">
+              {decision.outcome === 'user_approved' ? '✓ Đã áp dụng' : '× Đã đóng'}
+            </div>
+          )}
+        </div>
+        <span className="text-[9px] text-app-dim shrink-0">{fmtAgo(decision.created_at)}</span>
+      </div>
+    </div>
+  )
+}
+
 function NickDetailPanel({ nick, onClose }) {
   const { data: memories = [] } = useQuery({
     queryKey: ['ai-memory', nick?.id],
@@ -676,49 +772,9 @@ function NickDetailPanel({ nick, onClose }) {
                   </div>
                 )
               })}
-              {(kpiStatus.diagnoses || []).map((d) => {
-                const payload = typeof d.decision === 'string' ? (() => { try { return JSON.parse(d.decision) } catch { return {} } })() : (d.decision || {})
-                const isBump = d.decision_type === 'capability_bump'
-                return (
-                  <div
-                    key={d.id}
-                    className="px-3 py-2"
-                    style={{
-                      background: isBump ? 'color-mix(in srgb, var(--hermes) 10%, var(--bg-base))' : 'color-mix(in srgb, var(--warn) 10%, var(--bg-base))',
-                      borderBottom: '1px solid var(--border)',
-                    }}
-                  >
-                    <div className="flex items-start gap-2">
-                      <span className={isBump ? 'text-hermes' : 'text-warn'}>{isBump ? '⬆' : '⚠'}</span>
-                      <div className="flex-1">
-                        <div className="text-app-primary text-[12px]">{d.reason}</div>
-                        {payload.plan && !isBump && (
-                          <div className="text-[10px] text-app-muted mt-1">
-                            <span className="text-app-primary">Plan: </span>{payload.plan}
-                          </div>
-                        )}
-                        {Array.isArray(payload.per_action_plan) && payload.per_action_plan.length > 0 && (
-                          <div className="text-[10px] text-app-muted mt-1 space-y-0.5">
-                            {payload.per_action_plan.map((p, i) => (
-                              <div key={i}>
-                                <span className="text-warn">• {p.label}</span>
-                                <span className="text-app-dim"> {p.done}/{p.target}</span>
-                                <span className="text-app-muted"> → {p.plan}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {isBump && payload.streak_days && (
-                          <div className="text-[10px] text-app-muted mt-1">
-                            {payload.streak_days} ngày liên tiếp đạt KPI · đề xuất +{payload.bump_pct}% target
-                          </div>
-                        )}
-                      </div>
-                      <span className="text-[9px] text-app-dim shrink-0">{fmtAgo(d.created_at)}</span>
-                    </div>
-                  </div>
-                )
-              })}
+              {(kpiStatus.diagnoses || []).map((d) => (
+                <DiagnosisRow key={d.id} decision={d} nickId={nick.id} />
+              ))}
             </div>
           </div>
         )}

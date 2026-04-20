@@ -631,6 +631,43 @@ async function executeAction(action, campaignId, context, supabase) {
       return { ok: true, detail: 'notification created' }
     }
 
+    case 'raise_kpi_target': {
+      // Applies the capability bump recommended by nick-kpi-watcher.
+      // Bumps target_* columns on today's + future nick_kpi_daily rows.
+      const accountId = action.target_id
+      const detail = action.action_detail || (typeof action.decision === 'object' ? action.decision : {})
+      const bumpPct = detail.bump_pct || 20
+      const factor = 1 + bumpPct / 100
+      try {
+        await supabase._pool.query(
+          `UPDATE nick_kpi_daily
+           SET target_likes   = ROUND(target_likes   * $2)::int,
+               target_comments= ROUND(target_comments* $2)::int,
+               target_friend_requests = ROUND(target_friend_requests * $2)::int,
+               target_group_joins     = ROUND(target_group_joins     * $2)::int
+           WHERE account_id = $1 AND date >= CURRENT_DATE`,
+          [accountId, factor]
+        )
+        // Also persist the new capability in ai_pilot_memory so the scheduler's
+        // next-day target calc picks it up
+        await supabase.from('ai_pilot_memory').upsert({
+          memory_type: 'nick_capability',
+          key: `capability_bump:${accountId}`,
+          value: { bump_pct: bumpPct, applied_at: new Date().toISOString() },
+          owner_id: context.campaign?.owner_id || null,
+        })
+        return { ok: true, detail: `KPI target +${bumpPct}% applied` }
+      } catch (err) {
+        return { ok: false, detail: err.message }
+      }
+    }
+
+    case 'investigate_nick_shortfall': {
+      // Informational — nothing to execute. The decision itself IS the
+      // information (cause + plan shown in the drawer).
+      return { ok: true, detail: 'shortfall diagnosis logged' }
+    }
+
     case 'create_content':
     default:
       return { ok: false, detail: `action type '${action.type}' not implemented` }
