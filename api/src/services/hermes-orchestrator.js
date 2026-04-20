@@ -643,13 +643,12 @@ async function executeAction(action, campaignId, context, supabase) {
           `UPDATE nick_kpi_daily
            SET target_likes   = ROUND(target_likes   * $2)::int,
                target_comments= ROUND(target_comments* $2)::int,
+               target_opportunity_comments = ROUND(COALESCE(target_opportunity_comments,0) * $2)::int,
                target_friend_requests = ROUND(target_friend_requests * $2)::int,
                target_group_joins     = ROUND(target_group_joins     * $2)::int
            WHERE account_id = $1 AND date >= CURRENT_DATE`,
           [accountId, factor]
         )
-        // Also persist the new capability in ai_pilot_memory so the scheduler's
-        // next-day target calc picks it up
         await supabase.from('ai_pilot_memory').upsert({
           memory_type: 'nick_capability',
           key: `capability_bump:${accountId}`,
@@ -657,6 +656,41 @@ async function executeAction(action, campaignId, context, supabase) {
           owner_id: context.campaign?.owner_id || null,
         })
         return { ok: true, detail: `KPI target +${bumpPct}% applied` }
+      } catch (err) {
+        return { ok: false, detail: err.message }
+      }
+    }
+
+    case 'lower_kpi_target': {
+      // Applies the capability nerf — protects a stressed nick by reducing
+      // its KPI target. Applied to today + next 7 days so the nick has
+      // breathing room to recover. Floored at safe minimums so a nerfed
+      // nick still has SOMETHING to do (else kpi_met trivially=true).
+      const accountId = action.target_id
+      const detail = action.action_detail || (typeof action.decision === 'object' ? action.decision : {})
+      const nerfPct = detail.nerf_pct || 30
+      const factor = 1 - nerfPct / 100
+      try {
+        await supabase._pool.query(
+          `UPDATE nick_kpi_daily
+           SET target_likes    = GREATEST(5, ROUND(target_likes    * $2)::int),
+               target_comments = GREATEST(2, ROUND(target_comments * $2)::int),
+               target_opportunity_comments = CASE
+                 WHEN COALESCE(target_opportunity_comments,0) > 0
+                 THEN GREATEST(1, ROUND(target_opportunity_comments * $2)::int)
+                 ELSE 0 END,
+               target_friend_requests = GREATEST(1, ROUND(target_friend_requests * $2)::int),
+               target_group_joins     = GREATEST(1, ROUND(target_group_joins     * $2)::int)
+           WHERE account_id = $1 AND date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7`,
+          [accountId, factor]
+        )
+        await supabase.from('ai_pilot_memory').upsert({
+          memory_type: 'nick_capability',
+          key: `capability_nerf:${accountId}`,
+          value: { nerf_pct: nerfPct, reason: detail.reason, applied_at: new Date().toISOString(), expires_at: new Date(Date.now() + 7*86400000).toISOString() },
+          owner_id: context.campaign?.owner_id || null,
+        })
+        return { ok: true, detail: `KPI target -${nerfPct}% applied for 7 days (${detail.reason || 'nick stressed'})` }
       } catch (err) {
         return { ok: false, detail: err.message }
       }

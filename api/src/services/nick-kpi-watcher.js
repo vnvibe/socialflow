@@ -26,6 +26,7 @@
 const SHORTFALL_THRESHOLD_PCT = 20      // shortfall % that triggers a decision
 const CAPABILITY_STREAK_DAYS = 5        // consecutive days hitting target to auto-bump
 const CAPABILITY_BUMP_PCT = 20          // % to bump target when capable
+const CAPABILITY_NERF_PCT = 30          // % to reduce target when nick is stressed
 const ACTIVE_WINDOW_HOURS = 14          // 8am-22pm VN, matches typical account hours
 const ACTIVE_WINDOW_START = 8           // hour-of-day (VN) activity window starts
 
@@ -177,6 +178,77 @@ async function checkCapability(pool, accountId, campaignId) {
   return { eligible_for_bump: false, streak_days: streak }
 }
 
+// Checks if a nick should have its target LOWERED to protect it.
+// Triggers (any one is enough):
+//   - ≥1 CHECKPOINT failure in last 7d (most important — nick stressed)
+//   - New nick (<14d old) + missed target 3 consecutive days
+//   - Failure rate ≥30% in last 48h (nick unstable)
+// Returns { eligible_for_nerf, reason, nerf_pct }. Dedup handled by caller
+// checking ai_pilot_memory so we don't nerf twice within 3d.
+async function checkCapabilityNerf(pool, accountId, campaignId) {
+  // Signal 1: recent checkpoint
+  const since7d = new Date(Date.now() - 7 * 86400000).toISOString()
+  const { rows: cpRows } = await pool.query(
+    `SELECT COUNT(*)::int AS c FROM job_failures
+     WHERE account_id = $1 AND error_type IN ('CHECKPOINT','SESSION_EXPIRED') AND created_at > $2`,
+    [accountId, since7d]
+  )
+  if ((cpRows[0]?.c || 0) > 0) {
+    return { eligible_for_nerf: true, reason: `${cpRows[0].c} checkpoint/session-expired trong 7d`, nerf_pct: CAPABILITY_NERF_PCT }
+  }
+
+  // Signal 2: young nick missing target 3d
+  const { rows: accRows } = await pool.query(
+    `SELECT fb_created_at, created_at FROM accounts WHERE id = $1`,
+    [accountId]
+  )
+  const acc = accRows[0]
+  const ageDays = acc?.fb_created_at || acc?.created_at
+    ? Math.floor((Date.now() - new Date(acc.fb_created_at || acc.created_at).getTime()) / 86400000)
+    : 999
+  if (ageDays < 14) {
+    // Check missed target streak excluding today (today is in-progress)
+    const { rows: histRows } = await pool.query(
+      `SELECT date, done_likes + done_comments + done_friend_requests + done_group_joins AS done,
+              target_likes + target_comments + target_friend_requests + target_group_joins AS target
+       FROM nick_kpi_daily
+       WHERE account_id = $1 AND campaign_id = $2 AND date >= CURRENT_DATE - 3 AND date < CURRENT_DATE
+       ORDER BY date DESC`,
+      [accountId, campaignId]
+    )
+    let missStreak = 0
+    for (const r of histRows) {
+      if (r.target > 0 && r.done < r.target) missStreak++
+      else break
+    }
+    if (missStreak >= 3) {
+      return { eligible_for_nerf: true, reason: `nick mới ${ageDays}d, miss KPI ${missStreak}d liên tiếp`, nerf_pct: CAPABILITY_NERF_PCT }
+    }
+  }
+
+  // Signal 3: high failure rate 48h
+  const since48h = new Date(Date.now() - 48 * 3600000).toISOString()
+  const { rows: failRateRows } = await pool.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE status='failed')::int AS failed,
+       COUNT(*) FILTER (WHERE status IN ('done','failed'))::int AS finished
+     FROM jobs
+     WHERE payload->>'account_id' = $1 AND finished_at > $2`,
+    [accountId, since48h]
+  )
+  const failed = failRateRows[0]?.failed || 0
+  const finished = failRateRows[0]?.finished || 0
+  if (finished >= 10 && failed / finished >= 0.30) {
+    return {
+      eligible_for_nerf: true,
+      reason: `fail rate ${Math.round((failed/finished)*100)}% trong 48h (${failed}/${finished} jobs)`,
+      nerf_pct: CAPABILITY_NERF_PCT,
+    }
+  }
+
+  return { eligible_for_nerf: false }
+}
+
 async function runWatcher(supabaseInst) {
   const pool = supabaseInst?._pool
   if (!pool) return
@@ -199,7 +271,7 @@ async function runWatcher(supabaseInst) {
   )
 
   const expectedFrac = await expectedProgress()
-  let checked = 0, shortfalls = 0, capabilities = 0
+  let checked = 0, shortfalls = 0, capabilities = 0, nerfs = 0
 
   const ACTIONS = [
     { key: 'likes',    doneCol: 'done_likes',    targetCol: 'target_likes',    label: 'Like',        handlerHint: 'campaign_nurture likes posts in joined groups' },
@@ -290,11 +362,11 @@ async function runWatcher(supabaseInst) {
       ]
     )
 
-    // Also check capability bump
+    // Capability bump (auto-raise +20% after 5d streak + 0 checkpoint)
+    // auto_apply=true — signal is conservative enough. Next orchestrator
+    // tick will pick it up and UPDATE nick_kpi_daily.
     const cap = await checkCapability(pool, row.account_id, row.campaign_id)
     if (cap.eligible_for_bump) {
-      capabilities++
-      // Only log once per nick per 7d to avoid spam
       const { rows: recent } = await pool.query(
         `SELECT id FROM hermes_decisions
          WHERE campaign_id = $1 AND decision_type = 'capability_bump'
@@ -302,26 +374,110 @@ async function runWatcher(supabaseInst) {
          LIMIT 1`,
         [row.campaign_id, row.account_id]
       )
-      if (recent.length > 0) continue
+      if (recent.length === 0) {
+        capabilities++
+        await pool.query(
+          `INSERT INTO hermes_decisions (campaign_id, decision_type, action_type, target_id, target_name, priority, reason, decision, auto_apply, auto_applied, outcome, outcome_detail)
+           VALUES ($1, 'capability_bump', 'raise_kpi_target', $2, $3, 'low', $4, $5, true, false, 'pending', $6)`,
+          [
+            row.campaign_id,
+            row.account_id,
+            row.username,
+            `${cap.streak_days} ngày liên tiếp đạt KPI, không checkpoint — auto nâng target +${cap.bump_pct}%`,
+            JSON.stringify({ streak_days: cap.streak_days, bump_pct: cap.bump_pct, current_target: row.target }),
+            `streak=${cap.streak_days}d bump=+${cap.bump_pct}%`,
+          ]
+        )
+      }
+    }
 
-      await pool.query(
-        `INSERT INTO hermes_decisions (campaign_id, decision_type, action_type, target_id, target_name, priority, reason, decision, auto_apply, auto_applied, outcome, outcome_detail)
-         VALUES ($1, 'capability_bump', 'raise_kpi_target', $2, $3, 'low', $4, $5, false, false, 'pending', $6)`,
-        [
-          row.campaign_id,
-          row.account_id,
-          row.username,
-          `${cap.streak_days} ngày liên tiếp đạt KPI, không checkpoint — đề xuất nâng target +${cap.bump_pct}%`,
-          JSON.stringify({ streak_days: cap.streak_days, bump_pct: cap.bump_pct, current_target: row.target }),
-          `streak=${cap.streak_days}d bump=+${cap.bump_pct}%`,
-        ]
+    // Capability nerf (auto-lower -30% when nick stressed). Checked after
+    // bump so a nick can't be both — but the triggers are disjoint in
+    // practice (bump requires 5d streak, nerf requires recent failure).
+    // auto_apply=true for nick safety — we'd rather protect than wait for
+    // user to review when checkpoint already happened.
+    const nerf = await checkCapabilityNerf(pool, row.account_id, row.campaign_id)
+    if (nerf.eligible_for_nerf) {
+      const { rows: recentNerf } = await pool.query(
+        `SELECT id FROM hermes_decisions
+         WHERE campaign_id = $1 AND decision_type = 'capability_nerf'
+           AND target_id = $2 AND created_at > now() - INTERVAL '3 days'
+         LIMIT 1`,
+        [row.campaign_id, row.account_id]
       )
+      if (recentNerf.length === 0) {
+        nerfs++
+        await pool.query(
+          `INSERT INTO hermes_decisions (campaign_id, decision_type, action_type, target_id, target_name, priority, reason, decision, auto_apply, auto_applied, outcome, outcome_detail)
+           VALUES ($1, 'capability_nerf', 'lower_kpi_target', $2, $3, 'high', $4, $5, true, false, 'pending', $6)`,
+          [
+            row.campaign_id,
+            row.account_id,
+            row.username,
+            `Bảo vệ nick: ${nerf.reason} — auto giảm target -${nerf.nerf_pct}% trong 7 ngày`,
+            JSON.stringify({ nerf_pct: nerf.nerf_pct, reason: nerf.reason, current_target: row.target }),
+            `nerf=-${nerf.nerf_pct}% reason=${nerf.reason}`,
+          ]
+        )
+      }
     }
   }
 
-  if (shortfalls > 0 || capabilities > 0) {
-    console.log(`[NICK-KPI] Checked ${checked} nicks · shortfalls=${shortfalls} · capability_bumps=${capabilities}`)
+  if (shortfalls > 0 || capabilities > 0 || nerfs > 0) {
+    console.log(`[NICK-KPI] Checked ${checked} nicks · shortfalls=${shortfalls} · capability_bumps=${capabilities} · capability_nerfs=${nerfs}`)
+  }
+
+  // Auto-execute pending auto_apply=true capability decisions. Without
+  // this, decisions sit forever — the regular orchestrator loop only
+  // runs actions from LLM output, not from direct DB inserts.
+  // Limited to raise_kpi_target / lower_kpi_target so we don't accidentally
+  // auto-apply anything else the watcher might create later.
+  try {
+    const orchestrator = require('./hermes-orchestrator')
+    const { rows: pending } = await pool.query(
+      `SELECT id, campaign_id, action_type, decision, target_id, target_name, decision_type
+       FROM hermes_decisions
+       WHERE auto_apply = true AND auto_applied = false
+         AND outcome = 'pending'
+         AND action_type IN ('raise_kpi_target', 'lower_kpi_target')
+       ORDER BY created_at ASC
+       LIMIT 50`
+    )
+    let appliedCount = 0, failedCount = 0
+    for (const dec of pending) {
+      const actionDetail = typeof dec.decision === 'string' ? (() => { try { return JSON.parse(dec.decision) } catch { return {} } })() : (dec.decision || {})
+      const action = {
+        type: dec.action_type,
+        target_id: dec.target_id,
+        target_name: dec.target_name,
+        action_detail: actionDetail,
+        decision: actionDetail,
+      }
+      try {
+        const ctx = await orchestrator.buildOrchestrationContext(dec.campaign_id, supabaseInst)
+        const r = await orchestrator.executeAction(action, dec.campaign_id, ctx, supabaseInst)
+        await pool.query(
+          `UPDATE hermes_decisions
+           SET auto_applied = $2, applied_at = now(),
+               outcome = $3, outcome_detail = $4
+           WHERE id = $1`,
+          [dec.id, r.ok, r.ok ? 'success' : 'failed', r.detail]
+        )
+        if (r.ok) { appliedCount++ } else { failedCount++ }
+      } catch (err) {
+        failedCount++
+        await pool.query(
+          `UPDATE hermes_decisions SET outcome='failed', outcome_detail=$2 WHERE id=$1`,
+          [dec.id, err.message]
+        )
+      }
+    }
+    if (appliedCount > 0 || failedCount > 0) {
+      console.log(`[NICK-KPI] Auto-applied ${appliedCount}/${pending.length} capability decisions (${failedCount} failed)`)
+    }
+  } catch (err) {
+    console.warn(`[NICK-KPI] Auto-apply pass failed: ${err.message}`)
   }
 }
 
-module.exports = { runWatcher, diagnose, checkCapability }
+module.exports = { runWatcher, diagnose, checkCapability, checkCapabilityNerf }
