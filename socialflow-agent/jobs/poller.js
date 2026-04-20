@@ -163,10 +163,17 @@ const randRestMs = () => randBetween(agentRuntime.rest_min_minutes, agentRuntime
 // kills throughput with a small nick pool.
 const MIN_REST_BEFORE_STAGGER_EARLY_RELEASE = 15 * 60 * 1000   // 15 min floor
 
+// Only map jobs with a SINGLE primary action. Multi-action jobs (nurture,
+// interact_profile) do their own per-action budget checks inside the
+// handler — we don't want the poller-level pre-claim check to reject
+// the whole job just because ONE of its sub-actions is full.
+// campaign_nurture: does comment+like+share+visit → handler skips whichever
+//                   is full, still executes the rest.
+// campaign_interact_profile: does like+comment on target profile posts.
 const JOB_ACTION_MAP = {
   post_page: 'post', post_page_graph: 'post', post_group: 'post', post_profile: 'post',
-  campaign_post: 'post', campaign_nurture: 'like', campaign_discover_groups: 'join_group',
-  campaign_send_friend_request: 'friend_request', campaign_interact_profile: 'like',
+  campaign_post: 'post', campaign_discover_groups: 'join_group',
+  campaign_send_friend_request: 'friend_request',
   campaign_scan_members: 'scan', campaign_group_monitor: 'scan',
   campaign_opportunity_react: 'comment', comment_post: 'comment',
   nurture_feed: 'nurture_react',

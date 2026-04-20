@@ -52,13 +52,20 @@ module.exports = async (fastify) => {
           where.push(`j.created_by NOT IN (${placeholders})`)
         }
       }
-      args.push(parseInt(slots))
+      // Return up to N alternatives per nick so the poller can skip blocked
+      // jobs (warmup/budget/rest) and try the next one for the same nick
+      // in the same poll cycle. Without this, if a nick's top job maps
+      // to a full action budget (e.g. campaign_nurture → like → 80/80),
+      // the slot sits idle while other job types for the same nick (comment,
+      // FR, join) pile up waiting.
+      const PER_NICK_ALTERNATIVES = 4
+      args.push(parseInt(slots) * PER_NICK_ALTERNATIVES)
       // Fair rotation with 2 signals (fixes the Thúy-starved / Việt-monopoly issue):
       //   1. done_today  — nicks that drained 0 jobs today jump ahead of nicks
       //      that already finished many. Levels effort across the roster.
       //   2. last_activity — tie-breaker; within same done-count, oldest-idle first.
-      // Both wrapped in DISTINCT ON so each nick contributes exactly one candidate
-      // per poll cycle → the 2 agent slots can't be monopolized by one nick.
+      // ROW_NUMBER() per nick so we get multiple alternatives per nick, not
+      // just one. Poller iterates and picks the first one not blocked.
       const sql = `
         WITH vn_day_start AS (
           SELECT (date_trunc('day', (now() AT TIME ZONE 'Asia/Ho_Chi_Minh'))
@@ -75,18 +82,22 @@ module.exports = async (fastify) => {
           WHERE payload ? 'account_id'
           GROUP BY payload->>'account_id'
         ),
-        one_per_nick AS (
-          SELECT DISTINCT ON (j.payload->>'account_id')
+        ranked AS (
+          SELECT
             j.*,
             COALESCE(ns.last_activity, '1970-01-01'::timestamptz) AS _last_activity,
-            COALESCE(ns.done_today, 0)                            AS _done_today
+            COALESCE(ns.done_today, 0)                            AS _done_today,
+            ROW_NUMBER() OVER (
+              PARTITION BY j.payload->>'account_id'
+              ORDER BY j.priority ASC, j.scheduled_at ASC
+            ) AS _rn
           FROM jobs j
           LEFT JOIN nick_stats ns ON ns.account_id = j.payload->>'account_id'
           WHERE ${where.join(' AND ')}
-          ORDER BY j.payload->>'account_id' NULLS FIRST, j.priority ASC, j.scheduled_at ASC
         )
-        SELECT * FROM one_per_nick
-        ORDER BY _done_today ASC, _last_activity ASC, priority ASC, scheduled_at ASC
+        SELECT * FROM ranked
+        WHERE _rn <= ${PER_NICK_ALTERNATIVES}
+        ORDER BY _done_today ASC, _last_activity ASC, _rn ASC, priority ASC, scheduled_at ASC
         LIMIT $${args.length}
       `
       try {
