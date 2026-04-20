@@ -1427,16 +1427,38 @@ function HermesTab({ campaignId }) {
 }
 
 // ─── Tabs config ───────────────────────────────────────────
+// Collapsed from 8 → 4 tabs. 8 was overwhelming per user feedback
+// ("quá nhiều tab quản lý phát mệt"). Groupings:
+//   Tổng quan  = Overview + Agents + Data (everything "read-only state")
+//   Hoạt động  = Execution + activity log (everything "live/running")
+//   Nội dung   = Content + Groups (everything "assets for this campaign")
+//   Hermes     = AI decisions (unchanged)
 const TABS = [
-  { key: 'overview',  label: 'Overview' },
-  { key: 'agents',    label: 'Agents' },
-  { key: 'execution', label: 'Execution' },
-  { key: 'activity',  label: 'Hoạt động' },
-  { key: 'content',   label: 'Content' },
-  { key: 'groups',    label: 'Nhóm' },
-  { key: 'data',      label: 'Data' },
+  { key: 'overview',  label: 'Tổng quan' },
+  { key: 'runtime',   label: 'Hoạt động' },
+  { key: 'assets',    label: 'Nội dung' },
   { key: 'hermes',    label: 'Hermes' },
 ]
+
+// Stacks multiple legacy sub-tabs inside a single merged tab body.
+// Each child keeps its own header/table/filters — we just glue them
+// vertically so the user scrolls through related content instead of
+// hunting across 8 tabs.
+function MergedTab({ children }) {
+  const items = Array.isArray(children) ? children.filter(Boolean) : [children]
+  return (
+    <div className="h-full overflow-y-auto">
+      {items.map((child, i) => (
+        <div
+          key={i}
+          style={i > 0 ? { borderTop: '1px solid var(--border)', marginTop: 12 } : undefined}
+        >
+          {child}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // ─── Hermes Review modal ───────────────────────────────────
 function HermesReviewModal({ campaign, accounts, jobs, onClose }) {
@@ -1961,14 +1983,26 @@ export default function CampaignHub() {
 
       {/* ─── Tab body ─── */}
       <div className="flex-1 overflow-hidden min-h-0">
-        {tab === 'overview'  && <OverviewTab campaign={campaign} campaignId={id} />}
-        {tab === 'agents'    && <AgentsTab campaign={campaign} />}
-        {tab === 'execution' && <ExecutionTab campaignId={id} />}
-        {tab === 'activity'  && <ActivityTab campaignId={id} campaign={campaign} />}
-        {tab === 'hermes'    && <HermesTab campaignId={id} />}
-        {tab === 'content'   && <ContentTab campaignId={id} />}
-        {tab === 'groups'    && <GroupsTab campaignId={id} />}
-        {tab === 'data'      && <DataTab campaignId={id} />}
+        {tab === 'overview' && (
+          <MergedTab>
+            <OverviewTab campaign={campaign} campaignId={id} />
+            <AgentsTab campaign={campaign} />
+            <DataTab campaignId={id} />
+          </MergedTab>
+        )}
+        {tab === 'runtime' && (
+          <MergedTab>
+            <ExecutionTab campaignId={id} />
+            <ActivityTab campaignId={id} campaign={campaign} />
+          </MergedTab>
+        )}
+        {tab === 'assets' && (
+          <MergedTab>
+            <ContentTab campaignId={id} />
+            <GroupsTab campaignId={id} />
+          </MergedTab>
+        )}
+        {tab === 'hermes' && <HermesTab campaignId={id} />}
       </div>
 
       {reviewOpen && (
