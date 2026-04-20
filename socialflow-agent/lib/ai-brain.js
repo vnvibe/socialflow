@@ -229,13 +229,15 @@ Mỗi bài viết phía trên có thể đi kèm các comment hiện có (dòng 
 
 ${langBlock}${adSection}
 === CÁCH CHẤM ĐIỂM ===
-- 8-10: Người viết ĐANG HỎI / TÌM KIẾM giải pháp liên quan "${topic}" → comment trả lời cụ thể
-- 6-7: Bài thảo luận / chia sẻ kinh nghiệm về "${topic}" → comment đồng tình hoặc bổ sung
-- 5: Bài trong nhóm, liên quan gián tiếp → comment ngắn chia sẻ trải nghiệm cá nhân OK
-- 3-4: Bài trong nhóm nhưng liên quan lỏng → react hoặc comment ngắn kiểu "hay quá" / emoji / đồng cảm ngắn OK
-- 1-2: Off-topic hoàn toàn, spam, quảng cáo → BỎ QUA
+QUAN TRỌNG: Nick ĐÃ là thành viên nhóm "${group?.name || '?'}" và đang NUÔI acc — phải tương tác tự nhiên trong nhóm thực tế, KHÔNG phải chỉ tìm bài khớp "${topic}". Bài nào là NGỮ CẢNH NHÓM (hỏi/chia sẻ/câu chuyện bình thường) thì MẶC ĐỊNH engageable (score ≥ 4), chỉ loại bài spam/QC của người khác.
 
-LƯU Ý: Bạn đang ở trong nhóm "${topic}" — hầu hết bài viết ở đây ÍT NHẤT score 3-4. Chỉ score 1-2 cho bài THẬT SỰ off-topic hoặc spam.
+- 8-10: Bài HỎI / TÌM solution liên quan "${topic}" hoặc đang so sánh sp/dịch vụ → trả lời cụ thể có giá trị
+- 6-7: Bài thảo luận / chia sẻ kinh nghiệm, có thể gắn "${topic}" vào một cách tự nhiên → comment đồng tình + bổ sung
+- 4-5: Bài bình thường trong nhóm (tâm sự / kể chuyện / hỏi chung chung / share meme) KHÔNG khớp "${topic}" → comment ngắn đồng cảm / hay quá / emoji là OK — bài nào là ngữ cảnh nhóm bình thường PHẢI rơi vào mức này, KHÔNG được đẩy xuống 1-2
+- 3: Bài mờ nhạt, thread đã đầy đủ câu trả lời, chen vào sẽ gượng — vẫn giữ 3 chứ không về 1-2
+- 1-2: CHỈ dành cho bài spam / QC của người khác / link không nội dung / đối đầu đối thủ → BỎ QUA
+
+LƯU Ý TỐI QUAN TRỌNG: Hầu hết nhóm có 5-10 bài/ngày — ít nhất 60% trong số đó là ngữ cảnh nhóm bình thường (score 4-5). Nếu bạn chấm TẤT CẢ bài = 1-2 thì bạn đang sai — có nghĩa là bạn đang đòi hỏi bài phải nói về "${topic}" mới engage được, điều đó KHÔNG đúng với chiến lược warmup/nurture.
 
 === QUY TẮC ===
 1. Ưu tiên bài có câu hỏi cụ thể hoặc đang so sánh sản phẩm/dịch vụ.
