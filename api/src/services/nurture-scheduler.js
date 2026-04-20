@@ -450,6 +450,20 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
+  // Nick KPI watcher — every 30 min during active hours. Algorithmic
+  // diagnosis (no LLM), so it works even when Hermes is blocked on
+  // provider billing. Finds underperforming nicks, writes a
+  // hermes_decisions row with cause + plan; flags nicks consistently
+  // hitting target for a capability bump.
+  cron.schedule('*/30 * * * *', async () => {
+    try {
+      const { runWatcher } = require('./nick-kpi-watcher')
+      await runWatcher(supabase)
+    } catch (err) {
+      console.error('[NICK-KPI] watcher error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // Extra 5-min orchestrator tick JUST for hermes_central campaigns. These
   // campaigns opted into Hermes as sole coordinator — the dumb schedulers
   // skip them, so without a faster tick their nicks would only get work

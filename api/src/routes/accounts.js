@@ -73,6 +73,47 @@ module.exports = async (fastify) => {
     }
   })
 
+  // GET /accounts/:id/kpi-status — per-nick daily KPI summary + most
+  // recent Hermes diagnosis (shortfall cause + plan) so the UI can
+  // surface "why this nick is under target + what we're doing about it"
+  // without digging through raw hermes_decisions.
+  fastify.get('/:id/kpi-status', { preHandler: fastify.authenticate }, async (req, reply) => {
+    if (!await canAccess(supabase, req.user.id, 'account', req.params.id)) {
+      return reply.code(403).send({ error: 'No access' })
+    }
+    const pool = supabase._pool
+    if (!pool) return reply.code(500).send({ error: 'pg pool unavailable' })
+
+    try {
+      const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10)
+      const { rows: kpiRows } = await pool.query(
+        `SELECT k.campaign_id, c.name AS campaign_name,
+                COALESCE(k.done_likes,0) AS done_likes, COALESCE(k.target_likes,0) AS target_likes,
+                COALESCE(k.done_comments,0) AS done_comments, COALESCE(k.target_comments,0) AS target_comments,
+                COALESCE(k.done_friend_requests,0) AS done_fr, COALESCE(k.target_friend_requests,0) AS target_fr,
+                COALESCE(k.done_group_joins,0) AS done_joins, COALESCE(k.target_group_joins,0) AS target_joins
+         FROM nick_kpi_daily k
+         LEFT JOIN campaigns c ON c.id = k.campaign_id
+         WHERE k.account_id = $1 AND k.date = $2`,
+        [req.params.id, today]
+      )
+
+      const { rows: diagRows } = await pool.query(
+        `SELECT id, created_at, decision_type, action_type, priority, reason, decision, outcome
+         FROM hermes_decisions
+         WHERE target_id = $1 AND decision_type IN ('kpi_shortfall', 'capability_bump')
+           AND created_at > now() - INTERVAL '48 hours'
+         ORDER BY created_at DESC
+         LIMIT 5`,
+        [req.params.id]
+      )
+
+      return { kpi: kpiRows, diagnoses: diagRows }
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   // GET /accounts/:id/quota-today — today's daily job creation quota status
   // Returns { [job_type]: { used, quota, remaining } } for per-nick UI badge.
   fastify.get('/:id/quota-today', { preHandler: fastify.authenticate }, async (req, reply) => {
