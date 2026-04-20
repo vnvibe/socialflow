@@ -1612,8 +1612,10 @@ module.exports = async (fastify) => {
     }
 
     const enriched = (rows || []).map(r => {
-      const tot = (r.target_likes || 0) + (r.target_comments || 0) + (r.target_friend_requests || 0) + (r.target_group_joins || 0)
-      const done = (r.done_likes || 0) + (r.done_comments || 0) + (r.done_friend_requests || 0) + (r.done_group_joins || 0)
+      const tot = (r.target_likes || 0) + (r.target_comments || 0) + (r.target_opportunity_comments || 0)
+                + (r.target_friend_requests || 0) + (r.target_group_joins || 0)
+      const done = (r.done_likes || 0) + (r.done_comments || 0) + (r.done_opportunity_comments || 0)
+                 + (r.done_friend_requests || 0) + (r.done_group_joins || 0)
       return {
         ...r,
         username: nameMap[r.account_id] || r.account_id?.slice(0, 8),

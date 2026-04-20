@@ -20,8 +20,8 @@ function vnToday() {
 
 async function gatherStats(pool, campaignId, date) {
   const out = {
-    totals: { likes: 0, comments: 0, friend_requests: 0, group_joins: 0, visits: 0 },
-    target: { likes: 0, comments: 0, friend_requests: 0, group_joins: 0 },
+    totals: { likes: 0, comments: 0, opportunity_comments: 0, friend_requests: 0, group_joins: 0, visits: 0 },
+    target: { likes: 0, comments: 0, opportunity_comments: 0, friend_requests: 0, group_joins: 0 },
     per_nick: [],
     failures: { total: 0, by_type: {} },
     decisions: { total: 0, by_type: {} },
@@ -33,6 +33,8 @@ async function gatherStats(pool, campaignId, date) {
     `SELECT k.account_id, a.username,
             COALESCE(k.done_likes,0) AS done_likes,    COALESCE(k.target_likes,0) AS target_likes,
             COALESCE(k.done_comments,0) AS done_comments, COALESCE(k.target_comments,0) AS target_comments,
+            COALESCE(k.done_opportunity_comments,0) AS done_opp,
+            COALESCE(k.target_opportunity_comments,0) AS target_opp,
             COALESCE(k.done_friend_requests,0) AS done_fr, COALESCE(k.target_friend_requests,0) AS target_fr,
             COALESCE(k.done_group_joins,0) AS done_joins,  COALESCE(k.target_group_joins,0) AS target_joins
      FROM nick_kpi_daily k
@@ -44,15 +46,17 @@ async function gatherStats(pool, campaignId, date) {
   for (const r of kpiRows) {
     out.totals.likes += r.done_likes
     out.totals.comments += r.done_comments
+    out.totals.opportunity_comments += r.done_opp
     out.totals.friend_requests += r.done_fr
     out.totals.group_joins += r.done_joins
     out.target.likes += r.target_likes
     out.target.comments += r.target_comments
+    out.target.opportunity_comments += r.target_opp
     out.target.friend_requests += r.target_fr
     out.target.group_joins += r.target_joins
 
-    const done = r.done_likes + r.done_comments + r.done_fr + r.done_joins
-    const target = r.target_likes + r.target_comments + r.target_fr + r.target_joins
+    const done = r.done_likes + r.done_comments + r.done_opp + r.done_fr + r.done_joins
+    const target = r.target_likes + r.target_comments + r.target_opp + r.target_fr + r.target_joins
     out.per_nick.push({
       account_id: r.account_id,
       username: r.username,
@@ -61,6 +65,7 @@ async function gatherStats(pool, campaignId, date) {
       breakdown: {
         likes: { done: r.done_likes, target: r.target_likes },
         comments: { done: r.done_comments, target: r.target_comments },
+        opportunity_comments: { done: r.done_opp, target: r.target_opp },
         friend_requests: { done: r.done_fr, target: r.target_fr },
         group_joins: { done: r.done_joins, target: r.target_joins },
       },
@@ -119,9 +124,14 @@ async function callHermesReporter(stats, campaign) {
   const AGENT_SECRET = process.env.AGENT_SECRET
   if (!AGENT_SECRET) return null
 
+  const hasOpp = (stats.target.opportunity_comments || 0) > 0
+  const oppLine = hasOpp
+    ? ` · ${stats.totals.opportunity_comments} QC (target ${stats.target.opportunity_comments})`
+    : ''
+
   const prompt = `Bạn là Hermes — AI quản lý chiến dịch Facebook. Viết báo cáo CUỐI NGÀY cho campaign "${campaign.name}" bằng tiếng Việt tự nhiên, ngắn gọn (4-6 câu). Số liệu:
 
-- Tổng: ${stats.totals.likes} like · ${stats.totals.comments} comment · ${stats.totals.friend_requests} kết bạn · ${stats.totals.group_joins} join group · ${stats.totals.visits} lượt vào nhóm
+- Tổng: ${stats.totals.likes} like · ${stats.totals.comments} comment${oppLine} · ${stats.totals.friend_requests} kết bạn · ${stats.totals.group_joins} join group · ${stats.totals.visits} lượt vào nhóm
 - Target: ${stats.target.likes} like · ${stats.target.comments} comment · ${stats.target.friend_requests} kết bạn · ${stats.target.group_joins} join
 - Nicks active: ${stats.active_nicks}
 - Job failures: ${stats.failures.total} (${Object.keys(stats.failures.by_type).slice(0, 3).join(', ')})

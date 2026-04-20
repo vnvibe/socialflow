@@ -57,12 +57,16 @@ class ActivityLogger {
   }
 
   _incrementKpi(actionType) {
+    // Note: opportunity_comment routes to its OWN column (done_opportunity_comments).
+    // Migration 023 added the split so branded/ad comments have a separate
+    // KPI from normal comments — user wants visibility into "QC chạy bao
+    // nhiêu" without it blending into general comment target.
     const FIELD_MAP = {
       like: 'done_likes',
       comment: 'done_comments',
       friend_request: 'done_friend_requests',
       join_group: 'done_group_joins',
-      opportunity_comment: 'done_comments',
+      opportunity_comment: 'done_opportunity_comments',
     }
     const field = FIELD_MAP[actionType]
     if (!field) return

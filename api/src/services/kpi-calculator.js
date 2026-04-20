@@ -30,7 +30,11 @@ function nickWeight(nick) {
   return w
 }
 
-const DEFAULT_KPI = { daily_likes: 60, daily_comments: 15, daily_friend_requests: 10, daily_group_joins: 9 }
+// daily_opportunity_comments defaults to 0 — only set when campaign has brand_config.
+// When > 0, each nick gets a proportional target (min 1) and that target
+// participates in kpi_met. Prevents opp comments from masking missing
+// normal comments and vice versa.
+const DEFAULT_KPI = { daily_likes: 60, daily_comments: 15, daily_friend_requests: 10, daily_group_joins: 9, daily_opportunity_comments: 0 }
 
 // VN date (UTC+7) — both cron AND agent must use the same timezone for dates.
 // The daily cron fires at 00:01 VN = 17:01 UTC, so UTC date is YESTERDAY.
@@ -44,7 +48,7 @@ async function rebalanceKPI(supabase, campaignId) {
 
   const { data: campaign, error: cErr } = await supabase
     .from('campaigns')
-    .select('id, kpi_config, campaign_roles(account_ids)')
+    .select('id, kpi_config, brand_config, campaign_roles(account_ids)')
     .eq('id', campaignId)
     .single()
   if (cErr || !campaign) return { ok: false, reason: cErr?.message || 'campaign not found' }
@@ -77,19 +81,34 @@ async function rebalanceKPI(supabase, campaignId) {
   }
 
   const kpi = { ...DEFAULT_KPI, ...(campaign.kpi_config || {}) }
+
+  // Auto-derive opportunity target when campaign has brand_config but user
+  // hasn't set kpi_config.daily_opportunity_comments explicitly. 2/nick/day
+  // is the hard cap from warmup-budget.js — matches what the nurture handler
+  // actually allows. User can override via kpi_config to scale ad campaigns.
+  const hasBrand = !!(campaign.brand_config?.brand_name)
+  if (hasBrand && !(Number(campaign.kpi_config?.daily_opportunity_comments) > 0)) {
+    kpi.daily_opportunity_comments = nicks.length * 2
+  }
+
   const today = vnToday()
 
+  const oppTarget = Number(kpi.daily_opportunity_comments) || 0
   const rows = weighted.map(n => {
     const share = n.weight / totalWeight
     return {
       campaign_id: campaignId,
       account_id: n.id,
       date: today,
-      // Minimum targets so target is never 0 (prevents kpi_met=true bypass)
+      // Minimum targets so target is never 0 (prevents kpi_met=true bypass).
+      // Opportunity: no floor when daily=0 (campaign has no brand) — stays 0
+      // so kpi_met ignores it. When daily>0, floor at 1 so each nick owes
+      // at least one QC comment.
       target_likes: Math.max(5, Math.round(kpi.daily_likes * share)),
       target_comments: Math.max(2, Math.round(kpi.daily_comments * share)),
       target_friend_requests: Math.max(1, Math.round(kpi.daily_friend_requests * share)),
       target_group_joins: Math.max(1, Math.round(kpi.daily_group_joins * share)),
+      target_opportunity_comments: oppTarget > 0 ? Math.max(1, Math.round(oppTarget * share)) : 0,
     }
   })
 

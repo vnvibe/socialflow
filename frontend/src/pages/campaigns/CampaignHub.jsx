@@ -78,15 +78,20 @@ function DailyReportCard({ campaignId }) {
               (LLM narrative chưa tạo được — dưới là số liệu thô)
             </div>
           )}
-          {report.stats && (
-            <div className="grid grid-cols-5 gap-2">
-              {[
-                { k: 'Like',    got: report.stats.totals?.likes,           tgt: report.stats.target?.likes },
-                { k: 'Comment', got: report.stats.totals?.comments,        tgt: report.stats.target?.comments },
-                { k: 'Kết bạn', got: report.stats.totals?.friend_requests, tgt: report.stats.target?.friend_requests },
-                { k: 'Join',    got: report.stats.totals?.group_joins,     tgt: report.stats.target?.group_joins },
-                { k: 'Fails',   got: report.stats.failures?.total,         tgt: null },
-              ].map(({ k, got, tgt }) => (
+          {report.stats && (() => {
+            const hasOpp = (report.stats.target?.opportunity_comments || 0) > 0
+            const cells = [
+              { k: 'Like',    got: report.stats.totals?.likes,           tgt: report.stats.target?.likes },
+              { k: 'Comment', got: report.stats.totals?.comments,        tgt: report.stats.target?.comments },
+              ...(hasOpp ? [{ k: 'QC',    got: report.stats.totals?.opportunity_comments, tgt: report.stats.target?.opportunity_comments }] : []),
+              { k: 'Kết bạn', got: report.stats.totals?.friend_requests, tgt: report.stats.target?.friend_requests },
+              { k: 'Join',    got: report.stats.totals?.group_joins,     tgt: report.stats.target?.group_joins },
+              { k: 'Fails',   got: report.stats.failures?.total,         tgt: null },
+            ]
+            const cols = cells.length
+            return (
+              <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+              {cells.map(({ k, got, tgt }) => (
                 <div key={k} className="p-2" style={{ border: '1px solid var(--border)' }}>
                   <div className="text-[10px] text-app-muted uppercase tracking-wider">{k}</div>
                   <div className={`text-lg ${tgt > 0 && got >= tgt ? 'text-hermes' : (k === 'Fails' && got > 0 ? 'text-danger' : 'text-app-primary')}`}>
@@ -94,8 +99,9 @@ function DailyReportCard({ campaignId }) {
                   </div>
                 </div>
               ))}
-            </div>
-          )}
+              </div>
+            )
+          })()}
           {report.stats?.highlights && (report.stats.highlights.top?.length > 0 || report.stats.highlights.bottom?.length > 0) && (
             <div className="mt-3 grid grid-cols-2 gap-3">
               {report.stats.highlights.top?.length > 0 && (
@@ -326,6 +332,9 @@ function OverviewTab({ campaign, campaignId }) {
               <span className="flex-1">Nick</span>
               <span className="w-20 text-right">Likes</span>
               <span className="w-24 text-right">Comments</span>
+              {kpi.rows.some(r => (r.target_opportunity_comments || 0) > 0) && (
+                <span className="w-16 text-right" title="Branded/ad opportunity comments — separate from normal comments">QC</span>
+              )}
               <span className="w-20 text-right">FR</span>
               <span className="w-20 text-right">Groups</span>
               <span className="w-20 text-right" title="Jobs created today (all types) vs daily quota">Quota</span>
@@ -351,6 +360,16 @@ function OverviewTab({ campaign, campaignId }) {
                 <span className="w-24 text-right text-app-muted font-mono-ui">
                   {row.done_comments || 0}/{row.target_comments || 0}
                 </span>
+                {kpi.rows.some(r => (r.target_opportunity_comments || 0) > 0) && (
+                  <span
+                    className="w-16 text-right font-mono-ui"
+                    style={{ color: (row.target_opportunity_comments || 0) === 0 ? 'var(--text-dim)' :
+                      ((row.done_opportunity_comments || 0) >= (row.target_opportunity_comments || 0) ? 'var(--hermes)' : 'var(--text-muted)') }}
+                    title="Opportunity/ad comments"
+                  >
+                    {(row.target_opportunity_comments || 0) === 0 ? '—' : `${row.done_opportunity_comments || 0}/${row.target_opportunity_comments}`}
+                  </span>
+                )}
                 <span className="w-20 text-right text-app-muted font-mono-ui">
                   {row.done_friend_requests || 0}/{row.target_friend_requests || 0}
                 </span>
