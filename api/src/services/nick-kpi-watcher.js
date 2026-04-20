@@ -183,11 +183,14 @@ async function runWatcher(supabaseInst) {
 
   const today = vnToday()
 
-  // Pull today's KPI rows — only consider healthy nicks
+  // Pull today's KPI rows — keep per-action breakdown so we can
+  // diagnose SPECIFIC shortfalls (e.g. likes OK but comments 0).
   const { rows: kpis } = await pool.query(
     `SELECT k.account_id, k.campaign_id,
-            COALESCE(k.done_likes,0)+COALESCE(k.done_comments,0)+COALESCE(k.done_friend_requests,0)+COALESCE(k.done_group_joins,0) AS done,
-            COALESCE(k.target_likes,0)+COALESCE(k.target_comments,0)+COALESCE(k.target_friend_requests,0)+COALESCE(k.target_group_joins,0) AS target,
+            COALESCE(k.done_likes,0) AS done_likes, COALESCE(k.target_likes,0) AS target_likes,
+            COALESCE(k.done_comments,0) AS done_comments, COALESCE(k.target_comments,0) AS target_comments,
+            COALESCE(k.done_friend_requests,0) AS done_fr, COALESCE(k.target_friend_requests,0) AS target_fr,
+            COALESCE(k.done_group_joins,0) AS done_joins, COALESCE(k.target_group_joins,0) AS target_joins,
             a.is_active, a.status, a.username
      FROM nick_kpi_daily k
      JOIN accounts a ON a.id = k.account_id
@@ -198,51 +201,94 @@ async function runWatcher(supabaseInst) {
   const expectedFrac = await expectedProgress()
   let checked = 0, shortfalls = 0, capabilities = 0
 
+  const ACTIONS = [
+    { key: 'likes',    doneCol: 'done_likes',    targetCol: 'target_likes',    label: 'Like',        handlerHint: 'campaign_nurture likes posts in joined groups' },
+    { key: 'comments', doneCol: 'done_comments', targetCol: 'target_comments', label: 'Comment',     handlerHint: 'campaign_nurture comments via AI after quality gate' },
+    { key: 'fr',       doneCol: 'done_fr',       targetCol: 'target_fr',       label: 'Kết bạn',     handlerHint: 'campaign_send_friend_request (needs connect role + age >=14d)' },
+    { key: 'joins',    doneCol: 'done_joins',    targetCol: 'target_joins',    label: 'Join group',  handlerHint: 'campaign_discover_groups (scout role, age >=14d unlocks)' },
+  ]
+
   for (const row of kpis) {
     checked++
-    if (row.target <= 0) continue
-    const expectedDone = row.target * expectedFrac
-    const shortfall = expectedDone - row.done
-    const shortfallPct = expectedDone > 0 ? Math.round((shortfall / expectedDone) * 100) : 0
+    const totalTarget = row.target_likes + row.target_comments + row.target_fr + row.target_joins
+    if (totalTarget <= 0) continue
+    const totalDone = row.done_likes + row.done_comments + row.done_fr + row.done_joins
 
-    if (shortfallPct >= SHORTFALL_THRESHOLD_PCT) {
-      shortfalls++
-      const diag = await diagnose(pool, row.account_id, row.campaign_id)
-      if (!diag) continue
+    // Per-action shortfall analysis — find which action(s) are behind.
+    const actionStatus = ACTIONS.map(a => {
+      const target = row[a.targetCol]
+      const done = row[a.doneCol]
+      if (target <= 0) return null
+      const expected = target * expectedFrac
+      const gap = expected - done
+      const pct = expected > 0 ? Math.round((gap / expected) * 100) : 0
+      return {
+        action: a.key, label: a.label, done, target,
+        expected: Math.round(expected),
+        gap: Math.max(0, Math.round(gap)),
+        shortfall_pct: Math.max(0, pct),
+        handler_hint: a.handlerHint,
+        status: pct >= SHORTFALL_THRESHOLD_PCT ? 'behind' : (done >= target ? 'done' : 'on_track'),
+      }
+    }).filter(Boolean)
 
-      // Avoid spamming: only log one shortfall decision per nick per 2h
-      const { rows: recent } = await pool.query(
-        `SELECT id FROM hermes_decisions
-         WHERE campaign_id = $1 AND decision_type = 'kpi_shortfall'
-           AND target_id = $2 AND created_at > now() - INTERVAL '2 hours'
-         LIMIT 1`,
-        [row.campaign_id, row.account_id]
-      )
-      if (recent.length > 0) continue
+    const behindActions = actionStatus.filter(a => a.status === 'behind')
+    if (behindActions.length === 0) continue
 
-      await pool.query(
-        `INSERT INTO hermes_decisions (campaign_id, decision_type, action_type, target_id, target_name, priority, reason, decision, auto_apply, auto_applied, outcome, outcome_detail)
-         VALUES ($1, 'kpi_shortfall', 'investigate_nick_shortfall', $2, $3, $4, $5, $6, $7, false, 'success', $8)`,
-        [
-          row.campaign_id,
-          row.account_id,
-          row.username,
-          diag.severity === 'high' ? 'high' : 'medium',
-          `${diag.cause}. Hôm nay: ${row.done}/${row.target} (${Math.round((row.done / row.target) * 100)}%)`,
-          JSON.stringify({
-            done: row.done,
-            target: row.target,
-            expected_by_now: Math.round(expectedDone),
-            shortfall_pct: shortfallPct,
-            cause: diag.cause,
-            plan: diag.plan,
-            evidence: diag.evidence,
-          }),
-          diag.auto_apply,
-          `cause=${diag.cause} | plan=${diag.plan}`,
-        ]
-      )
-    }
+    shortfalls++
+
+    // Dedup: only log one shortfall decision per nick per 2h
+    const { rows: recent } = await pool.query(
+      `SELECT id FROM hermes_decisions
+       WHERE campaign_id = $1 AND decision_type = 'kpi_shortfall'
+         AND target_id = $2 AND created_at > now() - INTERVAL '2 hours'
+       LIMIT 1`,
+      [row.campaign_id, row.account_id]
+    )
+    if (recent.length > 0) continue
+
+    const diag = await diagnose(pool, row.account_id, row.campaign_id)
+    if (!diag) continue
+
+    // Build per-action plan. A nick can be "idle" globally but the
+    // PER-ACTION fix varies: comments need campaign_nurture to actually
+    // comment (quality gate may be rejecting), FR needs connect role etc.
+    const perActionPlans = behindActions.map(a => {
+      let specific = a.handler_hint
+      if (a.action === 'comments' && diag.evidence.failures_24h && Object.keys(diag.evidence.failures_24h).length) {
+        specific += ` · kiểm tra quality_gate rejection trong log`
+      }
+      if (a.action === 'fr' && diag.evidence.age_days < 14) {
+        specific += ` · nick mới ${diag.evidence.age_days}d, chờ đến 14d`
+      }
+      if (a.action === 'joins' && diag.evidence.age_days < 14) {
+        specific += ` · warmup đang chặn join_group`
+      }
+      return { ...a, plan: specific }
+    })
+
+    const behindSummary = behindActions.map(a => `${a.label} ${a.done}/${a.target}`).join(', ')
+    await pool.query(
+      `INSERT INTO hermes_decisions (campaign_id, decision_type, action_type, target_id, target_name, priority, reason, decision, auto_apply, auto_applied, outcome, outcome_detail)
+       VALUES ($1, 'kpi_shortfall', 'investigate_nick_shortfall', $2, $3, $4, $5, $6, $7, false, 'success', $8)`,
+      [
+        row.campaign_id,
+        row.account_id,
+        row.username,
+        diag.severity === 'high' ? 'high' : 'medium',
+        `${diag.cause}. Hôm nay: ${totalDone}/${totalTarget} (${Math.round((totalDone / totalTarget) * 100)}%) · Thiếu: ${behindSummary}`,
+        JSON.stringify({
+          total: { done: totalDone, target: totalTarget, pct: Math.round((totalDone / totalTarget) * 100) },
+          by_action: actionStatus,
+          cause: diag.cause,
+          plan: diag.plan,
+          per_action_plan: perActionPlans,
+          evidence: diag.evidence,
+        }),
+        diag.auto_apply,
+        `cause=${diag.cause} | behind=${behindSummary}`,
+      ]
+    )
 
     // Also check capability bump
     const cap = await checkCapability(pool, row.account_id, row.campaign_id)

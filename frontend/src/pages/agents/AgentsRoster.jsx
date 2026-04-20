@@ -544,6 +544,20 @@ function NickDetailPanel({ nick, onClose }) {
     refetchInterval: 15000,
   })
 
+  const { data: kpiStatus } = useQuery({
+    queryKey: ['nick-kpi-status', nick?.id],
+    enabled: !!nick,
+    queryFn: async () => {
+      try {
+        const res = await api.get(`/accounts/${nick.id}/kpi-status`)
+        return res.data
+      } catch {
+        return null
+      }
+    },
+    refetchInterval: 30000,
+  })
+
   // 7-day bar chart data
   const last7Days = useMemo(() => {
     const days = []
@@ -619,9 +633,99 @@ function NickDetailPanel({ nick, onClose }) {
           </div>
         </div>
 
-        {/* Daily KPI — target vs done today */}
+        {/* Hermes KPI card — per-action done/target + shortfall diagnosis
+            from nick-kpi-watcher. Surfaces cause + plan for each missing
+            action type (likes/comments/FR/joins) instead of a flat
+            aggregate. Refreshes every 30s. */}
+        {kpiStatus && (kpiStatus.kpi?.length > 0 || kpiStatus.diagnoses?.length > 0) && (
+          <div className="mb-4">
+            <div className="text-[10px] uppercase text-app-muted mb-2">Hermes KPI hôm nay</div>
+            <div style={{ border: '1px solid var(--border)' }}>
+              {(kpiStatus.kpi || []).map((k) => {
+                const rows = [
+                  { label: 'Like',     done: k.done_likes,    target: k.target_likes },
+                  { label: 'Comment',  done: k.done_comments, target: k.target_comments },
+                  { label: 'Kết bạn',  done: k.done_fr,       target: k.target_fr },
+                  { label: 'Join nhóm',done: k.done_joins,    target: k.target_joins },
+                ].filter(r => r.target > 0)
+                return (
+                  <div key={k.campaign_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div className="px-3 py-1.5 text-[10px] text-app-muted" style={{ background: 'var(--bg-elevated)' }}>
+                      {k.campaign_name || 'campaign'}
+                    </div>
+                    {rows.map((r) => {
+                      const pct = r.target > 0 ? Math.min(100, Math.round((r.done / r.target) * 100)) : 0
+                      const hit = r.done >= r.target
+                      const behind = pct < 40
+                      return (
+                        <div key={r.label} className="flex items-center gap-3 px-3 py-2">
+                          <div className="w-20 text-app-primary">{r.label}</div>
+                          <div className="flex-1 h-2" style={{ background: 'var(--bg-base)' }}>
+                            <div className="h-full" style={{
+                              width: `${pct}%`,
+                              background: hit ? 'var(--hermes)' : (behind ? 'var(--danger)' : 'var(--warn)'),
+                            }} />
+                          </div>
+                          <div className={`w-16 text-right ${hit ? 'text-hermes' : (behind ? 'text-danger' : 'text-app-primary')}`}>
+                            {r.done}/{r.target}
+                          </div>
+                          <div className="w-10 text-right text-app-muted">{pct}%</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+              {(kpiStatus.diagnoses || []).map((d) => {
+                const payload = typeof d.decision === 'string' ? (() => { try { return JSON.parse(d.decision) } catch { return {} } })() : (d.decision || {})
+                const isBump = d.decision_type === 'capability_bump'
+                return (
+                  <div
+                    key={d.id}
+                    className="px-3 py-2"
+                    style={{
+                      background: isBump ? 'color-mix(in srgb, var(--hermes) 10%, var(--bg-base))' : 'color-mix(in srgb, var(--warn) 10%, var(--bg-base))',
+                      borderBottom: '1px solid var(--border)',
+                    }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className={isBump ? 'text-hermes' : 'text-warn'}>{isBump ? '⬆' : '⚠'}</span>
+                      <div className="flex-1">
+                        <div className="text-app-primary text-[12px]">{d.reason}</div>
+                        {payload.plan && !isBump && (
+                          <div className="text-[10px] text-app-muted mt-1">
+                            <span className="text-app-primary">Plan: </span>{payload.plan}
+                          </div>
+                        )}
+                        {Array.isArray(payload.per_action_plan) && payload.per_action_plan.length > 0 && (
+                          <div className="text-[10px] text-app-muted mt-1 space-y-0.5">
+                            {payload.per_action_plan.map((p, i) => (
+                              <div key={i}>
+                                <span className="text-warn">• {p.label}</span>
+                                <span className="text-app-dim"> {p.done}/{p.target}</span>
+                                <span className="text-app-muted"> → {p.plan}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {isBump && payload.streak_days && (
+                          <div className="text-[10px] text-app-muted mt-1">
+                            {payload.streak_days} ngày liên tiếp đạt KPI · đề xuất +{payload.bump_pct}% target
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[9px] text-app-dim shrink-0">{fmtAgo(d.created_at)}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Daily KPI (quota) — job creation cap, not action KPI */}
         <div className="mb-4">
-          <div className="text-[10px] uppercase text-app-muted mb-2">KPI hôm nay (done / target)</div>
+          <div className="text-[10px] uppercase text-app-muted mb-2">Quota tạo job hôm nay</div>
           <div style={{ border: '1px solid var(--border)' }}>
             {Object.keys(quotaToday).length === 0 ? (
               <div className="p-3 text-app-muted text-center">No quota data</div>
