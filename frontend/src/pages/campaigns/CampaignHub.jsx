@@ -1166,10 +1166,28 @@ function ActivityRow({ row }) {
   )
 }
 
+// VN date helpers — UTC+7. "today" on frontend clock means the VN
+// calendar day, matching how activity_log timestamps are read elsewhere.
+function vnTodayStr() {
+  return new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10)
+}
+function vnYesterdayStr() {
+  return new Date(Date.now() + 7 * 3600000 - 86400000).toISOString().slice(0, 10)
+}
+// Convert YYYY-MM-DD (VN day) → UTC ISO bounds the API can filter on
+function vnDayBounds(ymd) {
+  if (!ymd) return { from: null, to: null }
+  const from = new Date(`${ymd}T00:00:00+07:00`).toISOString()
+  const to = new Date(`${ymd}T23:59:59.999+07:00`).toISOString()
+  return { from, to }
+}
+
 function ActivityTab({ campaignId, campaign }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const [filterType, setFilterType] = useState('')
-  const [filterToday, setFilterToday] = useState(true)
+  // dateMode: 'today' | 'yesterday' | 'custom' | 'all'
+  const [dateMode, setDateMode] = useState('today')
+  const [customDate, setCustomDate] = useState(vnTodayStr())
   // Seed nick filter from ?account_id= in URL (KPI click-through from Overview)
   const [filterAccountId, setFilterAccountId] = useState(searchParams.get('account_id') || '')
   const [limit, setLimit] = useState(50)
@@ -1183,21 +1201,27 @@ function ActivityTab({ campaignId, campaign }) {
   }, [filterAccountId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: resp, isLoading } = useQuery({
-    queryKey: ['campaign-activity-log', campaignId, filterType, filterToday, filterAccountId, limit],
+    queryKey: ['campaign-activity-log', campaignId, filterType, dateMode, customDate, filterAccountId, limit],
     queryFn: async () => {
       const params = new URLSearchParams()
       params.set('limit', String(limit))
       if (filterType) params.set('action_type', filterType)
       if (filterAccountId) params.set('account_id', filterAccountId)
-      if (filterToday) {
-        const start = new Date()
-        start.setHours(0, 0, 0, 0)
-        params.set('date_from', start.toISOString())
+
+      let ymd = null
+      if (dateMode === 'today') ymd = vnTodayStr()
+      else if (dateMode === 'yesterday') ymd = vnYesterdayStr()
+      else if (dateMode === 'custom') ymd = customDate
+      if (ymd) {
+        const { from, to } = vnDayBounds(ymd)
+        params.set('date_from', from)
+        params.set('date_to', to)
       }
+
       const r = await api.get(`/campaigns/${campaignId}/activity-log?${params}`)
       return r.data
     },
-    refetchInterval: 10000,
+    refetchInterval: dateMode === 'today' ? 10000 : false,
   })
 
   const rows = useMemo(() => {
@@ -1270,12 +1294,24 @@ function ActivityTab({ campaignId, campaign }) {
         <select
           className="px-2 py-1 rounded text-xs"
           style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
-          value={filterToday ? 'today' : 'all'}
-          onChange={(e) => setFilterToday(e.target.value === 'today')}
+          value={dateMode}
+          onChange={(e) => setDateMode(e.target.value)}
         >
           <option value="today">Hôm nay</option>
+          <option value="yesterday">Hôm qua</option>
+          <option value="custom">Chọn ngày…</option>
           <option value="all">Tất cả</option>
         </select>
+        {dateMode === 'custom' && (
+          <input
+            type="date"
+            className="px-2 py-1 rounded text-xs"
+            style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+            value={customDate}
+            max={vnTodayStr()}
+            onChange={(e) => setCustomDate(e.target.value)}
+          />
+        )}
         {accountIdsInRows.length > 0 && (
           <select
             className="px-2 py-1 rounded text-xs"
