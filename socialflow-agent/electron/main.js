@@ -157,6 +157,15 @@ function startAgent() {
     }
   }
 
+  // Scope this agent to the logged-in user — poller filters jobs by
+  // AGENT_USER_ID, so multiple users running the same binary each
+  // process only their own campaigns.
+  if (authSession) {
+    forkEnv.AGENT_USER_ID = authSession.user.id
+    forkEnv.AGENT_USER_EMAIL = authSession.user.email
+    forkEnv.AGENT_USER_TOKEN = authSession.token
+  }
+
   agentProcess = fork(agentPath, [], {
     cwd: appRoot,
     env: forkEnv,
@@ -281,10 +290,90 @@ function createTray() {
   updateTray()
 }
 
+// ── Auth (SaaS login) ──────────────────────────────────────────────────
+// Each user's agent runs against THEIR campaigns; the poller filters
+// jobs by user_id. So we need email+password login that calls the VPS
+// API /auth/login (not Supabase cloud — that DB is dead) and persists
+// { token, user } to disk so the session survives restart.
+
+const AUTH_STORE_PATH = path.join(app.getPath('userData'), 'auth.json')
+let authSession = null // { token, user: { id, email, username } }
+
+function loadAuth() {
+  try {
+    if (fs.existsSync(AUTH_STORE_PATH)) {
+      authSession = JSON.parse(fs.readFileSync(AUTH_STORE_PATH, 'utf8'))
+    }
+  } catch (err) {
+    authSession = null
+    try { fs.unlinkSync(AUTH_STORE_PATH) } catch {}
+  }
+  return authSession
+}
+
+function saveAuth(session) {
+  authSession = session
+  try {
+    if (session) fs.writeFileSync(AUTH_STORE_PATH, JSON.stringify(session, null, 2))
+    else if (fs.existsSync(AUTH_STORE_PATH)) fs.unlinkSync(AUTH_STORE_PATH)
+  } catch (err) {
+    addLog(`[AUTH] failed to persist session: ${err.message}`, 'warn')
+  }
+}
+
+async function apiLogin(email, password) {
+  // Resolve API URL from config.js (build-embedded) or env.
+  let apiUrl = process.env.API_URL || process.env.API_BASE_URL
+  if (!apiUrl) {
+    try {
+      const cfg = require(path.join(appRoot, 'lib', 'config'))
+      apiUrl = cfg.API_URL || 'https://103-142-24-60.sslip.io'
+    } catch {
+      apiUrl = 'https://103-142-24-60.sslip.io'
+    }
+  }
+  const url = `${apiUrl.replace(/\/$/, '')}/auth/login`
+  const body = JSON.stringify({ email, password })
+
+  const https = require('https')
+  const http = require('http')
+  const lib = url.startsWith('https:') ? https : http
+  return new Promise((resolve) => {
+    const req = lib.request(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 15000,
+    }, (res) => {
+      let data = ''
+      res.on('data', (c) => data += c)
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          if (res.statusCode === 200 && json.token) {
+            resolve({ ok: true, token: json.token, user: json.user })
+          } else {
+            resolve({ ok: false, error: json.error || `HTTP ${res.statusCode}` })
+          }
+        } catch (err) {
+          resolve({ ok: false, error: 'invalid response' })
+        }
+      })
+    })
+    req.on('error', (err) => resolve({ ok: false, error: err.message }))
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }) })
+    req.write(body)
+    req.end()
+  })
+}
+
 // IPC handlers
-ipcMain.handle('get-status', () => ({ running: !!agentProcess }))
+ipcMain.handle('get-status', () => ({ running: !!agentProcess, loggedIn: !!authSession }))
 ipcMain.handle('get-logs', () => logs)
 ipcMain.handle('start-agent', async () => {
+  if (!authSession) {
+    addLog('[AGENT] Login required before starting', 'warn')
+    return false
+  }
   await ensurePlaywright()
   startAgent()
   return true
@@ -292,14 +381,36 @@ ipcMain.handle('start-agent', async () => {
 ipcMain.handle('stop-agent', () => { stopAgent(); return true })
 ipcMain.handle('clear-logs', () => { logs = []; return true })
 
+ipcMain.handle('auth:login', async (_, { email, password }) => {
+  const result = await apiLogin(email, password)
+  if (result.ok) {
+    saveAuth({ token: result.token, user: result.user })
+    addLog(`[AUTH] Logged in as ${result.user.email}`, 'success')
+  } else {
+    addLog(`[AUTH] Login failed: ${result.error}`, 'error')
+  }
+  return result
+})
+ipcMain.handle('auth:logout', async () => {
+  stopAgent()
+  saveAuth(null)
+  addLog('[AUTH] Logged out', 'info')
+  return { ok: true }
+})
+ipcMain.handle('auth:me', () => authSession?.user || null)
+
 // App lifecycle
 app.whenReady().then(async () => {
+  loadAuth()
   createTray()
   createWindow()
 
-  // Auto-setup and start
-  await ensurePlaywright()
-  startAgent()
+  // Auto-start ONLY if previously logged in — otherwise UI shows
+  // login form and waits for the user.
+  if (authSession) {
+    await ensurePlaywright()
+    startAgent()
+  }
 })
 
 app.on('window-all-closed', () => {

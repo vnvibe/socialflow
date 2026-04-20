@@ -16,3 +16,13 @@ contextBridge.exposeInMainWorld('agent', {
     ipcRenderer.on('setup-progress', (_, msg) => callback(msg))
   },
 })
+
+// SaaS login — hits API /auth/login, stores JWT + user locally so the
+// poller can filter jobs for the correct owner. Without this the agent
+// would either run for no one (single-user embed) or against the wrong
+// user's campaigns.
+contextBridge.exposeInMainWorld('auth', {
+  login: (email, password) => ipcRenderer.invoke('auth:login', { email, password }),
+  logout: () => ipcRenderer.invoke('auth:logout'),
+  me: () => ipcRenderer.invoke('auth:me'),
+})

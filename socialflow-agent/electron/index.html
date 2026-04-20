@@ -187,6 +187,84 @@
       gap: 8px;
     }
     .empty-state .icon { font-size: 48px; opacity: 0.3; }
+
+    /* Login form */
+    .login-wrap {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .login-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 28px 28px 24px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .login-title { font-size: 20px; font-weight: 600; color: #f1f5f9; margin-bottom: 4px; }
+    .login-sub { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+    .login-field { margin-bottom: 14px; }
+    .login-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .login-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 13px;
+      outline: none;
+    }
+    .login-input:focus { border-color: #3b82f6; }
+    .login-error {
+      background: rgba(239,68,68,0.12);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #fca5a5;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .login-btn {
+      width: 100%;
+      padding: 10px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      justify-content: center;
+    }
+    .login-btn:hover { background: #2563eb; }
+    .login-btn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+    .user-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+    .user-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+    .btn-logout {
+      background: transparent;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      padding: 4px 10px;
+      font-size: 11px;
+    }
+    .btn-logout:hover { color: #e2e8f0; border-color: #475569; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -194,15 +272,38 @@
     <div class="header-left">
       <div class="logo">SF</div>
       <span class="app-name">SocialFlow Agent</span>
-      <span class="app-version">v1.0</span>
+      <span class="app-version">v1.2</span>
     </div>
     <div class="status-bar">
+      <div class="user-chip hidden" id="userChip">
+        <span class="dot"></span>
+        <span id="userEmail"></span>
+        <button class="btn-logout" onclick="logout()">Đăng xuất</button>
+      </div>
       <div class="status-dot" id="statusDot"></div>
       <span class="status-text" id="statusText">Stopped</span>
     </div>
   </div>
 
-  <div class="controls">
+  <!-- Login card — shown when not logged in -->
+  <div class="login-wrap hidden" id="loginView">
+    <form class="login-card" onsubmit="return doLogin(event)">
+      <div class="login-title">Đăng nhập SocialFlow</div>
+      <div class="login-sub">Agent chạy với tài khoản của bạn — chỉ xử lý campaigns bạn sở hữu.</div>
+      <div class="login-error" id="loginError"></div>
+      <div class="login-field">
+        <div class="login-label">Email</div>
+        <input class="login-input" id="emailInput" type="email" required autocomplete="email" />
+      </div>
+      <div class="login-field">
+        <div class="login-label">Mật khẩu</div>
+        <input class="login-input" id="passInput" type="password" required autocomplete="current-password" />
+      </div>
+      <button class="login-btn" id="loginBtn" type="submit">Đăng nhập</button>
+    </form>
+  </div>
+
+  <div class="controls hidden" id="controlsView">
     <button class="btn-start" id="btnStart" onclick="startAgent()">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
       Start
@@ -226,7 +327,7 @@
     <button class="btn-clear" onclick="clearLogs()">Clear</button>
   </div>
 
-  <div class="logs" id="logsContainer">
+  <div class="logs hidden" id="logsContainer">
     <div class="empty-state" id="emptyState">
       <div class="icon">&#9881;</div>
       <div>Agent is starting...</div>
@@ -293,8 +394,60 @@
       document.getElementById('errorCount').textContent = '0'
     }
 
+    // ── Auth state switching ────────────────────────────────────────
+    function showLogin() {
+      document.getElementById('loginView').classList.remove('hidden')
+      document.getElementById('controlsView').classList.add('hidden')
+      document.getElementById('logsContainer').classList.add('hidden')
+      document.getElementById('userChip').classList.add('hidden')
+    }
+    function showLoggedIn(user) {
+      document.getElementById('loginView').classList.add('hidden')
+      document.getElementById('controlsView').classList.remove('hidden')
+      document.getElementById('logsContainer').classList.remove('hidden')
+      const chip = document.getElementById('userChip')
+      chip.classList.remove('hidden')
+      document.getElementById('userEmail').textContent = user.email
+    }
+
+    async function doLogin(ev) {
+      ev.preventDefault()
+      const email = document.getElementById('emailInput').value.trim()
+      const password = document.getElementById('passInput').value
+      const errBox = document.getElementById('loginError')
+      const btn = document.getElementById('loginBtn')
+      errBox.style.display = 'none'
+      btn.disabled = true
+      btn.textContent = 'Đang đăng nhập…'
+      const result = await window.auth.login(email, password)
+      btn.disabled = false
+      btn.textContent = 'Đăng nhập'
+      if (result.ok) {
+        showLoggedIn(result.user)
+        // Kick off agent immediately on successful login
+        await window.agent.start()
+      } else {
+        errBox.textContent = result.error || 'Đăng nhập thất bại'
+        errBox.style.display = 'block'
+      }
+      return false
+    }
+
+    async function logout() {
+      if (!confirm('Đăng xuất? Agent sẽ dừng xử lý jobs.')) return
+      await window.auth.logout()
+      showLogin()
+    }
+
     // Initialize
     async function init() {
+      const me = await window.auth.me()
+      if (!me) {
+        showLogin()
+        return
+      }
+      showLoggedIn(me)
+
       const status = await window.agent.getStatus()
       updateUI(status.running)
 
