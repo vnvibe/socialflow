@@ -392,6 +392,13 @@ export default function CommandCenter() {
               : d.outcome === 'pending' ? 'text-warn'
               : 'text-app-muted'
             const camp = campaignById[d.campaign_id]
+            // Tag source: autopilot (script-based) vs hermes (LLM) vs
+            // kpi_shortfall/capability_bump (watcher). Lets the user see
+            // at a glance which decisions cost LLM calls and which are free.
+            const sourceTag = d.decision_type === 'autopilot' ? { label: 'SCRIPT', color: 'text-app-muted' }
+              : d.decision_type === 'kpi_shortfall' ? { label: 'KPI', color: 'text-warn' }
+              : d.decision_type === 'capability_bump' ? { label: 'KPI+', color: 'text-hermes' }
+              : { label: 'AI', color: 'text-info' }
             return (
               <button
                 key={d.id}
@@ -407,8 +414,11 @@ export default function CommandCenter() {
                     <span className={`${outcomeColor} text-[10px]`}>
                       {d.outcome === 'success' ? '✓' : d.outcome === 'failed' ? '✗' : d.outcome === 'pending' ? '⏳' : '·'}
                     </span>
+                    <span className={`${sourceTag.color} text-[9px] font-bold tracking-wider`}>
+                      {sourceTag.label}
+                    </span>
                     <span className="text-app-primary truncate">
-                      {d.decision_type || 'decision'}
+                      {d.action_type || d.decision_type || 'decision'}
                     </span>
                   </div>
                   <div className="text-[10px] text-app-dim truncate">
