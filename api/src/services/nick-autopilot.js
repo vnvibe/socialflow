@@ -41,7 +41,7 @@ async function insertDecision(pool, campaignId, targetId, targetName, actionType
 
   await pool.query(
     `INSERT INTO hermes_decisions (campaign_id, decision_type, action_type, target_id, target_name, priority, reason, decision, auto_apply, auto_applied, outcome)
-     VALUES ($1, 'autopilot', $2, $3, $4, $5, $6, $7, $8, $9, 'success')`,
+     VALUES ($1, 'autopilot', $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       campaignId,
       actionType,
@@ -51,7 +51,8 @@ async function insertDecision(pool, campaignId, targetId, targetName, actionType
       reason,
       JSON.stringify({ ...decision, source: 'autopilot' }),
       autoApply,
-      autoApply ? 'success' : null,
+      autoApply,                                // auto_applied boolean
+      autoApply ? 'success' : 'pending',        // outcome
     ]
   )
   return true
