@@ -22,6 +22,112 @@ const asArray = (d) => Array.isArray(d) ? d
   : []
 
 // ─── Tab: Overview ─────────────────────────────────────────
+// Daily report card — shows latest narrative + today's KPI totals. The
+// narrative is optional (LLM might be blocked); fallback is a bullet
+// list of the structured stats. User can click 'Tạo lại' to regenerate.
+function DailyReportCard({ campaignId }) {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['campaigns', campaignId, 'daily-report'],
+    queryFn: async () => (await api.get(`/campaigns/${campaignId}/daily-reports?days=1`)).data,
+    refetchInterval: 60000,
+  })
+  const regen = useMutation({
+    mutationFn: async () => (await api.post(`/campaigns/${campaignId}/daily-reports/generate`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['campaigns', campaignId, 'daily-report'] })
+      toast.success('Đã tạo lại báo cáo')
+    },
+    onError: (err) => toast.error(err?.response?.data?.error || err.message),
+  })
+
+  const report = data?.reports?.[0]
+  if (isLoading) return null
+  return (
+    <div className="p-6 font-mono-ui text-xs" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="flex items-center gap-3 mb-3">
+        <div className="text-[10px] uppercase tracking-wider text-app-muted">
+          Báo cáo hôm nay {report?.date ? `· ${report.date}` : ''}
+          {report?.narrative_provider && <span className="ml-2 text-hermes text-[9px]">via {report.narrative_provider}</span>}
+        </div>
+        <div className="flex-1" />
+        <button
+          className="btn-ghost text-[10px] uppercase tracking-wider"
+          onClick={() => regen.mutate()}
+          disabled={regen.isPending}
+        >
+          {regen.isPending ? 'Đang tạo…' : 'Tạo lại'}
+        </button>
+      </div>
+      {!report ? (
+        <div className="text-app-muted">Chưa có báo cáo hôm nay. Cron chạy 22:00 — hoặc bấm "Tạo lại".</div>
+      ) : (
+        <>
+          {report.narrative_text ? (
+            <div
+              className="p-3 mb-3 text-[13px] leading-relaxed text-app-primary"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+            >
+              {report.narrative_text}
+            </div>
+          ) : (
+            <div
+              className="p-3 mb-3 text-app-muted"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+            >
+              (LLM narrative chưa tạo được — dưới là số liệu thô)
+            </div>
+          )}
+          {report.stats && (
+            <div className="grid grid-cols-5 gap-2">
+              {[
+                { k: 'Like',    got: report.stats.totals?.likes,           tgt: report.stats.target?.likes },
+                { k: 'Comment', got: report.stats.totals?.comments,        tgt: report.stats.target?.comments },
+                { k: 'Kết bạn', got: report.stats.totals?.friend_requests, tgt: report.stats.target?.friend_requests },
+                { k: 'Join',    got: report.stats.totals?.group_joins,     tgt: report.stats.target?.group_joins },
+                { k: 'Fails',   got: report.stats.failures?.total,         tgt: null },
+              ].map(({ k, got, tgt }) => (
+                <div key={k} className="p-2" style={{ border: '1px solid var(--border)' }}>
+                  <div className="text-[10px] text-app-muted uppercase tracking-wider">{k}</div>
+                  <div className={`text-lg ${tgt > 0 && got >= tgt ? 'text-hermes' : (k === 'Fails' && got > 0 ? 'text-danger' : 'text-app-primary')}`}>
+                    {got ?? 0}{tgt != null ? <span className="text-app-dim text-xs">/{tgt}</span> : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {report.stats?.highlights && (report.stats.highlights.top?.length > 0 || report.stats.highlights.bottom?.length > 0) && (
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {report.stats.highlights.top?.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase text-app-muted mb-1">🏆 Top nicks</div>
+                  {report.stats.highlights.top.map((n) => (
+                    <div key={n.account_id} className="text-[11px]">
+                      <span className="text-hermes">{n.username}</span>
+                      <span className="text-app-muted"> · {n.done}/{n.target} ({n.pct}%)</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {report.stats.highlights.bottom?.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase text-app-muted mb-1">⚠ Nicks yếu</div>
+                  {report.stats.highlights.bottom.map((n) => (
+                    <div key={n.account_id} className="text-[11px]">
+                      <span className="text-warn">{n.username}</span>
+                      <span className="text-app-muted"> · {n.done}/{n.target} ({n.pct}%)</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function OverviewTab({ campaign, campaignId }) {
   const nav = useNavigate()
   const [, setSearchParams] = useSearchParams()
@@ -61,7 +167,9 @@ function OverviewTab({ campaign, campaignId }) {
   const hctx = campaign?.hermes_context || {}
 
   return (
-    <div className="overflow-auto p-6 font-mono-ui">
+    <div className="overflow-auto font-mono-ui">
+      <DailyReportCard campaignId={campaignId} />
+      <div className="p-6">
       {/* Empty state — prompt to configure Hermes */}
       {!campaign?.goal && !hctx.product_name && (
         <div
@@ -270,6 +378,7 @@ function OverviewTab({ campaign, campaignId }) {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

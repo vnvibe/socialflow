@@ -468,6 +468,18 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
+  // Daily report — 22:00 VN. Aggregates today's KPI stats from SQL
+  // (always works) and optionally calls Hermes reporter skill for a
+  // VN narrative (best-effort — row still saved if LLM fails).
+  cron.schedule('0 22 * * *', async () => {
+    try {
+      const { generateAllRunning } = require('./daily-report')
+      await generateAllRunning(supabase)
+    } catch (err) {
+      console.error('[DAILY-REPORT] cron error:', err.message)
+    }
+  }, { timezone: 'Asia/Ho_Chi_Minh' })
+
   // Nick KPI watcher — every 30 min during active hours. Algorithmic
   // diagnosis (no LLM), so it works even when Hermes is blocked on
   // provider billing. Finds underperforming nicks, writes a

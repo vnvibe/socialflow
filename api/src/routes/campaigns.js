@@ -1556,6 +1556,41 @@ module.exports = async (fastify) => {
     return result
   })
 
+  // GET /campaigns/:id/daily-reports?days=7
+  // Returns recent daily_reports rows. Dashboard + campaign hub use this.
+  fastify.get('/:id/daily-reports', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const days = Math.min(parseInt(req.query.days) || 7, 30)
+    const pool = supabase._pool
+    if (!pool) return reply.code(500).send({ error: 'pg pool unavailable' })
+    try {
+      const { rows } = await pool.query(
+        `SELECT date, stats, narrative_text, narrative_provider, created_at
+         FROM daily_reports
+         WHERE campaign_id = $1 AND date >= CURRENT_DATE - $2::int
+         ORDER BY date DESC`,
+        [req.params.id, days]
+      )
+      return { reports: rows }
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // POST /campaigns/:id/daily-reports/generate
+  // Manual trigger — regenerates today's report. Useful for testing and
+  // for user-clicked "Refresh" without waiting for 22:00 cron.
+  fastify.post('/:id/daily-reports/generate', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const { generateForCampaign, vnToday } = require('../services/daily-report')
+      const date = req.body?.date || vnToday()
+      const result = await generateForCampaign(supabase, req.params.id, date)
+      if (!result) return reply.code(404).send({ error: 'Campaign not found' })
+      return result
+    } catch (err) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
   fastify.get('/:id/kpi-today', { preHandler: fastify.authenticate }, async (req, reply) => {
     const { data: campaign } = await supabase.from('campaigns')
       .select('id, kpi_config').eq('id', req.params.id).eq('owner_id', req.user.id).single()
