@@ -167,10 +167,16 @@ async function closeSession(accountId) {
   console.log(`[SESSION-POOL] Closing session for ${accountId}`)
 
   try {
+    // Portable export (backup) — profileDir is the source of truth
     await session.context.storageState({ path: session.storageFile })
   } catch {}
   try {
-    await session.browser.close()
+    // Persistent context: close() on the context flushes profileDir;
+    // closing browser alone can race with IndexedDB flush.
+    await session.context.close()
+  } catch {}
+  try {
+    if (session.browser) await session.browser.close()
   } catch {}
 
   sessions.delete(accountId)

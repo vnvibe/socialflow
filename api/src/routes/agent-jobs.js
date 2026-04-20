@@ -53,11 +53,24 @@ module.exports = async (fastify) => {
         }
       }
       args.push(parseInt(slots))
+      // Fair rotation with 2 signals (fixes the Thúy-starved / Việt-monopoly issue):
+      //   1. done_today  — nicks that drained 0 jobs today jump ahead of nicks
+      //      that already finished many. Levels effort across the roster.
+      //   2. last_activity — tie-breaker; within same done-count, oldest-idle first.
+      // Both wrapped in DISTINCT ON so each nick contributes exactly one candidate
+      // per poll cycle → the 2 agent slots can't be monopolized by one nick.
       const sql = `
-        WITH nick_activity AS (
+        WITH vn_day_start AS (
+          SELECT (date_trunc('day', (now() AT TIME ZONE 'Asia/Ho_Chi_Minh'))
+                  AT TIME ZONE 'Asia/Ho_Chi_Minh') AS ts
+        ),
+        nick_stats AS (
           SELECT
             payload->>'account_id' AS account_id,
-            MAX(COALESCE(started_at, finished_at, created_at)) AS last_activity
+            MAX(COALESCE(started_at, finished_at, created_at))        AS last_activity,
+            COUNT(*) FILTER (
+              WHERE status = 'done' AND finished_at >= (SELECT ts FROM vn_day_start)
+            )::int AS done_today
           FROM jobs
           WHERE payload ? 'account_id'
           GROUP BY payload->>'account_id'
@@ -65,14 +78,15 @@ module.exports = async (fastify) => {
         one_per_nick AS (
           SELECT DISTINCT ON (j.payload->>'account_id')
             j.*,
-            COALESCE(na.last_activity, '1970-01-01'::timestamptz) AS _last_activity
+            COALESCE(ns.last_activity, '1970-01-01'::timestamptz) AS _last_activity,
+            COALESCE(ns.done_today, 0)                            AS _done_today
           FROM jobs j
-          LEFT JOIN nick_activity na ON na.account_id = j.payload->>'account_id'
+          LEFT JOIN nick_stats ns ON ns.account_id = j.payload->>'account_id'
           WHERE ${where.join(' AND ')}
           ORDER BY j.payload->>'account_id' NULLS FIRST, j.priority ASC, j.scheduled_at ASC
         )
         SELECT * FROM one_per_nick
-        ORDER BY _last_activity ASC, priority ASC, scheduled_at ASC
+        ORDER BY _done_today ASC, _last_activity ASC, priority ASC, scheduled_at ASC
         LIMIT $${args.length}
       `
       try {

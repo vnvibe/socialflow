@@ -5,6 +5,14 @@ const fs = require('fs')
 
 const PROFILES_DIR = path.join(os.homedir(), '.socialflow', 'profiles')
 
+// launchPersistentContext gives each nick its OWN Chromium user-data-dir —
+// cookies, localStorage, IndexedDB, service workers, cache, fingerprint
+// all persist across runs exactly like a real user. Old approach (launch
+// + newContext storageState) only kept cookies + localStorage, so FB saw
+// a "fresh browser" every session and raised checkpoint risk.
+//
+// Returns { browser, context, profileDir, storageFile } to keep callers
+// stable — browser === context.browser() on persistent contexts.
 async function launchBrowser(account, options = {}) {
   const profileDir = path.join(PROFILES_DIR, account.id)
   fs.mkdirSync(profileDir, { recursive: true })
@@ -12,16 +20,19 @@ async function launchBrowser(account, options = {}) {
   const storageFile = path.join(profileDir, 'storage.json')
   const proxyConfig = account.proxy || null
 
-  // headless priority: options.headless > env HEADLESS > default false
-  // Fetch/scan jobs nên chạy headless để không chiếm màn hình
   const headless = options.headless !== undefined ? options.headless : process.env.HEADLESS === 'true'
 
   const launchOptions = {
     headless,
+    userAgent: account.user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    viewport: account.viewport || { width: 1366, height: 768 },
+    locale: 'vi-VN',
+    timezoneId: account.timezone || 'Asia/Ho_Chi_Minh',
     args: [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',
       '--disable-infobars',
+      '--disable-features=IsolateOrigins,site-per-process',
       ...(headless ? ['--disable-gpu'] : []),
     ],
     ...(proxyConfig && {
@@ -45,31 +56,35 @@ async function launchBrowser(account, options = {}) {
     }
   }
 
-  const browser = await browserType.launch(launchOptions)
-
-  const contextOptions = {
-    userAgent: account.user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    viewport: account.viewport || { width: 1366, height: 768 },
-    locale: 'vi-VN',
-    timezoneId: account.timezone || 'Asia/Ho_Chi_Minh',
-    ...(fs.existsSync(storageFile) && { storageState: storageFile })
+  // First boot: if we have a storage.json from the old non-persistent flow,
+  // migrate it into the new persistent profile once by passing storageState.
+  // launchPersistentContext accepts it for initial population then keeps
+  // everything inside profileDir. After first run the file stays as a
+  // reference backup (saveAndClose still writes to it).
+  const oldStorageExists = fs.existsSync(storageFile) &&
+    !fs.existsSync(path.join(profileDir, 'Default'))
+  if (oldStorageExists) {
+    launchOptions.storageState = storageFile
   }
 
-  const context = await browser.newContext(contextOptions)
+  const context = await browserType.launchPersistentContext(profileDir, launchOptions)
 
-  // Anti-detection
   await context.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
     Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] })
     window.chrome = { runtime: {} }
   })
 
+  const browser = context.browser()
   return { browser, context, profileDir, storageFile }
 }
 
 async function saveAndClose(browser, context, storageFile) {
+  // Persistent context writes profile-dir on its own; we also dump a
+  // portable storageState.json for disaster recovery / cookie export.
   try { await context.storageState({ path: storageFile }) } catch {}
-  try { await browser.close() } catch {}
+  try { await context.close() } catch {}
+  try { if (browser) await browser.close() } catch {}
 }
 
 function getCamoufoxPath() {
