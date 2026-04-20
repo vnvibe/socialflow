@@ -69,7 +69,11 @@ try {
     '--arch=x64',
     '--out=dist',
     '--overwrite',
-    '--ignore="(dist|debug|\\.env$|^/nul$|\\.git|package-lock|scripts)"',
+    // Anchor each pattern with ^/... so 'dist' / 'scripts' don't match
+    // node_modules/<pkg>/dist or node_modules/<pkg>/scripts and nuke
+    // dependency files. Hit us with the axios 1.13 dist folder going
+    // missing → "Cannot find module axios.cjs".
+    '--ignore="(^/dist$|^/dist/|^/debug$|^/debug/|^/\\.env$|^/nul$|^/\\.git|^/package-lock\\.json$|^/scripts$|^/scripts/)"',
     '--icon=electron/icon.ico',
     // asar=false so agent.js + node_modules stay unpacked. fork() and
     // spawn() can't read files inside app.asar; this keeps the fork
