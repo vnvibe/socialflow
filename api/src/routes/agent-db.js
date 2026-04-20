@@ -124,6 +124,41 @@ module.exports = async (fastify) => {
       return reply.code(403).send({ error: `Table not whitelisted: ${table}` })
     }
 
+    // If cols contains a supabase-js foreign-table embed (e.g.
+    // '*, proxies(*)' or 'id, fb_groups!inner(...)'), delegate to the
+    // pg-supabase wrapper on the API — it already has an FK map and
+    // knows how to fetch embedded relations. Writing our own embed
+    // parser here would duplicate that. Only SELECT ops reach this
+    // branch; inserts/updates never embed.
+    const hasEmbed = op === 'select' && typeof cols === 'string' &&
+      /\b[a-zA-Z_][a-zA-Z0-9_]*(?:!inner|!left)?\s*\(/.test(cols || '')
+
+    if (hasEmbed) {
+      try {
+        let q = supabase.from(table).select(cols || '*')
+        for (const f of filters || []) {
+          if (f.type === 'eq') q = q.eq(f.column, f.value)
+          else if (f.type === 'neq') q = q.neq(f.column, f.value)
+          else if (f.type === 'gt') q = q.gt(f.column, f.value)
+          else if (f.type === 'gte') q = q.gte(f.column, f.value)
+          else if (f.type === 'lt') q = q.lt(f.column, f.value)
+          else if (f.type === 'lte') q = q.lte(f.column, f.value)
+          else if (f.type === 'like') q = q.like(f.column, f.value)
+          else if (f.type === 'ilike') q = q.ilike(f.column, f.value)
+          else if (f.type === 'in') q = q.in(f.column, f.value)
+          else if (f.type === 'is_null') q = q.is(f.column, null)
+          else if (f.type === 'is') q = q.is(f.column, f.value)
+        }
+        if (options?.order) q = q.order(options.order.column, { ascending: options.order.ascending })
+        if (options?.limit) q = q.limit(options.limit)
+        if (options?.single) return await q.single()
+        if (options?.maybeSingle) return await q.maybeSingle()
+        return await q
+      } catch (err) {
+        return { data: null, error: { message: err.message } }
+      }
+    }
+
     const tbl = `"${table}"`
     try {
       if (op === 'select') {
