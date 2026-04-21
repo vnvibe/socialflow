@@ -350,13 +350,14 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
   // Reject obvious template/generic/bot-like comments
   const genericPatterns = [
     /^hay (quá|lắm)?!?$/i,
-    /^cảm ơn (bạn )?(chia sẻ|share)/i,
+    /^cảm ơn (bạn|bác|anh|chị|các bạn|mọi người|ad|admin)? ?(đã )?(chia sẻ|share)/i,
     /^thông tin (hữu ích|bổ ích)/i,
     /^(nice|good|ok|tuyệt|hay|noted)[!.]*$/i,
     /^👍|^💯|^🔥|^❤️|^👏|^🙏$/,
     /^đúng (vậy|rồi)/i,
     /^đồng ý/i,
     /mình cũng đang (tìm hiểu|trải nghiệm|quan tâm)/i,  // sáo rỗng
+    /^mình cũng (gặp|bị) (tình trạng|trường hợp|vấn đề|hiện tượng) tương tự/i,
     /bạn đã thử .+ chưa\??/i,  // mẫu câu bán hàng
     /thấy (nó |nó )?xử lý (rất )?(mượt|tốt|nhanh)/i,  // bot review
     /rất (hay|bổ ích|hữu ích|tuyệt vời)/i,  // generic praise
@@ -375,6 +376,40 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
     const topicMentions = topicWords.filter(w => lower.includes(w)).length
     if (topicMentions >= 3) {
       return { approved: false, reason: 'too_promotional', score: 3 }
+    }
+  }
+
+  // COMPETITOR PLUG GUARD: never recommend a competitor when we're in
+  // the brand's own group (group name contains brand_name). Observed:
+  // Việt in "OpenClaw AI Kiếm Cơm" group commented "Ollama sẽ hợp với
+  // mình hơn" — recommending Ollama IN A GROUP NAMED AFTER OPENCLAW.
+  // Double harm: helps competitor + signals bot behavior to real users.
+  if (brandConfig?.brand_name) {
+    const brandNameLower = String(brandConfig.brand_name).toLowerCase()
+    const groupNameLower = (group?.name || '').toLowerCase()
+    const inBrandGroup = brandNameLower && groupNameLower.includes(brandNameLower)
+    if (inBrandGroup) {
+      // Known alt-tool keywords in AI/coding/hosting space. Extend via
+      // brand_config.competitors if user provides custom list.
+      const builtInCompetitors = [
+        'ollama', 'cursor', 'copilot', 'claude code', 'aider', 'cline',
+        'continue.dev', 'windsurf', 'codeium', 'tabnine',
+        'chatgpt', 'gemini', 'grok', 'deepseek', 'mistral',
+        'digitalocean', 'aws', 'vultr', 'linode', 'hetzner', 'contabo',
+      ]
+      const customComps = Array.isArray(brandConfig.competitors)
+        ? brandConfig.competitors.map(c => String(c).toLowerCase()).filter(Boolean)
+        : []
+      const competitors = [...new Set([...builtInCompetitors, ...customComps])]
+        .filter(c => c !== brandNameLower) // don't self-reject
+      const mentioned = competitors.find(c => {
+        if (c.length < 3) return false
+        // word boundary-ish check — avoid matching substrings like "aws" in "always"
+        return new RegExp(`(^|\\W)${c.replace(/[.\\+*?()[\\]{}|^$]/g, '\\$&')}(\\W|$)`, 'i').test(comment)
+      })
+      if (mentioned) {
+        return { approved: false, reason: `competitor_plug_in_brand_group:${mentioned}`, score: 1 }
+      }
     }
   }
 
@@ -698,6 +733,7 @@ ${langInstr}
 7. Read the post carefully and respond SPECIFICALLY, don't drift to other topics
 8. **NEVER guess cross-platform**: If post mentions a specific platform (Zalo, Telegram, Discord, iOS, Android, Shopee, etc.), use ONLY that platform's terminology. Don't say "page token vs app token" (Facebook term) on a Zalo post. Don't guess Android API on iOS post. If unsure → skip.
 9. **When in doubt → return empty string** rather than guessing. Post lacks context (screenshot-only, unclear question) → return empty.
+10. **NEVER recommend competitor tools while inside our brand's own group**: If the group name "${group?.name || ''}" contains our brand name, you MUST NOT name any competing tool (Ollama, Cursor, Copilot, ChatGPT, Gemini, Claude Code, DigitalOcean, AWS, etc.) as a suggestion. If post asks about alternatives → share generic experience without naming a specific competing product, or return empty.
 
 GOOD examples:
 - Post about Oracle VPS → "Oracle's 24G free tier is solid, been running docker on it smoothly"
@@ -728,6 +764,7 @@ ${langInstr}
 7. PHẢI đọc kỹ bài viết và phản hồi CỤ THỂ, KHÔNG lái sang chủ đề khác
 8. **TUYỆT ĐỐI KHÔNG ĐOÁN CROSS-PLATFORM**: Nếu bài nhắc nền tảng cụ thể (Zalo, Telegram, Discord, iOS, Android, Shopee, Lazada, TikTok Shop, v.v.), comment CHỈ được dùng thuật ngữ của ĐÚNG nền tảng đó. Không nói về "token page" khi bài hỏi Zalo (đó là thuật ngữ Facebook). Không đoán API Android khi bài hỏi iOS. Nếu bạn không biết chính xác → BỎ QUA, không viết bừa.
 9. **KHI KHÔNG CHẮC → TRẢ VỀ CHUỖI RỖNG** hơn là đoán mò. Bài viết thiếu ngữ cảnh (chỉ có ảnh screenshot mà không có nội dung text đủ), không rõ muốn hỏi gì → return empty string.
+10. **KHÔNG BAO GIỜ đề xuất TOOL CẠNH TRANH khi đang ở trong nhóm của brand mình**: Nếu tên nhóm "${group?.name || ''}" chứa tên brand đang nuôi, TUYỆT ĐỐI KHÔNG nhắc tên tool/sản phẩm khác (Ollama, Cursor, Copilot, ChatGPT, Gemini, Claude Code, DigitalOcean, AWS, v.v.) như là giải pháp thay thế. Nếu bài hỏi về alternative mà bạn không có câu trả lời phù hợp với brand → CHỈ chia sẻ kinh nghiệm chung không nêu tên tool cụ thể, hoặc trả về chuỗi rỗng.
 
 VÍ DỤ ĐÚNG (trả lời đúng nội dung):
 - Bài hỏi về Oracle VPS → "Oracle 24G free thì ngon, mình chạy docker trên đó mượt lắm"
