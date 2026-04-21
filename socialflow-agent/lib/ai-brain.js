@@ -51,11 +51,19 @@ function pickPersona(nick) {
     const cfg = nick.persona_config
     if (cfg.addressing || cfg.tone) return { key: cfg.key || 'custom', ...cfg, sample: cfg.sample || [] }
   }
-  // Deterministic hash-pick from account id (falls back to username)
+  // Deterministic pick from UUID first segment (8 hex chars) — distributes
+  // uniformly across personas for typical v4 UUIDs. Falls back to username
+  // string-hash if id isn't a UUID.
   const seed = String(nick?.id || nick?.account_id || nick?.username || '')
-  let hash = 0
-  for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0
-  const idx = Math.abs(hash) % PERSONAS.length
+  const hexMatch = seed.match(/^([0-9a-f]{8})/i)
+  let idx
+  if (hexMatch) {
+    idx = parseInt(hexMatch[1], 16) % PERSONAS.length
+  } else {
+    let h = 0
+    for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0
+    idx = Math.abs(h) % PERSONAS.length
+  }
   return PERSONAS[idx]
 }
 
