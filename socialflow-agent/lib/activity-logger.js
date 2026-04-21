@@ -61,8 +61,13 @@ class ActivityLogger {
     // Migration 023 added the split so branded/ad comments have a separate
     // KPI from normal comments — user wants visibility into "QC chạy bao
     // nhiêu" without it blending into general comment target.
+    // nurture-feed handler logs 'react' for thumbs-up on feed posts — same
+    // underlying action as 'like' in campaign-nurture, just a different
+    // surface (feed vs group). Map both to done_likes so feed contributes
+    // to daily KPI (20 reacts today = 0 KPI likes was the observed bug).
     const FIELD_MAP = {
       like: 'done_likes',
+      react: 'done_likes',
       comment: 'done_comments',
       friend_request: 'done_friend_requests',
       join_group: 'done_group_joins',

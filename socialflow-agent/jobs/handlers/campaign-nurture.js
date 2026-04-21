@@ -686,6 +686,33 @@ async function campaignNurture(payload, supabase) {
           const debugPath = require('path').join(__dirname, '..', '..', 'debug', `nurture-dom-${Date.now()}.json`)
           fs.writeFileSync(debugPath, JSON.stringify(debugInfo, null, 2))
           console.log(`[NURTURE] DOM: ${debugInfo.articlesCount} articles, ${debugInfo.likeButtonsCount} like btns, logged=${debugInfo.isLoggedIn}, url=${debugInfo.url}`)
+
+          // Member verification: if page shows 'Tham gia nhóm' / 'Join group'
+          // button AND only 2-3 articles visible, the nick is actually NOT
+          // a member even though DB says so. Flip is_member=false + skip
+          // so scheduler stops assigning this group. DB membership drift
+          // (DB stale) was observed for Thúy's 2 groups — all 81 nurture
+          // runs failed with posts_found:0 until caught here.
+          const body = debugInfo.bodyText || ''
+          const joinButtonVisible = /Tham gia nhóm|Join group|Join this group/i.test(body)
+          if (joinButtonVisible && debugInfo.articlesCount < 3) {
+            console.log(`[NURTURE] ❌ ${account.username} NOT actual member of "${group.name}" — FB shows Join button. Flipping is_member=false.`)
+            try {
+              await supabase.from('fb_groups')
+                .update({ is_member: false, pending_approval: false, join_status: 'not_member' })
+                .eq('id', group.id)
+            } catch (uErr) {
+              console.warn(`[NURTURE] is_member flip failed: ${uErr.message}`)
+            }
+            logger.log('visit_group', {
+              target_type: 'group', target_id: group.fb_group_id, target_name: group.name,
+              target_url: groupUrl, result_status: 'skipped',
+              details: { reason: 'not_actual_member', body_snippet: body.substring(0, 100) },
+            })
+            result.errors.push('skipped: not_actual_member')
+            groupResults.push(result)
+            continue
+          }
         } catch (e) { console.warn('[NURTURE] DOM debug failed:', e.message) }
 
         // ===== LIKE POSTS (desktop, JS-based) =====
@@ -862,6 +889,32 @@ async function campaignNurture(payload, supabase) {
             }
           } catch {}
 
+          // Hybrid: attach GraphQL post sniffer BEFORE scrolling so we
+          // passively capture post payloads regardless of whether DOM
+          // selectors match. If DOM extraction yields 0 (FB DOM drift),
+          // we can still fall back on captured posts instead of skipping
+          // the whole group. Reuses the same extractor fetch_source_cookie
+          // uses — that path returns 6-10 posts reliably.
+          const sniffedPosts = []
+          let sniffer = null
+          try {
+            const { extractPostsFromGraphQL } = require('./fetch-source-cookie')
+            sniffer = async (response) => {
+              try {
+                const url = response.url()
+                if (!url.includes('/api/graphql')) return
+                if (response.status() !== 200) return
+                const text = await response.text().catch(() => '')
+                if (!text || text.length < 200) return
+                const found = extractPostsFromGraphQL(text)
+                if (found.length > 0) sniffedPosts.push(...found)
+              } catch {}
+            }
+            page.on('response', sniffer)
+          } catch (snifErr) {
+            console.warn(`[NURTURE] GraphQL sniffer setup failed: ${snifErr.message}`)
+          }
+
           // Scroll to trigger FB lazy-loading of feed posts. Without this,
           // DOM at `domcontentloaded` may only contain the group header/about
           // article and zero actual posts. Retry up to 2 times if post count
@@ -993,6 +1046,42 @@ async function campaignNurture(payload, supabase) {
             // If we got >= 2 posts, stop scrolling. Otherwise retry.
             if (commentableInfo.length >= 2) break
           } // end scroll retry loop
+
+          // Detach GraphQL sniffer — we either captured enough by now or
+          // the page is done loading anyway.
+          if (sniffer) {
+            try { page.off('response', sniffer) } catch {}
+          }
+
+          // Hybrid fallback: DOM extraction yielded 0 → merge in sniffed
+          // posts from GraphQL. Dedupe by id (GraphQL) / postUrl. Map to
+          // the same shape commentableInfo uses. threadComments empty
+          // (API doesn't carry visible thread context); AI falls back
+          // to post body only when no thread present.
+          if (commentableInfo.length === 0 && sniffedPosts.length > 0) {
+            const seen = new Set()
+            const mapped = []
+            for (const p of sniffedPosts) {
+              const key = p.id || p.postUrl
+              if (!key || seen.has(key)) continue
+              seen.add(key)
+              if (!p.msg || p.msg.length < 10) continue
+              mapped.push({
+                index: mapped.length,
+                postUrl: p.postUrl || null,
+                body: p.msg.substring(0, 1500),
+                author: p.authorName || '',
+                isTranslated: false,
+                threadComments: [],
+                _source: 'graphql',
+              })
+              if (mapped.length >= 15) break
+            }
+            if (mapped.length > 0) {
+              console.log(`[NURTURE] 🔌 DOM empty → using ${mapped.length} posts from GraphQL sniffer for "${group.name}"`)
+              commentableInfo = mapped
+            }
+          }
 
           // Filter: skip translated, already commented (by ANY nick in this campaign), spam
           const eligible = commentableInfo.filter(p => {

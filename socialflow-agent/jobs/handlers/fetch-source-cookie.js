@@ -333,4 +333,9 @@ async function extractDesktopDOM(page) {
   })
 }
 
+// Exported for campaign-nurture hybrid fallback: if DOM selectors miss all
+// posts (FB DOM drift), attach this GraphQL sniffer to capture post payloads
+// from /api/graphql responses while the page loads, and extract the same
+// shape we use internally.
 module.exports = fetchSourceCookieHandler
+module.exports.extractPostsFromGraphQL = extractPostsFromGraphQL

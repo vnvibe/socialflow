@@ -108,12 +108,21 @@ async function getBusyNicksFallback(accountIds) {
   return busySet
 }
 
+// Janitorial/diagnostic jobs don't block user-facing work. Without this
+// filter, a nick with 100+ pending `check_group_membership` jobs hits
+// MAX_PENDING_PER_NICK=3 → scheduler silently refuses to create any
+// new campaign_nurture / friend_request → nick stalls for hours.
+// Observed 2026-04-21: Diệu 159 membership pending, 0 nurture created
+// in 9h despite cron firing 8×/day.
+const JANITORIAL_TYPES = new Set([
+  'check_group_membership', 'check_health', 'check_engagement',
+  'fetch_source_cookie', 'nurture_feed', 'warmup_browse',
+])
+
 /**
- * Return a Map<accountId, count> of pending/claimed/running jobs per nick.
- * Used by schedulers to enforce a global per-nick pending cap — prevents
- * multi-campaign schedulers from piling 5+ jobs onto the same nick within
- * a single cycle. Agent only drains 1 job at a time per nick anyway, so
- * queueing more is wasted ordering work.
+ * Return a Map<accountId, count> of USER-FACING pending/claimed/running
+ * jobs per nick. Janitorial/diagnostic types are excluded — they queue
+ * in large volumes independently and would starve the real work queue.
  */
 async function getNickPendingCounts(accountIds) {
   if (!accountIds?.length) return new Map()
@@ -125,12 +134,13 @@ async function getNickPendingCounts(accountIds) {
     const orConditions = chunk.map(id => `payload->>account_id.eq.${id}`).join(',')
     const { data: rows } = await sb
       .from('jobs')
-      .select('payload')
+      .select('type, payload')
       .in('status', ['pending', 'claimed', 'running'])
       .or(orConditions)
     for (const j of rows || []) {
       const accId = j.payload?.account_id
       if (!accId) continue
+      if (JANITORIAL_TYPES.has(j.type)) continue
       counts.set(accId, (counts.get(accId) || 0) + 1)
     }
   }
