@@ -427,8 +427,15 @@ async function campaignNurture(payload, supabase) {
 
       try {
         // Stay on DESKTOP Facebook (cookies work, no login overlay)
-        const groupUrl = (group.url || `https://www.facebook.com/groups/${group.fb_group_id}`)
+        // Force feed view — without /posts, FB often lands on About/Discussion tab
+        // which has 0 role=article feed posts (just header + pinned). /posts
+        // explicitly requests the feed stream.
+        const baseUrl = (group.url || `https://www.facebook.com/groups/${group.fb_group_id}`)
           .replace('://m.facebook.com', '://www.facebook.com')
+          .replace(/\/+$/, '')
+        const groupUrl = /\/(posts|discussion|media|announcements)\/?$/.test(baseUrl)
+          ? baseUrl
+          : `${baseUrl}/posts`
         console.log(`[NURTURE] Visiting: ${group.name || group.fb_group_id}`)
         logger.log('visit_group', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: groupUrl })
 
@@ -860,22 +867,52 @@ async function campaignNurture(payload, supabase) {
           // article and zero actual posts. Retry up to 2 times if post count
           // is too low after the first pass.
           let commentableInfo = []
-          for (let _scrollAttempt = 0; _scrollAttempt < 3; _scrollAttempt++) {
+          // Stats 2026-04-21: posts_found>0 dropped to 7-15% for all nicks
+          // — FB lazy-loads more aggressively now, old 3x scroll is insufficient.
+          // Bump to 5 retries with longer waits + wait for networkidle between.
+          for (let _scrollAttempt = 0; _scrollAttempt < 5; _scrollAttempt++) {
             if (_scrollAttempt > 0) {
-              console.log(`[NURTURE] Scroll attempt ${_scrollAttempt + 1}/3 for "${group.name}" — previous had ${commentableInfo.length} posts`)
+              console.log(`[NURTURE] Scroll attempt ${_scrollAttempt + 1}/5 for "${group.name}" — previous had ${commentableInfo.length} posts`)
             }
             await humanScroll(page)
-            await R.sleepRange(1500, 2500)
-            if (_scrollAttempt < 2) {
+            await R.sleepRange(2000, 3500)
+            if (_scrollAttempt < 4) {
               await humanScroll(page)
-              await R.sleepRange(1000, 2000)
+              await R.sleepRange(1500, 2500)
             }
+            // Let FB finish any in-flight fetches before snapshotting DOM
+            try { await page.waitForLoadState('networkidle', { timeout: 4000 }) } catch {}
 
             // Extract ALL posts with content + tag comment buttons
             commentableInfo = await page.evaluate(() => {
-              const articles = document.querySelectorAll('[role="article"]')
+              // FB rolls out new DOM occasionally — role=article misses recent
+              // group-feed posts. Merge multiple selectors and dedupe by element.
+              // Priority: role=article (classic) → data-pagelet=FeedUnit → data-pagelet=GroupFeed
+              // → div with data-ad-preview inside (post body marker)
+              const selectors = [
+                '[role="article"]',
+                '[data-pagelet^="FeedUnit"]',
+                '[data-pagelet*="GroupFeed"]',
+                '[data-ft]',
+                'div[aria-posinset]',
+              ]
+              const seen = new Set()
+              const candidates = []
+              for (const sel of selectors) {
+                for (const el of document.querySelectorAll(sel)) {
+                  if (!seen.has(el)) { seen.add(el); candidates.push(el) }
+                }
+              }
+              // If nothing matched yet, fall back to wrappers containing a post body marker
+              if (candidates.length === 0) {
+                for (const marker of document.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"]')) {
+                  const wrap = marker.closest('div[class][style], div[data-visualcompletion="ignore-dynamic"]') || marker.parentElement?.parentElement
+                  if (wrap && !seen.has(wrap)) { seen.add(wrap); candidates.push(wrap) }
+                }
+              }
+              const articles = candidates
               const results = []
-              for (const article of [...articles].slice(0, 10)) {
+              for (const article of articles.slice(0, 15)) {
               // Skip nested (comment articles)
               const parent = article.parentElement?.closest('[role="article"]')
               if (parent && parent !== article) continue
