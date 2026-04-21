@@ -1264,11 +1264,39 @@ async function campaignNurture(payload, supabase) {
                   console.warn(`[NURTURE] shared_posts upsert failed: ${poolErr.message}`)
                 }
               } else {
-                console.log(`[NURTURE] AI Brain says NO posts worth engaging in "${group.name}" (topic: ${topic})`)
-                logger.log('ai_evaluate_posts', {
-                  target_type: 'group', target_name: group.name, result_status: 'skipped',
-                  details: { total_eligible: eligible.length, selected: 0, reason: 'no_relevant_posts' },
-                })
+                // Emergency warmup fallback — ai-brain Tier 2 should have
+                // picked 1 post, but in production we still see evaluated=[]
+                // daily (AI returns empty JSON / all posts flagged ad / parse
+                // fail — silent catch → returns []). Without this, 0-comment
+                // days persist even when 14 eligible posts sit on the page.
+                // Condition: 3+ eligible (group is active). Post choice:
+                // longest non-spam body — substantive enough to write a
+                // contextual reply. No brand push (score=0 → ad path skips).
+                if (eligible.length >= 3) {
+                  const candidate = eligible
+                    .filter(p => (p.body || '').length >= 30 && !/inbox|liên hệ|giảm giá|mua ngay/i.test(p.body || ''))
+                    .sort((a, b) => (b.body?.length || 0) - (a.body?.length || 0))[0]
+                  if (candidate) {
+                    aiSelected = [candidate]
+                    console.log(`[NURTURE] AI evaluate empty; emergency warmup fallback → post #${candidate.index} (body len=${candidate.body.length})`)
+                    logger.log('ai_evaluate_posts', {
+                      target_type: 'group', target_name: group.name, result_status: 'fallback',
+                      details: { total_eligible: eligible.length, selected: 1, reason: 'emergency_warmup' },
+                    })
+                  } else {
+                    console.log(`[NURTURE] AI empty + no non-spam candidate — skipping "${group.name}"`)
+                    logger.log('ai_evaluate_posts', {
+                      target_type: 'group', target_name: group.name, result_status: 'skipped',
+                      details: { total_eligible: eligible.length, selected: 0, reason: 'no_relevant_posts' },
+                    })
+                  }
+                } else {
+                  console.log(`[NURTURE] AI Brain says NO posts worth engaging in "${group.name}" (${eligible.length} eligible, below threshold 3)`)
+                  logger.log('ai_evaluate_posts', {
+                    target_type: 'group', target_name: group.name, result_status: 'skipped',
+                    details: { total_eligible: eligible.length, selected: 0, reason: 'no_relevant_posts' },
+                  })
+                }
               }
             } catch (err) {
               console.warn(`[NURTURE] AI Brain evaluation failed: ${err.message}, falling back to simple selection`)
