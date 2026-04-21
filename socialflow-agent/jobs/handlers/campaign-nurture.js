@@ -1504,8 +1504,23 @@ async function campaignNurture(payload, supabase) {
               }
 
               // === AD TRIGGER: trust AI's contextual decision (no keyword matching) ===
-              // hasAdOpportunity comes from evaluatePosts() which already considered brandConfig
-              if (canDoAdComment && adCommentsToday < AD_COMMENT_DAILY_LIMIT && hasAdOpportunity && brandConfig?.brand_name && (evaluation?.score || 0) >= 6) {
+              // hasAdOpportunity comes from evaluatePosts() which already considered brandConfig.
+              // In-brand-group boost: if group name contains brand name AND the post is asking
+              // for advice in the brand's domain, treat as ad opportunity even if AI score was
+              // low or ad_opportunity flag was false — missing these is a direct lead leak
+              // (observed 2026-04-21: Phương Nam asked for chatbot advice in OpenClaw VN group
+              // and bot deflected with a counter-question instead of proposing OpenClaw).
+              const brandNameLower = String(brandConfig?.brand_name || '').toLowerCase()
+              const groupNameLower = (group?.name || '').toLowerCase()
+              const inBrandGroup = brandNameLower && groupNameLower.includes(brandNameLower)
+              const postRequestsAdvice = /(xin\s*gợi\s*ý|cho\s*(em|mình|mk|m)?\s*hỏi|tư\s*vấn|giúp\s*(em|mình|với)|chia\s*sẻ\s*(chút\s*)?kinh\s*nghiệm|các\s*bác\s*cho)/i.test(postText)
+              const brandGroupAdBoost = inBrandGroup && postRequestsAdvice && brandConfig?.brand_name
+              if (brandGroupAdBoost && !hasAdOpportunity) {
+                console.log(`[NURTURE] 📢 In-brand-group advice request — boosting to ad opportunity for post #${post.index}`)
+              }
+              const adGatePasses = (hasAdOpportunity || brandGroupAdBoost) &&
+                                   ((evaluation?.score || 0) >= 6 || brandGroupAdBoost)
+              if (canDoAdComment && adCommentsToday < AD_COMMENT_DAILY_LIMIT && adGatePasses && brandConfig?.brand_name) {
                 try {
                   // Extract any existing comments from the post to avoid duplicating brand mentions
                   const existingComments = Array.isArray(post.comments)

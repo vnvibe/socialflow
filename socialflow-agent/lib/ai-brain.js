@@ -494,6 +494,25 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
     /chuyển sang (mua|dùng) .+ (cho đỡ|luôn)/i,     // ad shoe-in
     /mua .+ có sẵn .+ chạy luôn/i,                  // VPS spam pattern
   ]
+
+  // COUNTER-QUESTION DEFLECTION — when post asks for advice ("xin gợi
+  // ý", "cho hỏi", "tư vấn giúp", "chia sẻ kinh nghiệm"), bot must
+  // OFFER a concrete suggestion, not ask back. Observed 2026-04-21
+  // 18:56: user asked "cho e xin gợi ý tham khảo" about building a
+  // chatbot → Diệu replied "Bạn muốn làm về lĩnh vực gì để mình gợi
+  // ý" = bot punted question back = useless.
+  const postAsksForAdvice = /(xin\s*gợi\s*ý|cho\s*(em|mình|mk|m)?\s*hỏi|tư\s*vấn|giúp\s*(em|mình|với)|chia\s*sẻ\s*(chút\s*)?kinh\s*nghiệm|các\s*bác\s*cho)/i.test(postText || '')
+  if (postAsksForAdvice) {
+    const counterQuestionPatterns = [
+      /bạn\s*muốn\s*(làm\s*)?(về\s*)?(lĩnh\s*vực|mục\s*đích|ngành|domain|cái)\s*(gì|nào)/i,
+      /(em|bạn)\s*(đang|cần|muốn)\s*(làm|dùng|build|tạo|xây)\s*(cho|để|với)?\s*(cái\s*)?(gì|ai)\s*(nhỉ|nào|vậy)?\s*\?*/i,
+      /(mục\s*tiêu|yêu\s*cầu|use\s*case)\s*(của\s*bạn|cụ\s*thể)\s*(là\s*)?(gì|như\s*thế\s*nào)/i,
+      /bạn\s*đã\s*(có|thử|xem|tìm\s*hiểu)\s*.+\s*chưa/i,
+    ]
+    if (counterQuestionPatterns.some(p => p.test(comment))) {
+      return { approved: false, reason: 'counter_question_when_asked_for_advice', score: 2 }
+    }
+  }
   if (genericPatterns.some(p => p.test(comment.trim()))) {
     return { approved: false, reason: 'generic_template', score: 2 }
   }
@@ -862,6 +881,7 @@ ${langInstr}
 8. **NEVER guess cross-platform**: If post mentions a specific platform (Zalo, Telegram, Discord, iOS, Android, Shopee, etc.), use ONLY that platform's terminology. Don't say "page token vs app token" (Facebook term) on a Zalo post. Don't guess Android API on iOS post. If unsure → skip.
 9. **When in doubt → return empty string** rather than guessing. Post lacks context (screenshot-only, unclear question) → return empty.
 10. **NEVER recommend competitor tools while inside our brand's own group**: If the group name "${group?.name || ''}" contains our brand name, you MUST NOT name any competing tool (Ollama, Cursor, Copilot, ChatGPT, Gemini, Claude Code, DigitalOcean, AWS, etc.) as a suggestion. If post asks about alternatives → share generic experience without naming a specific competing product, or return empty.
+11. **WHEN POST ASKS FOR ADVICE → GIVE ACTUAL ADVICE, NEVER BOUNCE THE QUESTION BACK**: If the post contains phrases like "please suggest", "can anyone recommend", "looking for advice", "newbie here, need help", "share your experience" — you MUST provide at least 1 concrete suggestion (tool name, setup step, config, specific experience) in your reply. DO NOT write "What domain are you building for?" / "What's your use case?" — that bounces the question back, which is useless because they already asked for suggestions. If you genuinely have no relevant suggestion aligned with our brand → return empty string (skip the post).
 
 GOOD examples:
 - Post about Oracle VPS → "Oracle's 24G free tier is solid, been running docker on it smoothly"
@@ -893,6 +913,7 @@ ${langInstr}
 8. **TUYỆT ĐỐI KHÔNG ĐOÁN CROSS-PLATFORM**: Nếu bài nhắc nền tảng cụ thể (Zalo, Telegram, Discord, iOS, Android, Shopee, Lazada, TikTok Shop, v.v.), comment CHỈ được dùng thuật ngữ của ĐÚNG nền tảng đó. Không nói về "token page" khi bài hỏi Zalo (đó là thuật ngữ Facebook). Không đoán API Android khi bài hỏi iOS. Nếu bạn không biết chính xác → BỎ QUA, không viết bừa.
 9. **KHI KHÔNG CHẮC → TRẢ VỀ CHUỖI RỖNG** hơn là đoán mò. Bài viết thiếu ngữ cảnh (chỉ có ảnh screenshot mà không có nội dung text đủ), không rõ muốn hỏi gì → return empty string.
 10. **KHÔNG BAO GIỜ đề xuất TOOL CẠNH TRANH khi đang ở trong nhóm của brand mình**: Nếu tên nhóm "${group?.name || ''}" chứa tên brand đang nuôi, TUYỆT ĐỐI KHÔNG nhắc tên tool/sản phẩm khác (Ollama, Cursor, Copilot, ChatGPT, Gemini, Claude Code, DigitalOcean, AWS, v.v.) như là giải pháp thay thế. Nếu bài hỏi về alternative mà bạn không có câu trả lời phù hợp với brand → CHỈ chia sẻ kinh nghiệm chung không nêu tên tool cụ thể, hoặc trả về chuỗi rỗng.
+11. **KHI POST XIN GỢI Ý → PHẢI GỢI Ý THẬT, KHÔNG HỎI NGƯỢC LẠI**: Nếu post có các cụm "xin gợi ý", "cho hỏi", "tư vấn giúp", "giúp em với", "chia sẻ kinh nghiệm", "các bác cho e xin..." — bạn PHẢI đưa ra ít nhất 1 gợi ý CỤ THỂ (tên tool, bước setup, config, kinh nghiệm cụ thể) trong câu trả lời. TUYỆT ĐỐI KHÔNG viết kiểu "Bạn muốn làm về lĩnh vực gì để mình gợi ý" / "Bạn dùng cho mục đích gì" — đó là HỎI NGƯỢC, vô ích, người hỏi đã xin gợi ý rồi. Nếu thật sự không có gợi ý phù hợp với brand → return empty string (bỏ qua bài).
 
 VÍ DỤ ĐÚNG (trả lời đúng nội dung):
 - Bài hỏi về Oracle VPS → "Oracle 24G free thì ngon, mình chạy docker trên đó mượt lắm"
