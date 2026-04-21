@@ -427,15 +427,16 @@ async function campaignNurture(payload, supabase) {
 
       try {
         // Stay on DESKTOP Facebook (cookies work, no login overlay)
-        // Force feed view — without /posts, FB often lands on About/Discussion tab
-        // which has 0 role=article feed posts (just header + pinned). /posts
-        // explicitly requests the feed stream.
+        // Force chronological feed view. Plain /groups/{ID} sometimes lands
+        // on About page (cold session / no hydrated membership). Using
+        // ?sorting_setting=CHRONOLOGICAL is the community-tested fix
+        // (kevinzg/facebook-scraper#935) — pins FB to the feed + ordered
+        // newest first, dramatically fewer About-page redirects than /posts.
         const baseUrl = (group.url || `https://www.facebook.com/groups/${group.fb_group_id}`)
           .replace('://m.facebook.com', '://www.facebook.com')
           .replace(/\/+$/, '')
-        const groupUrl = /\/(posts|discussion|media|announcements)\/?$/.test(baseUrl)
-          ? baseUrl
-          : `${baseUrl}/posts`
+          .replace(/\?.*$/, '')
+        const groupUrl = `${baseUrl}/?sorting_setting=CHRONOLOGICAL`
         console.log(`[NURTURE] Visiting: ${group.name || group.fb_group_id}`)
         logger.log('visit_group', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: groupUrl })
 
@@ -938,25 +939,40 @@ async function campaignNurture(payload, supabase) {
 
             // Extract ALL posts with content + tag comment buttons
             commentableInfo = await page.evaluate(() => {
-              // FB rolls out new DOM occasionally — role=article misses recent
-              // group-feed posts. Merge multiple selectors and dedupe by element.
-              // Priority: role=article (classic) → data-pagelet=FeedUnit → data-pagelet=GroupFeed
-              // → div with data-ad-preview inside (post body marker)
-              const selectors = [
-                '[role="article"]',
-                '[data-pagelet^="FeedUnit"]',
-                '[data-pagelet*="GroupFeed"]',
-                '[data-ft]',
-                'div[aria-posinset]',
-              ]
-              const seen = new Set()
+              // 2026 FB Comet DOM: feed posts live in div[role="feed"] > children
+              // with aria-posinset. Legacy [role="article"] only catches header/
+              // pinned wrappers (2 per page vs 10+ actual feed posts). Research
+              // (MasuRii/FBScrapeIdeas + thanh2004nguyen/facebook-group-scraper)
+              // shows data-ad-rendering-role="story_message" is the current
+              // stable post-body marker in Comet architecture. Walk up to the
+              // feed-item wrapper from each message.
               const candidates = []
-              for (const sel of selectors) {
-                for (const el of document.querySelectorAll(sel)) {
+              const seen = new Set()
+
+              // Strategy 1: walk up from story_message markers (most reliable 2026)
+              for (const marker of document.querySelectorAll('[data-ad-rendering-role="story_message"]')) {
+                const wrap = marker.closest('div[role="article"], div[data-pagelet^="FeedUnit"], div[aria-posinset]') || marker.parentElement?.parentElement?.parentElement
+                if (wrap && !seen.has(wrap)) { seen.add(wrap); candidates.push(wrap) }
+              }
+
+              // Strategy 2: feed-scoped articles with aria-posinset (ARIA feed pattern)
+              const feed = document.querySelector('div[role="feed"]')
+              if (feed) {
+                for (const el of feed.querySelectorAll('div[aria-posinset], div[role="article"], div[data-pagelet^="FeedUnit"]')) {
                   if (!seen.has(el)) { seen.add(el); candidates.push(el) }
                 }
               }
-              // If nothing matched yet, fall back to wrappers containing a post body marker
+
+              // Strategy 3: legacy fallbacks (older FB layouts / non-group pages)
+              if (candidates.length < 3) {
+                for (const sel of ['[data-pagelet^="FeedUnit"]', '[role="article"]', '[data-ft]']) {
+                  for (const el of document.querySelectorAll(sel)) {
+                    if (!seen.has(el)) { seen.add(el); candidates.push(el) }
+                  }
+                }
+              }
+
+              // Strategy 4: any post-body marker wrapped up (last resort)
               if (candidates.length === 0) {
                 for (const marker of document.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"]')) {
                   const wrap = marker.closest('div[class][style], div[data-visualcompletion="ignore-dynamic"]') || marker.parentElement?.parentElement
@@ -970,9 +986,11 @@ async function campaignNurture(payload, supabase) {
               const parent = article.parentElement?.closest('[role="article"]')
               if (parent && parent !== article) continue
 
-              // Extract post body — allow up to 5000 chars now that "See more" is expanded
+              // Extract post body — 2026 Comet primary marker is
+              // data-ad-rendering-role="story_message". Keep legacy
+              // data-ad-preview/comet-preview as fallback for older layouts.
               let body = ''
-              const bodyEl = article.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]')
+              const bodyEl = article.querySelector('[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"]')
               if (bodyEl) body = bodyEl.innerText.trim()
               if (!body || body.length < 10) {
                 for (const d of article.querySelectorAll('div[dir="auto"]')) {
@@ -1293,11 +1311,16 @@ async function campaignNurture(payload, supabase) {
               await commentBtn.click({ force: true, timeout: 5000 })
               await R.sleepRange(1500, 2500)
 
-              // Find comment textbox (desktop contenteditable)
+              // Comment input selectors — 2026 Comet uses Lexical editor
+              // (div[data-lexical-editor="true"] + contenteditable). Include
+              // as primary for newer layouts; keep legacy contenteditable as
+              // fallback.
               const desktopCommentSels = [
+                'div[contenteditable="true"][data-lexical-editor="true"][role="textbox"]',
                 'div[contenteditable="true"][role="textbox"][aria-label*="comment" i]',
                 'div[contenteditable="true"][role="textbox"][aria-label*="bình luận" i]',
                 'div[contenteditable="true"][role="textbox"]',
+                'div[contenteditable="true"][aria-describedby]',
               ]
               let commentBox = null
               for (const sel of desktopCommentSels) {
