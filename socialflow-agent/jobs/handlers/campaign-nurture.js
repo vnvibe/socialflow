@@ -415,7 +415,19 @@ async function campaignNurture(payload, supabase) {
       } catch {}
     }
 
+    let _groupIdx = 0
     for (const group of groupsToVisit) {
+      _groupIdx++
+      // Mid-session idle pause — 20% chance between groups, 30-120s.
+      // Real users don't visit one group right after another at a
+      // constant pace — they pause (read, get coffee, get distracted).
+      // Skip for first group (just started session).
+      if (_groupIdx > 1 && Math.random() < 0.2) {
+        const idleMs = 30000 + Math.floor(Math.random() * 90000) // 30-120s
+        console.log(`[NURTURE] 💤 Idle pause ${Math.round(idleMs/1000)}s (distracted-user simulation)`)
+        await new Promise(r => setTimeout(r, idleMs))
+      }
+
       // Group visit rate limit: max 2 nicks in same group within 30 min
       if (!canVisitGroup(group.fb_group_id, account_id)) {
         console.log(`[NURTURE] ⏭️ Skip "${group.name}" — group visit rate limit (${GROUP_VISIT_MAX} nicks/30min)`)
@@ -799,19 +811,71 @@ async function campaignNurture(payload, supabase) {
               await btn.scrollIntoViewIfNeeded()
               await R.sleepRange(800, 1500)
 
-              // Click using dispatchEvent for React compatibility
-              await page.evaluate((idx) => {
-                const el = document.querySelector(`[data-nurture-like="${idx}"]`)
-                if (!el) return
-                // Dispatch full mouse event sequence for React
-                const rect = el.getBoundingClientRect()
-                const x = rect.left + rect.width / 2
-                const y = rect.top + rect.height / 2
-                const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
-                el.dispatchEvent(new MouseEvent('mousedown', opts))
-                el.dispatchEvent(new MouseEvent('mouseup', opts))
-                el.dispatchEvent(new MouseEvent('click', opts))
-              }, i)
+              // Reaction variety: 75% Like, 15% Love, 7% Haha, 3% Wow.
+              // All-Like pattern across every post is a bot signal; real
+              // users vary emotion. When picking non-Like, hover 500-900ms
+              // on the Like button first to trigger the reaction tray,
+              // then click the specific emoji. Fallback to plain click if
+              // the tray doesn't appear.
+              const reactionRoll = Math.random()
+              let reactionType = 'like'
+              if (reactionRoll >= 0.97) reactionType = 'wow'
+              else if (reactionRoll >= 0.90) reactionType = 'haha'
+              else if (reactionRoll >= 0.75) reactionType = 'love'
+
+              const reactionLabels = {
+                like: ['Like', 'Thích'],
+                love: ['Love', 'Yêu thích'],
+                haha: ['Haha'],
+                wow: ['Wow'],
+              }
+
+              let reactionDone = false
+              if (reactionType !== 'like') {
+                try {
+                  // Hover the Like button to open reaction tray
+                  await btn.hover().catch(() => {})
+                  await R.sleepRange(500, 900)
+                  const labels = reactionLabels[reactionType]
+                  reactionDone = await page.evaluate((labels) => {
+                    const buttons = document.querySelectorAll('div[role="button"], div[aria-label]')
+                    for (const b of buttons) {
+                      const lab = (b.getAttribute('aria-label') || '').trim()
+                      if (labels.some(l => lab === l || lab.startsWith(l + ':') || lab.startsWith(l + ' '))) {
+                        const visible = b.offsetParent !== null || b.getBoundingClientRect().width > 0
+                        if (visible) {
+                          const rect = b.getBoundingClientRect()
+                          const x = rect.left + rect.width / 2
+                          const y = rect.top + rect.height / 2
+                          const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
+                          b.dispatchEvent(new MouseEvent('mousedown', opts))
+                          b.dispatchEvent(new MouseEvent('mouseup', opts))
+                          b.dispatchEvent(new MouseEvent('click', opts))
+                          return true
+                        }
+                      }
+                    }
+                    return false
+                  }, labels)
+                  if (reactionDone) console.log(`[NURTURE] Reaction: ${reactionType}`)
+                } catch {}
+              }
+
+              if (!reactionDone) {
+                // Plain Like click (default + fallback)
+                await page.evaluate((idx) => {
+                  const el = document.querySelector(`[data-nurture-like="${idx}"]`)
+                  if (!el) return
+                  const rect = el.getBoundingClientRect()
+                  const x = rect.left + rect.width / 2
+                  const y = rect.top + rect.height / 2
+                  const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
+                  el.dispatchEvent(new MouseEvent('mousedown', opts))
+                  el.dispatchEvent(new MouseEvent('mouseup', opts))
+                  el.dispatchEvent(new MouseEvent('click', opts))
+                }, i)
+                reactionType = 'like'
+              }
 
               await R.sleepRange(1500, 2500)
 
@@ -824,7 +888,7 @@ async function campaignNurture(payload, supabase) {
                 p_action_type: 'like',
               })
               console.log(`[NURTURE] Liked #${totalLikes} (session: ${tracker.get('like')}/${maxLikesSession})`)
-              logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { post_url: likeableInfo[i]?.postUrl || null, reactions: likeableInfo[i]?.reactions || 0, comments: likeableInfo[i]?.commentCount || 0 } })
+              logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { post_url: likeableInfo[i]?.postUrl || null, reactions: likeableInfo[i]?.reactions || 0, comments: likeableInfo[i]?.commentCount || 0, reaction_type: reactionType } })
 
               // Human delay between likes (minGapSeconds: 2)
               await R.sleepRange(2000, 5000)
@@ -1441,6 +1505,20 @@ async function campaignNurture(payload, supabase) {
               }
 
               await commentBtn.scrollIntoViewIfNeeded()
+              // Human "re-read" behavior: before clicking comment, 40%
+              // chance to scroll up a bit (re-check post body), pause,
+              // scroll back. Real users do this when composing a reply.
+              if (Math.random() < 0.4) {
+                try {
+                  await page.evaluate(() => window.scrollBy(0, -(150 + Math.random() * 200)))
+                  await R.sleepRange(800, 2000) // "re-reading" pause
+                  await page.evaluate(() => window.scrollBy(0, 120 + Math.random() * 200))
+                  await R.sleepRange(300, 700)
+                } catch {}
+              } else {
+                // Just a shorter "reading" pause before engaging
+                await R.sleepRange(1200, 3500)
+              }
               await R.sleepRange(500, 1000)
               try {
                 await commentBtn.click({ force: true, timeout: 5000 })
@@ -1664,8 +1742,35 @@ async function campaignNurture(payload, supabase) {
                 continue
               }
               await R.sleepRange(500, 1000)
+              // Human-like typing: char-by-char with variable delay, plus
+              // ~15% chance of typo+backspace to look less robotic. Real
+              // people hit the wrong key, notice, backspace, retype — bots
+              // never do. Also ~20% chance of a 'thinking pause' (400-
+              // 1200ms) somewhere mid-sentence.
               try {
-                for (const char of commentText) {
+                const adjacentKeys = {
+                  'a':'sw', 'b':'vn', 'c':'xv', 'd':'sf', 'e':'wr', 'f':'dg',
+                  'g':'fh', 'h':'gj', 'i':'uo', 'j':'hk', 'k':'jl', 'l':'k',
+                  'm':'n', 'n':'bm', 'o':'ip', 'p':'o', 'q':'w', 'r':'et',
+                  's':'ad', 't':'ry', 'u':'yi', 'v':'cb', 'w':'qe', 'x':'zc',
+                  'y':'tu', 'z':'x',
+                }
+                const thinkingPauseAt = Math.random() < 0.2 ? Math.floor(commentText.length * (0.3 + Math.random() * 0.4)) : -1
+                for (let i = 0; i < commentText.length; i++) {
+                  const char = commentText[i]
+                  // Thinking pause mid-sentence
+                  if (i === thinkingPauseAt) {
+                    await R.sleepRange(400, 1200)
+                  }
+                  // 15% chance typo (lowercase letters only, avoid punctuation/VN diacritics)
+                  const isLowerLetter = /^[a-z]$/.test(char)
+                  if (isLowerLetter && adjacentKeys[char] && Math.random() < 0.15) {
+                    const wrong = adjacentKeys[char][Math.floor(Math.random() * adjacentKeys[char].length)]
+                    await page.keyboard.type(wrong, { delay: Math.random() * 80 + 30 })
+                    await R.sleepRange(120, 320) // notice delay
+                    await page.keyboard.press('Backspace')
+                    await R.sleepRange(80, 220)
+                  }
                   await page.keyboard.type(char, { delay: Math.random() * 80 + 30 })
                 }
               } catch (typeErr) {
@@ -1673,11 +1778,37 @@ async function campaignNurture(payload, supabase) {
                 continue
               }
               await R.sleepRange(800, 1500)
-              try {
-                await page.keyboard.press('Enter')
-              } catch (enterErr) {
-                logFail('enter_press_failed', { err: enterErr.message })
-                continue
+              // Randomize submit method: 70% Enter key, 30% click send
+              // button. Always using same submit path is a subtle bot tell
+              // FB behavioral analytics could pick up over time.
+              const useSendButton = Math.random() < 0.3
+              let submitted = false
+              if (useSendButton) {
+                try {
+                  submitted = await page.evaluate(() => {
+                    const btns = document.querySelectorAll('div[role="button"][aria-label="Comment"], div[role="button"][aria-label="Bình luận"]')
+                    for (const b of btns) {
+                      if (!b.closest('[role="article"], [data-ad-rendering-role="story_message"]')) continue
+                      try { b.click(); return true } catch {}
+                    }
+                    return false
+                  })
+                } catch {}
+                if (!submitted) {
+                  // fallback to Enter
+                  try { await page.keyboard.press('Enter'); submitted = true } catch (e) {
+                    logFail('enter_press_failed', { err: e.message, tried_send_btn: true })
+                    continue
+                  }
+                }
+              } else {
+                try {
+                  await page.keyboard.press('Enter')
+                  submitted = true
+                } catch (enterErr) {
+                  logFail('enter_press_failed', { err: enterErr.message })
+                  continue
+                }
               }
               await R.sleepRange(2000, 4000)
 
