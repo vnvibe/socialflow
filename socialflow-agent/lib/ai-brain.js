@@ -715,7 +715,7 @@ ${langInstr}
 3. Nếu bài hỏi kỹ thuật → trả lời kỹ thuật (config, command, số liệu)
 4. Nếu bài chia sẻ kinh nghiệm → phản hồi ĐÚNG kinh nghiệm đó
 5. Viết 1-2 câu, ngắn gọn, có thể dùng slang/viết tắt
-6. KHÔNG dùng: "Mình cũng đang...", "Bạn đã thử X chưa?", "Rất hay/bổ ích", "Cảm ơn chia sẻ"
+6. KHÔNG dùng các opener chung chung: "Mình cũng đang...", "Mình cũng gặp tình trạng/trường hợp/vấn đề tương tự...", "Bạn đã thử X chưa?", "Rất hay/bổ ích", "Cảm ơn chia sẻ". Mở đầu phải là CHI TIẾT cụ thể từ bài.
 7. PHẢI đọc kỹ bài viết và phản hồi CỤ THỂ, KHÔNG lái sang chủ đề khác
 
 VÍ DỤ ĐÚNG (trả lời đúng nội dung):
@@ -742,16 +742,15 @@ Chỉ trả về COMMENT, không giải thích.`
     })
 
     let comment = (res.data?.text || res.data?.result || '').trim()
+    const provider = res.data?.provider || 'unknown'
     if (comment) {
-      // Clean up: remove quotes, URLs, excessive length
       comment = comment.replace(/^["']|["']$/g, '').trim()
       comment = comment.replace(/https?:\/\/\S+/gi, '').trim()
       if (comment.length > 150) comment = comment.substring(0, 150).replace(/\s\S*$/, '')
 
-      // REJECT generic comments that don't reference post content
       const genericPatterns = [
-        // Vietnamese
         /^mình cũng đang (tìm hiểu|trải nghiệm|sử dụng)/i,
+        /^mình cũng (gặp|bị) (tình trạng|trường hợp|vấn đề|hiện tượng) tương tự/i,
         /^bạn đã thử.*chưa/i,
         /^cảm ơn (bạn )?chia sẻ/i,
         /^thông tin (hữu ích|bổ ích|hay)/i,
@@ -759,11 +758,11 @@ Chỉ trả về COMMENT, không giải thích.`
         /^bài viết (hay|rất hay|bổ ích)/i,
         /^mình cũng (nghĩ|thấy) vậy/i,
         /^hay quá/i,
-        // English
         /^thanks for sharing/i,
         /^great (post|article|info)/i,
         /^very (useful|helpful|interesting)/i,
         /^i'?m? also (looking|exploring|trying)/i,
+        /^i'?m? (also|having) (the )?same (issue|problem|experience)/i,
         /^have you tried/i,
         /^useful info/i,
         /^nice (post|share)/i,
@@ -771,10 +770,10 @@ Chỉ trả về COMMENT, không giải thích.`
       const isGeneric = genericPatterns.some(p => p.test(comment))
       if (isGeneric) {
         console.warn(`[AI-BRAIN] ❌ Rejected generic comment: "${comment.substring(0, 50)}..."`)
-        return null // reject → caller skips this post
+        return null
       }
 
-      if (comment.length >= 5) return { text: comment, ai: true, smart: true }
+      if (comment.length >= 5) return { text: comment, ai: true, smart: true, provider }
     }
   } catch (err) {
     console.warn(`[AI-BRAIN] generateSmartComment failed: ${err.message}`)

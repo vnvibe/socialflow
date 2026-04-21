@@ -1133,6 +1133,11 @@ function ActivityRow({ row }) {
       {commentText && (
         <div className="mt-1 text-sm" style={{ fontStyle: 'italic', ...dim }}>
           "{commentText.length > 200 ? commentText.slice(0, 200) + '…' : commentText}"
+          {(d.generator || d.provider) && (
+            <span className="ml-2 text-[10px] uppercase tracking-wider" style={{ color: 'var(--hermes)' }}>
+              · {d.generator || d.provider}
+            </span>
+          )}
         </div>
       )}
       {captionPreview && !commentText && (

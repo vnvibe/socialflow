@@ -848,20 +848,47 @@ async function campaignNurture(payload, supabase) {
         if (canComment && commentCheck.allowed && tracker.get('comment') < maxCommentsSession) {
           const maxComments = getActionParams(parsed_plan, 'comment', { countMin: 1, countMax: 2 }).count
 
-          // Get ALL previously commented posts for this USER (never comment same post twice, ANY campaign)
-          const { data: prevComments } = await supabase
-            .from('comment_logs')
-            .select('post_url, fb_post_id')
-            .eq('owner_id', payload.owner_id || payload.created_by)
-            .not('post_url', 'is', null)
-            .order('created_at', { ascending: false })
-            .limit(1000)
+          // Cross-session dedup — query BOTH comment_logs AND campaign_activity_log
+          // so we catch comments posted when comment_logs insert may have
+          // silently failed (CHECK constraint violation on 'posting' status
+          // left the table empty historically). Query by owner_id — no
+          // matter which nick posted, we treat it as the user's existing
+          // comment on that post.
+          const ownerId = payload.owner_id || payload.created_by
           const commentedUrls = new Set()
           const commentedPostIds = new Set()
-          for (const c of (prevComments || [])) {
-            if (c.post_url) commentedUrls.add(c.post_url)
-            if (c.fb_post_id) commentedPostIds.add(c.fb_post_id)
-          }
+          try {
+            const { data: prevComments } = await supabase
+              .from('comment_logs')
+              .select('post_url, fb_post_id')
+              .eq('owner_id', ownerId)
+              .not('post_url', 'is', null)
+              .order('created_at', { ascending: false })
+              .limit(1000)
+            for (const c of (prevComments || [])) {
+              if (c.post_url) commentedUrls.add(c.post_url)
+              if (c.fb_post_id) commentedPostIds.add(c.fb_post_id)
+            }
+          } catch {}
+          try {
+            const { data: prevLogs } = await supabase
+              .from('campaign_activity_log')
+              .select('details, target_url')
+              .eq('owner_id', ownerId)
+              .in('action_type', ['comment', 'opportunity_comment'])
+              .eq('result_status', 'success')
+              .order('created_at', { ascending: false })
+              .limit(1000)
+            for (const l of (prevLogs || [])) {
+              const u = l.details?.post_url
+              if (u) {
+                commentedUrls.add(u)
+                const m = u.match(/(?:posts|permalink)\/(\d+)/) || u.match(/story_fbid=(\d+)/)
+                if (m) commentedPostIds.add(m[1])
+              }
+            }
+          } catch {}
+          console.log(`[NURTURE] Dedup: loaded ${commentedUrls.size} commented URLs + ${commentedPostIds.size} post IDs for this user`)
 
           // === EXPAND "See more" / "Xem thêm" links to get full post content ===
           // FB truncates long posts behind these links — click them so AI sees full context
@@ -1537,6 +1564,10 @@ async function campaignNurture(payload, supabase) {
 
               const commentText = typeof commentResult === 'object' ? commentResult.text : commentResult
               const isAI = typeof commentResult === 'object' ? (commentResult.ai || commentResult.smart) : false
+              const generatorProvider = typeof commentResult === 'object' ? (commentResult.provider || null) : null
+              const generatorLabel = generatorProvider
+                ? (generatorProvider === 'hermes' ? 'Hermes' : generatorProvider)
+                : (isAI ? 'AI' : 'template')
 
               // === QUALITY GATE: Check comment quality before posting ===
               // Phase 6 Fix 4: gate now considers thread comments — comment must address
@@ -1569,19 +1600,28 @@ async function campaignNurture(payload, supabase) {
                 if (m) fbPostId = m[1]
               }
 
-              // PRE-LOG: Create comment_logs entry BEFORE posting (status='posting')
-              // This ensures we have a record even if typing/submit crashes
+              // PRE-LOG: Create comment_logs entry BEFORE posting (status='pending')
+              // to serve as cross-session dedup source. Table has a CHECK
+              // constraint status IN ('pending','done','failed','dismissed')
+              // — previous code used 'posting' which silently violated and
+              // insert failed, leaving table empty → dedup returned nothing
+              // → same post got commented on every agent restart (observed:
+              // Việt commented "929984039659793" twice 15:28 & 16:13).
               let commentLogId = null
               try {
-                const { data: logEntry } = await supabase.from('comment_logs').insert({
+                const { data: logEntry, error: logErr } = await supabase.from('comment_logs').insert({
                   owner_id: payload.owner_id || payload.created_by, account_id,
                   fb_post_id: fbPostId,
                   comment_text: commentText, source_name: group.name,
-                  status: 'posting', campaign_id,
+                  status: 'pending', campaign_id,
                   ai_generated: isAI,
                   post_url: thisUrl,
                 }).select('id').single()
-                commentLogId = logEntry?.id
+                if (logErr) {
+                  console.warn(`[NURTURE] Pre-log insert error: ${logErr.message}`)
+                } else {
+                  commentLogId = logEntry?.id
+                }
               } catch (logErr) {
                 console.warn(`[NURTURE] Pre-log failed: ${logErr.message} — posting anyway`)
               }
@@ -1667,7 +1707,7 @@ async function campaignNurture(payload, supabase) {
               }
 
               const isSoftAd = adTriggered || (hasAdOpportunity && brandConfig?.brand_name && commentText.toLowerCase().includes(brandConfig.brand_name.toLowerCase()))
-              console.log(`[NURTURE] ✅ Commented #${totalComments} (${isAI ? 'AI' : 'template'}${adTriggered ? ' +AD-TRIGGERED' : isSoftAd ? ' +AD' : ''}): "${commentText.substring(0, 50)}..."`)
+              console.log(`[NURTURE] ✅ Commented #${totalComments} (${generatorLabel}${adTriggered ? ' +AD-TRIGGERED' : isSoftAd ? ' +AD' : ''}): "${commentText.substring(0, 50)}..."`)
 
               // Flag lead_potential authors for friend request pipeline
               if (isLeadPotential && post.author && campaign_id) {
@@ -1693,7 +1733,7 @@ async function campaignNurture(payload, supabase) {
                 } catch {}
               }
               const logActionType = adTriggered ? 'opportunity_comment' : 'comment'
-              try { await logger.log(logActionType, { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { comment_text: commentText.substring(0, 200), post_text: postText.substring(0, 200), post_url: thisUrl, ai_generated: isAI, post_author: postAuthor, soft_ad: isSoftAd, ad_triggered: adTriggered, ad_opportunity: hasAdOpportunity, lead_potential: isLeadPotential, comment_angle: commentAngle } }) } catch {}
+              try { await logger.log(logActionType, { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { comment_text: commentText.substring(0, 200), post_text: postText.substring(0, 200), post_url: thisUrl, ai_generated: isAI, generator: generatorLabel, provider: generatorProvider, post_author: postAuthor, soft_ad: isSoftAd, ad_triggered: adTriggered, ad_opportunity: hasAdOpportunity, lead_potential: isLeadPotential, comment_angle: commentAngle } }) } catch {}
 
               await R.sleepRange(90000, 180000) // 90-180 seconds gap
             } catch (err) {
