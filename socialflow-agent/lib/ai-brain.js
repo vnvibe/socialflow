@@ -793,7 +793,20 @@ const evaluateLeadQuality = evaluateProfileForConnect
  * - Gets comment_angle from evaluatePosts (knows WHY we're commenting)
  * - Generates contextual, value-adding response
  */
-async function generateSmartComment({ postText, postAuthor, group, campaign, nick, topic, commentAngle, ownerId, adConfig, hasAdOpportunity, language, threadComments }) {
+async function generateSmartComment({ postText, postAuthor, group, campaign, nick, topic, commentAngle, ownerId, adConfig, hasAdOpportunity, language, threadComments, targetLength }) {
+  // Comment length variety — real FB users write from 5 chars ("đúng r")
+  // to 200+ chars (detailed help). Bots that always produce 30-60 chars
+  // have a statistical signature. Caller may pass targetLength; if not,
+  // pick from a realistic distribution:
+  //   15% very short (5-20 chars), 45% short (20-60), 30% medium (60-120),
+  //   10% longer (120-200).
+  if (!targetLength) {
+    const r = Math.random()
+    if (r < 0.15) targetLength = 5 + Math.floor(Math.random() * 15)
+    else if (r < 0.60) targetLength = 20 + Math.floor(Math.random() * 40)
+    else if (r < 0.90) targetLength = 60 + Math.floor(Math.random() * 60)
+    else targetLength = 120 + Math.floor(Math.random() * 80)
+  }
   const context = buildContext({ campaign, nick, group, topic })
   const lang = language === 'en' ? 'en' : 'vi'
 
@@ -875,7 +888,7 @@ ${langInstr}
 2. NEVER write generic comments that could paste into any post
 3. If post asks technical question → answer with technical detail (config, command, numbers)
 4. If post shares experience → respond to THAT specific experience
-5. Write 1-2 sentences, short, casual abbreviations OK
+5. Target length this time: ~${targetLength} chars. Vary length — short (5-20 chars: "same", "fixed it", "nice") for simple posts, medium (20-60) for normal replies, longer (60-200) ONLY when you have a concrete detail to add. Never always hit 1-2 sentences — that's a bot pattern.
 6. AVOID: "I'm also looking into...", "Have you tried X?", "Very useful", "Thanks for sharing"
 7. Read the post carefully and respond SPECIFICALLY, don't drift to other topics
 8. **NEVER guess cross-platform**: If post mentions a specific platform (Zalo, Telegram, Discord, iOS, Android, Shopee, etc.), use ONLY that platform's terminology. Don't say "page token vs app token" (Facebook term) on a Zalo post. Don't guess Android API on iOS post. If unsure → skip.
@@ -907,7 +920,7 @@ ${langInstr}
 2. KHÔNG ĐƯỢC viết comment chung chung có thể paste vào bất kỳ bài nào
 3. Nếu bài hỏi kỹ thuật → trả lời kỹ thuật (config, command, số liệu)
 4. Nếu bài chia sẻ kinh nghiệm → phản hồi ĐÚNG kinh nghiệm đó
-5. Viết 1-2 câu, ngắn gọn, có thể dùng slang/viết tắt
+5. Độ dài cmt lần này: khoảng ${targetLength} ký tự. Đa dạng độ dài — ngắn (5-20 ký tự: "đúng r đó", "mình cũng z", "ok bác") cho bài đơn giản, trung bình (20-60) cho phản hồi thường, dài hơn (60-200) CHỈ khi bạn thực sự có chi tiết cụ thể đóng góp. Đừng lúc nào cũng viết đúng 1-2 câu đều đặn — đó là pattern bot.
 6. KHÔNG dùng các opener chung chung: "Mình cũng đang...", "Mình cũng gặp tình trạng/trường hợp/vấn đề tương tự...", "Bạn đã thử X chưa?", "Rất hay/bổ ích", "Cảm ơn chia sẻ". Mở đầu phải là CHI TIẾT cụ thể từ bài.
 7. PHẢI đọc kỹ bài viết và phản hồi CỤ THỂ, KHÔNG lái sang chủ đề khác
 8. **TUYỆT ĐỐI KHÔNG ĐOÁN CROSS-PLATFORM**: Nếu bài nhắc nền tảng cụ thể (Zalo, Telegram, Discord, iOS, Android, Shopee, Lazada, TikTok Shop, v.v.), comment CHỈ được dùng thuật ngữ của ĐÚNG nền tảng đó. Không nói về "token page" khi bài hỏi Zalo (đó là thuật ngữ Facebook). Không đoán API Android khi bài hỏi iOS. Nếu bạn không biết chính xác → BỎ QUA, không viết bừa.
@@ -943,7 +956,9 @@ Chỉ trả về COMMENT, không giải thích.`
     if (comment) {
       comment = comment.replace(/^["']|["']$/g, '').trim()
       comment = comment.replace(/https?:\/\/\S+/gi, '').trim()
-      if (comment.length > 150) comment = comment.substring(0, 150).replace(/\s\S*$/, '')
+      // Cap at targetLength + 30 char overrun buffer, hard max 220
+      const maxLen = Math.min(220, Math.max(targetLength + 30, 150))
+      if (comment.length > maxLen) comment = comment.substring(0, maxLen).replace(/\s\S*$/, '')
 
       const genericPatterns = [
         /^mình cũng đang (tìm hiểu|trải nghiệm|sử dụng)/i,

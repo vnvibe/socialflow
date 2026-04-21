@@ -428,6 +428,31 @@ async function campaignNurture(payload, supabase) {
         await new Promise(r => setTimeout(r, idleMs))
       }
 
+      // Feed detour — 12% chance between groups, navigate to home feed,
+      // scroll briefly, come back. Real users don't go group→group→group
+      // linearly; they bounce off the home feed occasionally. Break
+      // 'linear traversal' bot pattern that FB graph analytics could see.
+      if (_groupIdx > 1 && Math.random() < 0.12) {
+        try {
+          console.log(`[NURTURE] 🏠 Home feed detour`)
+          await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {})
+          await R.sleepRange(2000, 4000)
+          // 2-4 natural scrolls on feed
+          const scrollCount = 2 + Math.floor(Math.random() * 3)
+          for (let s = 0; s < scrollCount; s++) {
+            try { await humanScroll(page) } catch {}
+            await R.sleepRange(2500, 5500)
+          }
+          // Occasionally scroll up too (re-check earlier post)
+          if (Math.random() < 0.35) {
+            try { await page.evaluate(() => window.scrollBy(0, -(200 + Math.random() * 400))) } catch {}
+            await R.sleepRange(1500, 3000)
+          }
+        } catch (e) {
+          console.warn(`[NURTURE] Home detour threw (non-fatal): ${e.message}`)
+        }
+      }
+
       // Group visit rate limit: max 2 nicks in same group within 30 min
       if (!canVisitGroup(group.fb_group_id, account_id)) {
         console.log(`[NURTURE] ⏭️ Skip "${group.name}" — group visit rate limit (${GROUP_VISIT_MAX} nicks/30min)`)
