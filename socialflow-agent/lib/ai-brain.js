@@ -428,13 +428,19 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
       notStartsGeneric: !/^(hay|vâng|ok|đúng|cảm ơn|tuyệt)\b/i.test(comment.trim()),
     }
     const score = Object.values(specificSignals).filter(Boolean).length
-    if (score >= 3) {
+    // Heuristic used to pass at score>=3 but that let through wrong-domain
+    // answers: e.g. bot commented "token page vs token app" on a Zalo bot
+    // post — "token" appears in post so referencesPost=true, plus 2 other
+    // trivial signals = 3 → passed without LLM check. Raised to >=4 so
+    // LLM gate runs for borderline-looking comments and catches domain
+    // drift (FB terminology on Zalo post, iOS answer on Android post, …).
+    if (score >= 4) {
       return { approved: true, reason: 'heuristic_pass_strong', score: 8 }
     }
     if (score === 0) {
       return { approved: false, reason: 'heuristic_fail_no_signals', score: 3 }
     }
-    // score 1-2 → borderline, fall through to LLM
+    // score 1-3 → borderline, fall through to LLM
   }
 
   // AI quality check for borderline or long comments
@@ -461,6 +467,7 @@ REJECT (approved=false) nếu:
 - Comment lặp lại ý đã có trong thread
 - Comment hỏi câu đã được trả lời trong thread
 - Comment chung chung kiểu "rất hay", "thông tin bổ ích", "mình cũng vậy"
+- **DOMAIN DRIFT**: Comment dùng thuật ngữ của nền tảng/công nghệ KHÁC với nền tảng post đang hỏi. Ví dụ: post hỏi về Zalo bot mà comment nói "token page vs token app" (thuật ngữ Facebook). Post hỏi iOS mà comment trả lời Android API. KHÔNG đoán cross-platform.
 
 Trả về JSON: {"naturalness": N, "relevance": N, "value": N, "approved": true/false, "reason": "..."}`
         }],
@@ -689,6 +696,8 @@ ${langInstr}
 5. Write 1-2 sentences, short, casual abbreviations OK
 6. AVOID: "I'm also looking into...", "Have you tried X?", "Very useful", "Thanks for sharing"
 7. Read the post carefully and respond SPECIFICALLY, don't drift to other topics
+8. **NEVER guess cross-platform**: If post mentions a specific platform (Zalo, Telegram, Discord, iOS, Android, Shopee, etc.), use ONLY that platform's terminology. Don't say "page token vs app token" (Facebook term) on a Zalo post. Don't guess Android API on iOS post. If unsure → skip.
+9. **When in doubt → return empty string** rather than guessing. Post lacks context (screenshot-only, unclear question) → return empty.
 
 GOOD examples:
 - Post about Oracle VPS → "Oracle's 24G free tier is solid, been running docker on it smoothly"
@@ -717,6 +726,8 @@ ${langInstr}
 5. Viết 1-2 câu, ngắn gọn, có thể dùng slang/viết tắt
 6. KHÔNG dùng các opener chung chung: "Mình cũng đang...", "Mình cũng gặp tình trạng/trường hợp/vấn đề tương tự...", "Bạn đã thử X chưa?", "Rất hay/bổ ích", "Cảm ơn chia sẻ". Mở đầu phải là CHI TIẾT cụ thể từ bài.
 7. PHẢI đọc kỹ bài viết và phản hồi CỤ THỂ, KHÔNG lái sang chủ đề khác
+8. **TUYỆT ĐỐI KHÔNG ĐOÁN CROSS-PLATFORM**: Nếu bài nhắc nền tảng cụ thể (Zalo, Telegram, Discord, iOS, Android, Shopee, Lazada, TikTok Shop, v.v.), comment CHỈ được dùng thuật ngữ của ĐÚNG nền tảng đó. Không nói về "token page" khi bài hỏi Zalo (đó là thuật ngữ Facebook). Không đoán API Android khi bài hỏi iOS. Nếu bạn không biết chính xác → BỎ QUA, không viết bừa.
+9. **KHI KHÔNG CHẮC → TRẢ VỀ CHUỖI RỖNG** hơn là đoán mò. Bài viết thiếu ngữ cảnh (chỉ có ảnh screenshot mà không có nội dung text đủ), không rõ muốn hỏi gì → return empty string.
 
 VÍ DỤ ĐÚNG (trả lời đúng nội dung):
 - Bài hỏi về Oracle VPS → "Oracle 24G free thì ngon, mình chạy docker trên đó mượt lắm"
