@@ -19,8 +19,10 @@ const https = require('https')
 const http = require('http')
 
 // Per-nick persona — deterministic from account.id so the same nick
-// always talks the same way. 3 archetypes covering common VN FB user
-// voices. If account.persona_config JSONB is set in DB, that overrides.
+// always talks the same way. 8 archetypes covering common VN FB user
+// voices. With >3 archetypes + per-nick signature salt, a group with
+// 5+ nicks won't show obvious bot-cluster patterns. account.persona_config
+// JSONB in DB overrides the auto-pick.
 const PERSONAS = [
   {
     key: 'tech_casual',
@@ -43,28 +45,89 @@ const PERSONAS = [
     style_notes: 'viết tắt nhiều hơn chút (k, đc, m, b, mn, vl, vcl nhẹ); ít emoji (nếu có thì 1 cái thôi); câu ngắn',
     sample: ['m cũng dính lỗi này, chạy lại là ok', 'b thử đổi port khác coi', 'setup 2 tiếng r mới ra vl 😅'],
   },
+  {
+    key: 'senior_professional',
+    addressing: 'xưng "tôi", gọi "bạn / anh / chị"',
+    tone: 'chững chạc, rõ ràng, giọng người đi làm 30+',
+    style_notes: 'gần như không viết tắt; câu đầy đủ ngữ pháp; không emoji; thỉnh thoảng trích số liệu hoặc dẫn link tham khảo (mà không paste link)',
+    sample: ['Tôi đã thử cấu hình này trên môi trường production, chạy ổn định khoảng 3 tháng nay', 'Theo kinh nghiệm của tôi, vấn đề thường đến từ timeout setting', 'Bạn kiểm tra lại dependency version, có thể đang conflict'],
+  },
+  {
+    key: 'curious_newbie',
+    addressing: 'xưng "em / mk", gọi "anh / chị / bác"',
+    tone: 'tò mò, hay hỏi ngược, chưa rành nhiều',
+    style_notes: 'hay đặt câu hỏi nhỏ cuối cmt; viết tắt nhẹ (mk, k, đc); đôi khi 😅 khi không hiểu',
+    sample: ['em mới học nên hỏi ngu tí, cái này có cần mở port gì ko ạ', 'mk làm theo hướng dẫn mà vẫn báo lỗi, anh chỉ em với', 'hay quá bác, để em thử xem sao'],
+  },
+  {
+    key: 'blunt_direct',
+    addressing: 'xưng "mình / m", gọi "b / bro"',
+    tone: 'thẳng mặt, đi thẳng vấn đề, không vòng vo',
+    style_notes: 'câu cực ngắn (5-15 từ); gần như không emoji; viết tắt vừa (k, đc, m); đôi khi chỉ 1 câu',
+    sample: ['lỗi config thôi, check lại env file', 'chạy docker-compose up thì hết', 'đổi version v2.3 đi, v2.1 có bug đó'],
+  },
+  {
+    key: 'southern_warm',
+    addressing: 'xưng "mình / mk", gọi "anh / chị / mn"',
+    tone: 'giọng miền Nam dễ thương, hay dùng từ địa phương',
+    style_notes: 'thi thoảng dùng "nha", "nè", "á", "dạ"; viết tắt vừa; thỉnh thoảng 🥰 hoặc 😄',
+    sample: ['mk cũng từng bị vậy nè, restart lại service là okie ha', 'anh thử xem lại log nha, mình thấy thường là do port á', 'dạ em đã test ok rồi ạ, cảm ơn mn nhiều'],
+  },
+  {
+    key: 'veteran_mentor',
+    addressing: 'xưng "mình / anh", gọi "em / bạn"',
+    tone: 'đi trước dẫn đường, hay giảng giải ngắn, có kinh nghiệm thực chiến',
+    style_notes: 'câu trung bình (20-40 từ); gần không viết tắt; hay nhắc "đã từng gặp" / "hồi trước mình cũng"; không emoji',
+    sample: ['hồi trước mình cũng stuck ở chỗ này, sau mới biết là do version mismatch', 'em check 2 thứ: log và config file; 90% là một trong hai', 'vấn đề này gặp nhiều rồi, thường chỉ cần bump memory lên 2g là được'],
+  },
+]
+
+// Signature flairs — small per-nick verbal tick (opener, closer, or
+// recurring phrase). Layered on TOP of persona so 2 nicks sharing a
+// persona still sound different. 10 variants → with 8 personas
+// effectively 80 unique voice combos.
+const SIGNATURES = [
+  { opener: 'ok', closer: '' },
+  { opener: '', closer: ' nhé' },
+  { opener: 'À', closer: '' },
+  { opener: '', closer: ' nha' },
+  { opener: 'Nói thật', closer: '' },
+  { opener: 'Thật ra', closer: '' },
+  { opener: '', closer: ' đó' },
+  { opener: 'Mình thấy', closer: '' },
+  { opener: '', closer: ' á' },
+  { opener: 'Thử xem', closer: '' },
 ]
 
 function pickPersona(nick) {
   // Accept explicit persona_config from DB if provided
   if (nick?.persona_config && typeof nick.persona_config === 'object') {
     const cfg = nick.persona_config
-    if (cfg.addressing || cfg.tone) return { key: cfg.key || 'custom', ...cfg, sample: cfg.sample || [] }
+    if (cfg.addressing || cfg.tone) {
+      return { key: cfg.key || 'custom', ...cfg, sample: cfg.sample || [], signature: cfg.signature || { opener: '', closer: '' } }
+    }
   }
-  // Deterministic pick from UUID first segment (8 hex chars) — distributes
-  // uniformly across personas for typical v4 UUIDs. Falls back to username
-  // string-hash if id isn't a UUID.
+  // Deterministic pick from UUID — different hex segments drive persona
+  // vs signature so same-persona nicks get different signatures.
   const seed = String(nick?.id || nick?.account_id || nick?.username || '')
-  const hexMatch = seed.match(/^([0-9a-f]{8})/i)
-  let idx
-  if (hexMatch) {
-    idx = parseInt(hexMatch[1], 16) % PERSONAS.length
+  const hexPersona = seed.match(/^([0-9a-f]{8})/i)
+  const hexSig = seed.match(/^[0-9a-f]+-([0-9a-f]+)/i)
+  let personaIdx, sigIdx
+  if (hexPersona) {
+    personaIdx = parseInt(hexPersona[1], 16) % PERSONAS.length
   } else {
     let h = 0
     for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0
-    idx = Math.abs(h) % PERSONAS.length
+    personaIdx = Math.abs(h) % PERSONAS.length
   }
-  return PERSONAS[idx]
+  if (hexSig && hexSig[1]) {
+    sigIdx = parseInt(hexSig[1].slice(0, 4), 16) % SIGNATURES.length
+  } else {
+    let h = 7919 // prime salt to diverge from persona hash
+    for (let i = 0; i < seed.length; i++) h = ((h << 3) + h + seed.charCodeAt(i)) | 0
+    sigIdx = Math.abs(h) % SIGNATURES.length
+  }
+  return { ...PERSONAS[personaIdx], signature: SIGNATURES[sigIdx] }
 }
 
 const API_URL = process.env.API_URL || 'http://localhost:3000'
@@ -117,6 +180,10 @@ KHÔNG phải đối tượng: Người bán cùng ngành (đối thủ), spam, 
       : 'trưởng thành (tương tác bình thường)'
 
     const persona = pickPersona(nick)
+    const sig = persona.signature || { opener: '', closer: '' }
+    const sigLine = (sig.opener || sig.closer)
+      ? `- Dấu ấn riêng (verbal tick): ${sig.opener ? `thỉnh thoảng mở đầu bằng "${sig.opener}"` : ''}${sig.opener && sig.closer ? ' · ' : ''}${sig.closer ? `thỉnh thoảng kết câu bằng "${sig.closer}"` : ''} — KHÔNG dùng trong MỌI cmt, chỉ 1/3 cmt`
+      : ''
     sections.push(`=== NHÂN VẬT (NICK) ===
 Tên: ${nick.username || 'N/A'}
 Tuổi tài khoản: ${ageInDays} ngày — Giai đoạn: ${phase}
@@ -126,6 +193,7 @@ Phong cách riêng của nick này (PHẢI GIỮ NHẤT QUÁN):
 - Cách xưng hô: ${persona.addressing}
 - Tone: ${persona.tone}
 - Sở thích ngôn ngữ: ${persona.style_notes}
+${sigLine}
 - Ví dụ câu mẫu của nick này: ${persona.sample.map(s => `"${s}"`).join(' / ')}
 
 === VIẾT TẮT VN (dùng VỪA PHẢI, tối đa 1-2 từ/cmt) ===
