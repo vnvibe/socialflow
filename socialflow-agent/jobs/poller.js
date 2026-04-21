@@ -234,23 +234,29 @@ async function _pollInner() {
       return
     }
 
-    // Audit 2026-04-12: never open a browser for check_group_membership while
-    // any campaign_nurture / campaign_send_friend_request is still pending.
-    // Nurture is user-facing; membership is janitorial. Priority ordering
-    // already picks nurture first, but this gate handles the case where the
-    // nurture job is gated (budget/warmup/hours) and membership is the only
-    // thing the poller can see. We check ALL pending nurture/FR across the
-    // queue (not just this batch) once per poll cycle.
-    let nurturePendingCount = null
+    // Audit 2026-04-21: the global nurture-gate was starving nicks who had
+    // ONLY check_group_membership pending while another nick (Thúy) had
+    // nurture jobs piling up that produced 0 results every run. Diệu with
+    // 162 membership pending never got to run because of Thúy's 8 nurture.
+    // Make the gate PER-NICK: defer a nick's membership only when that
+    // SAME nick has nurture/FR pending. Other nicks proceed normally.
+    const nurturePendingByAcc = new Map()
     const needsNurtureGate = (jobs || []).some(j => j.type === 'check_group_membership')
     if (needsNurtureGate) {
-      const { count } = await supabase
-        .from('jobs')
-        .select('id', { count: 'exact', head: true })
-        .in('type', ['campaign_nurture', 'campaign_send_friend_request'])
-        .eq('status', 'pending')
-        .lte('scheduled_at', new Date().toISOString())
-      nurturePendingCount = count || 0
+      // Collect all account_ids that appear in the batch (cheap)
+      const accIds = [...new Set((jobs || []).map(j => j.payload?.account_id).filter(Boolean))]
+      if (accIds.length > 0) {
+        const { data: pendRows } = await supabase
+          .from('jobs')
+          .select('payload')
+          .in('type', ['campaign_nurture', 'campaign_send_friend_request'])
+          .eq('status', 'pending')
+          .lte('scheduled_at', new Date().toISOString())
+        for (const row of pendRows || []) {
+          const aid = row.payload?.account_id
+          if (aid) nurturePendingByAcc.set(aid, (nurturePendingByAcc.get(aid) || 0) + 1)
+        }
+      }
     }
 
     if (!jobs?.length) {
@@ -273,13 +279,13 @@ async function _pollInner() {
       const accId = job.payload?.account_id
       const isPostJob = POST_TYPES.includes(job.type)
 
-      // Audit 2026-04-12: defer check_group_membership when nurture/FR is pending.
-      // Nurture wins the browser slot even if it's currently gated (budget, warmup,
-      // rest period) — the gate will clear within a few poll cycles and the nick
-      // gets to its user-facing work first.
-      if (job.type === 'check_group_membership' && nurturePendingCount > 0) {
-        console.log(`[POLLER] Defer check_group_membership: ${nurturePendingCount} nurture/FR pending first`)
-        continue
+      // Per-nick defer: only hold membership when THIS nick has nurture/FR pending.
+      if (job.type === 'check_group_membership') {
+        const myPend = (accId && nurturePendingByAcc.get(accId)) || 0
+        if (myPend > 0) {
+          console.log(`[POLLER] Defer check_group_membership for ${accId?.slice(0,8)}: ${myPend} of its own nurture/FR pending first`)
+          continue
+        }
       }
 
       // 1 nick = 1 browser = 1 job tại 1 thời điểm
