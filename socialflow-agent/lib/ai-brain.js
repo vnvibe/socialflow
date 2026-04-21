@@ -279,36 +279,40 @@ CHỈ trả về JSON, không giải thích.`
     const match = text.match(/\[[\s\S]*\]/)
     if (match) {
       const results = JSON.parse(match[0])
-      // 2-tier picker — DeepSeek is too strict about campaign-topic match
-      // (scores 1 for any post not mentioning the topic directly, even
-      // ordinary group chatter). Separate "topic-relevant" from "warmup-
-      // engagement" instead of using a single threshold:
-      //
-      //   Tier 1 (topic-relevant): score>=5, action!='skip' → up to maxPicks
-      //   Tier 2 (warmup-only):    score 1-4, action!='skip' → 1 post max,
-      //     flagged with warmup_only=true so the caller knows to write a
-      //     generic group-native comment (NO brand mention, NO ad angle)
-      //
-      // Without Tier 2, nicks in off-topic groups (Đà Nẵng general, crypto,
-      // AI community) find 0 posts every session → 0 comments → KPI miss.
-      // With Tier 2, we still comment but limit to 1 safe post per group
-      // and never push brand so it looks like natural user activity.
-      const eligible = results
+      // Debug: log AI's score distribution so we can see WHY filters drop
+      // everything (was invisible before — just got 'no_relevant_posts').
+      const scoreDist = results.map(r => `${r.index}:${r.score}/${r.action}`).join(' ')
+      console.log(`[AI-BRAIN] Raw scores (${results.length} posts): ${scoreDist.substring(0, 200)}`)
+
+      // 2-tier picker. Tier 1 = topic-relevant. Tier 2 = warmup fallback
+      // when nick is in off-topic groups and AI (DeepSeek) insists on
+      // scoring every non-VPS post as 1 with action='skip'. Tier 2 MUST
+      // ignore action='skip' — otherwise AI's strict-by-default behavior
+      // collapses the whole fallback.
+      const inRange = results
         .filter(r => r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
-        .filter(r => r.action !== 'skip')
         .sort((a, b) => (b.score || 0) - (a.score || 0))
 
-      const tier1 = eligible.filter(r => (r.score || 0) >= 5).slice(0, maxPicks || 2)
+      // Tier 1: real topic match — honor action='skip' here (don't force a
+      // comment on a post AI confidently flagged as spam/ad when we have
+      // other good options).
+      const tier1 = inRange
+        .filter(r => (r.score || 0) >= 5 && r.action !== 'skip')
+        .slice(0, maxPicks || 2)
       if (tier1.length > 0) return tier1
 
-      // Warmup fallback — 1 post only, flagged so comment gen skips brand
-      const tier2 = eligible.slice(0, 1).map(r => ({ ...r, warmup_only: true, ad_opportunity: false }))
-      if (tier2.length > 0) {
-        console.log(`[AI-BRAIN] No topic-relevant posts; picking 1 warmup-mode post (score=${tier2[0].score}) for generic engagement`)
-        return tier2
+      // Tier 2: warmup mode — pick top post regardless of action flag,
+      // BUT only if body is substantive (exclude posts AI clearly scored
+      // 0 for empty/broken content). Flag warmup_only so handler skips
+      // brand mention.
+      const tier2Candidates = inRange.filter(r => (r.score || 0) >= 1)
+      if (tier2Candidates.length > 0) {
+        const pick = { ...tier2Candidates[0], warmup_only: true, ad_opportunity: false }
+        console.log(`[AI-BRAIN] No topic-relevant posts; picking warmup post index=${pick.index} score=${pick.score} action=${pick.action} for generic engagement`)
+        return [pick]
       }
 
-      console.log(`[AI-BRAIN] All posts marked skip or flagged as ads — skipping group entirely`)
+      console.log(`[AI-BRAIN] All posts scored 0 or flagged as ads — nothing to engage with`)
       return []
     }
   } catch (err) {
