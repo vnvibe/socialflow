@@ -1004,12 +1004,36 @@ async function campaignNurture(payload, supabase) {
               const authorEl = article.querySelector('a[role="link"] strong, h2 a, h3 a')
               const author = authorEl ? authorEl.textContent.trim() : ''
 
-              // Extract post URL
+              // Extract post URL — the FB timestamp link (<abbr>'s wrapping
+              // <a>) is the most reliable permalink source. In Comet layouts
+              // it often sits OUTSIDE the story_message wrapper, so we also
+              // walk up to the nearest [role="article"] or aria-posinset
+              // ancestor and search there. Without this, many posts come
+              // back with postUrl=null and "Xem bài" link disappears in UI.
               let postUrl = null
-              for (const link of article.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"]')) {
-                const href = link.href || ''
-                if (href.match(/\/(posts|permalink)\/\d+/) || href.includes('story_fbid')) {
-                  postUrl = href.split('?')[0]; break
+              const scope = article.closest('[role="article"], div[aria-posinset], [data-pagelet^="FeedUnit"]') || article
+              // Strategy 1: abbr timestamp's ancestor <a>
+              const abbrEl = scope.querySelector('abbr')
+              if (abbrEl) {
+                const abbrLink = abbrEl.closest('a[href*="/posts/"], a[href*="/permalink/"], a[href*="/groups/"]')
+                if (abbrLink?.href) postUrl = abbrLink.href.split('?')[0]
+              }
+              // Strategy 2: any permalink anchor in scope
+              if (!postUrl) {
+                for (const link of scope.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"]')) {
+                  const href = link.href || ''
+                  if (href.match(/\/(posts|permalink)\/\d+/) || href.includes('story_fbid')) {
+                    postUrl = href.split('?')[0]; break
+                  }
+                }
+              }
+              // Strategy 3: look at sibling wrapper (Comet sometimes puts
+              // the permalink link outside the story_message but in same
+              // parent feed unit)
+              if (!postUrl && scope !== article && scope.parentElement) {
+                for (const link of scope.parentElement.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"]')) {
+                  const href = link.href || ''
+                  if (href.match(/\/(posts|permalink)\/\d+/)) { postUrl = href.split('?')[0]; break }
                 }
               }
 
