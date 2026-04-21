@@ -1315,28 +1315,88 @@ async function campaignNurture(payload, supabase) {
           for (const post of aiSelected) {
             if (commented >= commentsToDo) break
 
+            // Every failure path in this loop MUST write to activity_log
+            // so we can see WHY comments fail from DB. Before these logs
+            // the loop had 5 silent `continue`s — agent runs, no comments,
+            // no error visible anywhere. User demand: "nếu lỗi phải nói rõ".
+            const logFail = (step, extra = {}) => {
+              console.log(`[NURTURE] ❌ Comment skip on post #${post.index}: ${step} ${JSON.stringify(extra)}`)
+              try {
+                logger.log('comment', {
+                  target_type: 'group', target_id: group.fb_group_id,
+                  target_name: group.name, target_url: group.url,
+                  result_status: 'failed',
+                  details: { step, post_index: post.index, post_url: post.postUrl, post_body_len: (post.body || '').length, ...extra },
+                })
+              } catch {}
+            }
+
             try {
               const thisPostUrl = post.postUrl
-              if (thisPostUrl && commentedUrls.has(thisPostUrl)) continue
+              if (thisPostUrl && commentedUrls.has(thisPostUrl)) {
+                logFail('dedup_local_url', { url: thisPostUrl })
+                continue
+              }
               // Cross-nick dedup by fb_post_id
               if (thisPostUrl) {
                 const m = thisPostUrl.match(/(?:posts|permalink)\/(\d+)/) || thisPostUrl.match(/story_fbid=(\d+)/)
-                if (m && commentedPostIds.has(m[1])) { console.log(`[NURTURE] Skip post ${m[1]} — already commented by another nick`); continue }
+                if (m && commentedPostIds.has(m[1])) {
+                  logFail('dedup_cross_nick', { fb_post_id: m[1] })
+                  continue
+                }
               }
 
-              const commentBtn = await page.$(`[data-nurture-comment="${post.index}"]`)
-              if (!commentBtn) continue
+              // Try tagged button first, then fallback strategies — DOM
+              // may have re-rendered since extraction (scroll, lazy load)
+              // and the attribute can get wiped. Fallbacks: find button
+              // by post body match (most reliable) or URL substring.
+              let commentBtn = await page.$(`[data-nurture-comment="${post.index}"]`)
+              if (!commentBtn) {
+                commentBtn = await page.evaluateHandle((postBody, postUrlPart) => {
+                  const articles = document.querySelectorAll('[role="article"], [data-ad-rendering-role="story_message"], div[aria-posinset]')
+                  for (const article of articles) {
+                    const t = (article.innerText || '')
+                    const matchesBody = postBody && postBody.length > 30 && t.includes(postBody.substring(0, 80))
+                    const matchesUrl = postUrlPart && article.querySelector(`a[href*="${postUrlPart}"]`)
+                    if (matchesBody || matchesUrl) {
+                      const toolbar = article.querySelector('[role="group"]') || article
+                      for (const btn of toolbar.querySelectorAll('[role="button"], a')) {
+                        const l = (btn.getAttribute('aria-label') || '').toLowerCase()
+                        const tx = (btn.innerText || '').trim().toLowerCase()
+                        if (l.includes('comment') || l.includes('bình luận') || /^(comment|bình luận)$/i.test(tx)) {
+                          return btn
+                        }
+                      }
+                    }
+                  }
+                  return null
+                }, post.body || '', (post.postUrl || '').split('/').slice(-2, -1)[0] || '')
+                const asElement = commentBtn && await commentBtn.asElement()
+                commentBtn = asElement || null
+                if (commentBtn) console.log(`[NURTURE] Comment button fallback-matched for post #${post.index}`)
+              }
 
-              // Post text already extracted during AI selection
+              if (!commentBtn) {
+                logFail('button_not_found')
+                continue
+              }
+
               const postText = post.body || ''
               const postAuthor = post.author || ''
 
-              // Final safety: skip if too short
-              if (postText.length < 15) { continue }
+              if (postText.length < 15) {
+                logFail('body_too_short', { len: postText.length })
+                continue
+              }
 
               await commentBtn.scrollIntoViewIfNeeded()
               await R.sleepRange(500, 1000)
-              await commentBtn.click({ force: true, timeout: 5000 })
+              try {
+                await commentBtn.click({ force: true, timeout: 5000 })
+              } catch (clickErr) {
+                logFail('button_click_failed', { err: clickErr.message })
+                continue
+              }
               await R.sleepRange(1500, 2500)
 
               // Comment input selectors — 2026 Comet uses Lexical editor
@@ -1362,6 +1422,7 @@ async function campaignNurture(payload, supabase) {
               }
 
               if (!commentBox) {
+                logFail('textbox_not_found', { selectors_tried: desktopCommentSels.length })
                 result.errors.push('comment: no comment box')
                 continue
               }
@@ -1505,15 +1566,61 @@ async function campaignNurture(payload, supabase) {
               if (thisUrl) commentedUrls.add(thisUrl)
               if (fbPostId) commentedPostIds.add(fbPostId)
 
-              // TYPE + SUBMIT comment
-              await commentBox.click({ force: true, timeout: 5000 })
+              // TYPE + SUBMIT comment — log each failure mode explicitly
+              try {
+                await commentBox.click({ force: true, timeout: 5000 })
+              } catch (clickErr) {
+                logFail('textbox_click_failed', { err: clickErr.message })
+                continue
+              }
               await R.sleepRange(500, 1000)
-              for (const char of commentText) {
-                await page.keyboard.type(char, { delay: Math.random() * 80 + 30 })
+              try {
+                for (const char of commentText) {
+                  await page.keyboard.type(char, { delay: Math.random() * 80 + 30 })
+                }
+              } catch (typeErr) {
+                logFail('keyboard_type_failed', { err: typeErr.message, text_len: commentText.length })
+                continue
               }
               await R.sleepRange(800, 1500)
-              await page.keyboard.press('Enter')
+              try {
+                await page.keyboard.press('Enter')
+              } catch (enterErr) {
+                logFail('enter_press_failed', { err: enterErr.message })
+                continue
+              }
               await R.sleepRange(2000, 4000)
+
+              // Verify submission actually happened — Lexical sometimes
+              // eats Enter silently. Look for the comment we just posted
+              // in the DOM; if not present, our "success" was a lie.
+              try {
+                const snippet = commentText.substring(0, 40)
+                const appeared = await page.evaluate((s) => {
+                  if (!s || s.length < 5) return true
+                  return (document.body?.innerText || '').includes(s)
+                }, snippet)
+                if (!appeared) {
+                  // Fallback: click the send button if Enter didn't fire
+                  const sent = await page.evaluate(() => {
+                    const btns = document.querySelectorAll('div[role="button"][aria-label="Comment"], div[role="button"][aria-label="Bình luận"]')
+                    for (const b of btns) {
+                      if (!b.closest('[role="article"]')) continue
+                      try { b.click(); return true } catch {}
+                    }
+                    return false
+                  })
+                  if (sent) {
+                    console.log(`[NURTURE] Enter didn't fire, clicked send button for post #${post.index}`)
+                    await R.sleepRange(1500, 2500)
+                  } else {
+                    logFail('submit_verification_failed', { snippet })
+                    continue
+                  }
+                }
+              } catch (verifyErr) {
+                console.warn(`[NURTURE] Submit verify threw (non-fatal): ${verifyErr.message}`)
+              }
 
               // POST-SUCCESS: Update log status + increment counters
               totalComments++
