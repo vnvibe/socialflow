@@ -1234,7 +1234,7 @@ async function campaignNurture(payload, supabase) {
               const evaluated = await evaluatePosts({
                 posts: eligible,
                 campaign: campaignData,
-                nick: { username: account.username, created_at: account.created_at, mission: config?.nick_mission },
+                nick: { id: account.id, username: account.username, created_at: account.created_at, mission: config?.nick_mission, persona_config: account.persona_config },
                 group: { name: group.name, member_count: group.member_count, description: group.description },
                 topic,
                 maxPicks: Math.min(maxComments, eligible.length),
@@ -1267,7 +1267,7 @@ async function campaignNurture(payload, supabase) {
                 try {
                   await scanGroupPosts({
                     posts: eligible, group: { ...group, fb_group_id: group.fb_group_id },
-                    campaign: campaignData, nick: { username: account.username },
+                    campaign: campaignData, nick: { id: account.id, username: account.username, persona_config: account.persona_config },
                     topic, ownerId: payload.owner_id, brandConfig,
                     supabase, campaignId: campaign_id,
                   })
@@ -1542,7 +1542,7 @@ async function campaignNurture(payload, supabase) {
                   postText, postAuthor,
                   group: { name: group.name, member_count: group.member_count },
                   campaign: campaignCtx,
-                  nick: { username: account.username, created_at: account.created_at, mission: config?.nick_mission },
+                  nick: { id: account.id, username: account.username, created_at: account.created_at, mission: config?.nick_mission, persona_config: account.persona_config },
                   topic, commentAngle,
                   ownerId: payload.owner_id,
                   threadComments: postThreadComments, // Fix 2
@@ -1588,7 +1588,7 @@ async function campaignNurture(payload, supabase) {
                   comment: commentText, postText,
                   threadComments: postThreadComments,
                   group: { name: group.name },
-                  topic, nick: { username: account.username },
+                  topic, nick: { id: account.id, username: account.username, persona_config: account.persona_config },
                   ownerId: payload.owner_id,
                   brandConfig, // enables ad-drift rejection when brand name appears in off-domain posts
                 })

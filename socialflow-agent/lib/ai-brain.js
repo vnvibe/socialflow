@@ -18,6 +18,47 @@ const axios = require('axios')
 const https = require('https')
 const http = require('http')
 
+// Per-nick persona — deterministic from account.id so the same nick
+// always talks the same way. 3 archetypes covering common VN FB user
+// voices. If account.persona_config JSONB is set in DB, that overrides.
+const PERSONAS = [
+  {
+    key: 'tech_casual',
+    addressing: 'xưng "mình", gọi người khác là "bro / bác / b"',
+    tone: 'thẳng thắn, ngắn gọn, hơi tech geek',
+    style_notes: 'slang công nghệ OK (fix, run, check, config); viết tắt nhẹ: k/đc/m/v/bro; đôi khi dùng 1 emoji như 👍 hoặc 😅',
+    sample: ['thử fix lại port config xem bro', 'chỗ này cứ restart là đc m ạ', 'mình check rồi k sao đâu'],
+  },
+  {
+    key: 'friendly_helper',
+    addressing: 'xưng "mình", gọi người khác là "bạn / các bạn / mn"',
+    tone: 'thân thiện, nhiệt tình, giọng giúp đỡ',
+    style_notes: 'ít viết tắt hơn (chỉ k, đc, mn); câu trọn vẹn; thỉnh thoảng 1 emoji 🙌 hoặc 😊',
+    sample: ['bạn thử cài lại phiên bản mới xem sao, mình làm vậy ok r', 'mn cho hỏi chỗ này mình setup đúng chưa', 'cảm ơn bạn, mình áp dụng thấy chạy mượt hơn hẳn'],
+  },
+  {
+    key: 'gen_z_chill',
+    addressing: 'xưng "m", gọi người khác là "b / mn / ae"',
+    tone: 'thoải mái, hơi sarcastic, nhanh gọn',
+    style_notes: 'viết tắt nhiều hơn chút (k, đc, m, b, mn, vl, vcl nhẹ); ít emoji (nếu có thì 1 cái thôi); câu ngắn',
+    sample: ['m cũng dính lỗi này, chạy lại là ok', 'b thử đổi port khác coi', 'setup 2 tiếng r mới ra vl 😅'],
+  },
+]
+
+function pickPersona(nick) {
+  // Accept explicit persona_config from DB if provided
+  if (nick?.persona_config && typeof nick.persona_config === 'object') {
+    const cfg = nick.persona_config
+    if (cfg.addressing || cfg.tone) return { key: cfg.key || 'custom', ...cfg, sample: cfg.sample || [] }
+  }
+  // Deterministic hash-pick from account id (falls back to username)
+  const seed = String(nick?.id || nick?.account_id || nick?.username || '')
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0
+  const idx = Math.abs(hash) % PERSONAS.length
+  return PERSONAS[idx]
+}
+
 const API_URL = process.env.API_URL || 'http://localhost:3000'
 // Auth priority: AGENT_SECRET_KEY (stable, no expiry) > SERVICE_ROLE > user JWT (expires)
 const AUTH_TOKEN = process.env.AGENT_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.AGENT_USER_TOKEN || ''
@@ -67,11 +108,22 @@ KHÔNG phải đối tượng: Người bán cùng ngành (đối thủ), spam, 
       : ageInDays < 90 ? 'đang phát triển (tương tác vừa phải)'
       : 'trưởng thành (tương tác bình thường)'
 
+    const persona = pickPersona(nick)
     sections.push(`=== NHÂN VẬT (NICK) ===
 Tên: ${nick.username || 'N/A'}
 Tuổi tài khoản: ${ageInDays} ngày — Giai đoạn: ${phase}
 Vai trò: ${nick.role_description || nick.mission || 'Thành viên nhóm, tương tác tự nhiên'}
-Phong cách: Nói chuyện tự nhiên, không quảng cáo lộ liễu, giúp đỡ mọi người`)
+
+Phong cách riêng của nick này (PHẢI GIỮ NHẤT QUÁN):
+- Cách xưng hô: ${persona.addressing}
+- Tone: ${persona.tone}
+- Sở thích ngôn ngữ: ${persona.style_notes}
+- Ví dụ câu mẫu của nick này: ${persona.sample.map(s => `"${s}"`).join(' / ')}
+
+=== VIẾT TẮT VN (dùng VỪA PHẢI, tối đa 1-2 từ/cmt) ===
+OK dùng: k/ko (không), đc (được), m/mk (mình), b (bạn), v (vậy), mn (mọi người), bro, r (rồi), dc (được), nx (nữa)
+KHÔNG dùng quá đà: đừng viết toàn chữ tắt như "mk k bt lm sao dc" — nhìn spam. Cmt 20-30 chữ dùng 1-2 từ tắt là tự nhiên.
+Người thật viết hỗn hợp: vài từ đầy đủ + vài từ tắt + có khi 1 emoji (không quá 1-2).`)
   }
 
   // Group context — WHERE are we?
