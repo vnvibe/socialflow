@@ -671,7 +671,7 @@ Chỉ trả về NỘI DUNG bình luận, không giải thích.`)
       const comment = (result?.text || '').trim().replace(/^["']|["']$/g, '')
       if (!comment) return reply.code(500).send({ error: 'AI returned empty comment' })
 
-      return { comment }
+      return { comment, provider: result?.provider || 'hermes', model: result?.model || null }
     } catch (err) {
       console.error('[AI-COMMENT] Error:', err.message)
       return reply.code(500).send({ error: err.message })

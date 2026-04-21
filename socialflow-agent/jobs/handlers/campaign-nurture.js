@@ -1565,9 +1565,20 @@ async function campaignNurture(payload, supabase) {
               const commentText = typeof commentResult === 'object' ? commentResult.text : commentResult
               const isAI = typeof commentResult === 'object' ? (commentResult.ai || commentResult.smart) : false
               const generatorProvider = typeof commentResult === 'object' ? (commentResult.provider || null) : null
+              // Normalize provider → display label. DeepSeek is Hermes's
+              // primary backend; orchestrator may return either name.
+              const providerLabelMap = {
+                hermes: 'Hermes',
+                deepseek: 'Hermes',
+                openai: 'OpenAI',
+                gemini: 'Gemini',
+                claude: 'Claude',
+                anthropic: 'Claude',
+                template: 'Template',
+              }
               const generatorLabel = generatorProvider
-                ? (generatorProvider === 'hermes' ? 'Hermes' : generatorProvider)
-                : (isAI ? 'AI' : 'template')
+                ? (providerLabelMap[String(generatorProvider).toLowerCase()] || generatorProvider)
+                : (isAI ? 'AI' : 'Template')
 
               // === QUALITY GATE: Check comment quality before posting ===
               // Phase 6 Fix 4: gate now considers thread comments — comment must address

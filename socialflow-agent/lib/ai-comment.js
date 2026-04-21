@@ -20,16 +20,17 @@ const FALLBACK_TEMPLATES = [
 ]
 
 /**
- * Generate a contextual comment using AI, with template fallback
- * @param {object} context - { postText, groupName, topic, style, userId }
- * @returns {string} comment text
+ * Generate a contextual comment using AI, with template fallback.
+ * Returns { text, ai, provider } so caller can label source accurately.
+ * Previously returned bare string → caller labelled every Hermes output
+ * as 'template' in logs (observed: Diệu 2026-04-21 16:35 "token page"
+ * cmt was DeepSeek/Hermes but activity log showed generator='template').
  */
 async function generateComment(context = {}) {
   const { postText, groupName, topic, style, userId } = context
 
-  // Skip AI if no post text to work with
   if (!postText || postText.length < 10) {
-    return pickTemplate(context.templates)
+    return { text: pickTemplate(context.templates), ai: false, provider: 'template' }
   }
 
   try {
@@ -49,14 +50,15 @@ async function generateComment(context = {}) {
     })
 
     const comment = res.data?.comment
+    const provider = res.data?.provider || 'hermes'
     if (comment && comment.length > 0 && comment.length < 200) {
-      return comment
+      return { text: comment, ai: true, provider }
     }
   } catch (err) {
     console.warn(`[AI-COMMENT] API failed, using template: ${err.message}`)
   }
 
-  return pickTemplate(context.templates)
+  return { text: pickTemplate(context.templates), ai: false, provider: 'template' }
 }
 
 function pickTemplate(custom) {
