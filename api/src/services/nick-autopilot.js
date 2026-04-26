@@ -1,23 +1,23 @@
-// Nick Autopilot — script-based orchestrator.
+// Nick Autopilot — script-based deterministic safety rules.
 //
 // User: "cái nào cần suy nghĩ thì mới dùng LLM, không cần thì dùng script".
 //
-// The LLM orchestrator was firing 461 calls/week (88% of Hermes cost) to
-// emit mostly deterministic decisions:
-//   • idle + healthy + pending job in queue → claim / assign_job
-//   • group pending_days > 7 + check_count >= 3 → skip_group
-//   • nick failed 5+ in 24h → decrease_budget
-//   • nick expired/checkpoint → alert_user
-//   • nick avg_comment_gap < 45s + sample >= 10 → pause_nick 2h
+// 6 rules:
+//   • nick expired/checkpoint → alert_user (manual)
+//   • nick checkpoint_7d ≥ 2 → decrease_budget comment 50%
+//   • nick avg_comment_gap < 45s + sample ≥ 10 → pause_nick 2h
+//   • nick failures_24h ≥ 5 → alert_user (warning)
+//   • group pending > 7d + checked 3x → skip_group
+//   • group pending ≤ 7d + check_count < 3 → recheck_group
 //
-// None of those need LLM judgment — they're rule matches on DB state.
-// This autopilot runs every 5 min, emits those actions directly, and
-// writes hermes_decisions rows with source='autopilot' so the UI can
-// distinguish AI vs scripted decisions.
+// 2026-04-25 refactor: split into compute + apply. Hermes-central campaigns
+// now consume signals INLINE in runPreOrchestrationPipeline (single source of
+// truth). Non-Hermes campaigns + HERMES_DOWN fallback keep the cron path.
 //
-// The LLM orchestrator is still useful for capability bumps, content
-// strategy, novel edge cases — but now runs hourly instead of every
-// 15 min (288 → 72 calls/day for 3 campaigns = ~75% cost cut).
+// Public API:
+//   computeAutopilotSignals(supabase, campaignId)  → pure data, no writes
+//   applyAutopilotSignals(...)                     → cron path: insertDecision rows
+//   runAutopilot(supabase)                         → cron entry, skips hermes_central
 
 const AGE_WARMUP_DAYS = 14
 const IDLE_MINUTES_THRESHOLD = 180
@@ -58,18 +58,26 @@ async function insertDecision(pool, campaignId, targetId, targetName, actionType
   return true
 }
 
-async function runNickChecks(pool, campaignId, nicks) {
-  let emitted = 0
-
+// ─── Pure rule evaluation (no DB writes) ───────────────────
+// Takes already-gathered nick stats, returns proposed actions as plain data.
+// Keeps the 6 rules in ONE place — both cron path and pre-orchestration
+// pipeline consume the same evaluator. Returned objects carry the same
+// shape as Hermes orchestrator actions so executeAction() can apply them.
+function evaluateNickRules(nicks) {
+  const actions = []
   for (const nick of nicks) {
     // Rule 1: nick in checkpoint/expired → alert_user (needs human)
     if (nick.status === 'checkpoint' || nick.status === 'expired') {
-      if (await insertDecision(pool, campaignId, nick.id, nick.username,
-        'alert_user', 'high',
-        `Nick ${nick.status} — cookies chết, cần user refresh`,
-        { severity: 'urgent', action: 'refresh_cookies' },
-        false
-      )) emitted++
+      actions.push({
+        type: 'alert_user',
+        target_id: nick.id,
+        target_name: nick.username,
+        priority: 'high',
+        auto_apply: false,
+        reason: `Nick ${nick.status} — cookies chết, cần user refresh`,
+        action_detail: { severity: 'urgent', action: 'refresh_cookies' },
+        rule: 'nick_dead',
+      })
       continue
     }
 
@@ -77,42 +85,112 @@ async function runNickChecks(pool, campaignId, nicks) {
 
     // Rule 2: too many checkpoints recent → decrease_budget
     if ((nick.checkpoint_7d || 0) >= CHECKPOINT_7D_THRESHOLD) {
-      if (await insertDecision(pool, campaignId, nick.id, nick.username,
-        'decrease_budget', 'high',
-        `${nick.checkpoint_7d} checkpoint trong 7 ngày — giảm comment quota 50%`,
-        { task_type: 'comment', multiplier: 0.5 },
-        true
-      )) emitted++
+      actions.push({
+        type: 'decrease_budget',
+        target_id: nick.id,
+        target_name: nick.username,
+        priority: 'high',
+        auto_apply: true,
+        reason: `${nick.checkpoint_7d} checkpoint trong 7 ngày — giảm comment quota 50%`,
+        action_detail: { task_type: 'comment', multiplier: 0.5 },
+        rule: 'checkpoint_7d_cap',
+      })
     }
 
     // Rule 3: comment gap too tight → pause 2h
     if (nick.avg_comment_gap != null && nick.avg_comment_gap < COMMENT_GAP_SECONDS_FLOOR
         && (nick.comment_sample || 0) >= COMMENT_SAMPLE_MIN) {
-      if (await insertDecision(pool, campaignId, nick.id, nick.username,
-        'pause_nick', 'high',
-        `Comment quá nhanh (avg ${nick.avg_comment_gap}s < ${COMMENT_GAP_SECONDS_FLOOR}s) — nghỉ 2h`,
-        { duration_hours: 2, reason: 'comment_spam_prevention' },
-        true
-      )) emitted++
+      actions.push({
+        type: 'pause_nick',
+        target_id: nick.id,
+        target_name: nick.username,
+        priority: 'high',
+        auto_apply: true,
+        reason: `Comment quá nhanh (avg ${nick.avg_comment_gap}s < ${COMMENT_GAP_SECONDS_FLOOR}s) — nghỉ 2h`,
+        action_detail: { duration_hours: 2, reason: 'comment_spam_prevention' },
+        rule: 'comment_spam',
+      })
     }
 
     // Rule 4: too many failures → alert + throttle
     if ((nick.failures_24h || 0) >= FAILURES_24H_THRESHOLD) {
-      if (await insertDecision(pool, campaignId, nick.id, nick.username,
-        'alert_user', 'medium',
-        `${nick.failures_24h} job fail trong 24h — review error pattern`,
-        { severity: 'warning', failures: nick.failures_24h },
-        false
-      )) emitted++
+      actions.push({
+        type: 'alert_user',
+        target_id: nick.id,
+        target_name: nick.username,
+        priority: 'medium',
+        auto_apply: false,
+        reason: `${nick.failures_24h} job fail trong 24h — review error pattern`,
+        action_detail: { severity: 'warning', failures: nick.failures_24h },
+        rule: 'failure_burst',
+      })
     }
   }
+  return actions
+}
 
+function evaluateGroupRules(groups) {
+  const actions = []
+  for (const g of groups) {
+    if (g.has_check_job) continue
+
+    if (g.pending_days > PENDING_DAYS_HARD_CAP && g.check_count >= CHECK_COUNT_HARD_CAP) {
+      actions.push({
+        type: 'skip_group',
+        target_id: g.id,
+        target_name: g.name,
+        priority: 'low',
+        auto_apply: true,
+        reason: `Chờ duyệt ${g.pending_days}d, đã check ${g.check_count} lần — bỏ nhóm`,
+        action_detail: { reason: 'admin_approval_unlikely', pending_days: g.pending_days, check_count: g.check_count },
+        rule: 'pending_timeout',
+      })
+    } else if (g.pending_days <= PENDING_DAYS_HARD_CAP && g.check_count < CHECK_COUNT_HARD_CAP) {
+      actions.push({
+        type: 'recheck_group',
+        target_id: g.id,
+        target_name: g.name,
+        priority: 'medium',
+        auto_apply: true,
+        reason: `Pending ${g.pending_days}d, check ${g.check_count}/${CHECK_COUNT_HARD_CAP} — queue recheck`,
+        action_detail: { action: 'queue_check_group_membership' },
+        rule: 'pending_recheck',
+      })
+    }
+  }
+  return actions
+}
+
+// Pure data — query DB, run rules, return signals. Used by both cron path
+// AND hermes pre-orchestration pipeline.
+async function computeAutopilotSignals(supabase, campaignId) {
+  const pool = supabase?._pool
+  if (!pool) return { nick_actions: [], group_actions: [] }
+
+  const nicks = await gatherNickStats(pool, campaignId)
+  const groups = await gatherGroupStats(pool, campaignId)
+  return {
+    nick_actions: evaluateNickRules(nicks),
+    group_actions: evaluateGroupRules(groups),
+  }
+}
+
+// Legacy cron-mode wrapper: writes hermes_decisions rows directly via
+// insertDecision (with 2h dedup). Used when the campaign is NOT
+// hermes_central (cron still runs autopilot for those campaigns) or in
+// HERMES_DOWN fallback.
+async function runNickChecks(pool, campaignId, nicks) {
+  const actions = evaluateNickRules(nicks)
+  let emitted = 0
+  for (const a of actions) {
+    const wrote = await insertDecision(pool, campaignId, a.target_id, a.target_name,
+      a.type, a.priority, a.reason, a.action_detail, a.auto_apply)
+    if (wrote) emitted++
+  }
   return emitted
 }
 
-async function runGroupChecks(pool, campaignId) {
-  let emitted = 0
-  // Pull groups pending admin approval for this campaign
+async function gatherGroupStats(pool, campaignId) {
   const { rows: groups } = await pool.query(
     `SELECT fg.id, fg.name, fg.pending_approval,
             EXTRACT(DAY FROM (now() - fg.created_at))::int AS pending_days,
@@ -130,30 +208,19 @@ async function runGroupChecks(pool, campaignId) {
        AND fg.pending_approval = true AND fg.is_member = false`,
     [campaignId]
   )
+  return groups
+}
 
-  for (const g of groups) {
-    if (g.has_check_job) continue // already checking
-
-    // Rule 5: pending > 7d + already checked 3+ times → give up
-    if (g.pending_days > PENDING_DAYS_HARD_CAP && g.check_count >= CHECK_COUNT_HARD_CAP) {
-      if (await insertDecision(pool, campaignId, g.id, g.name,
-        'skip_group', 'low',
-        `Chờ duyệt ${g.pending_days}d, đã check ${g.check_count} lần — bỏ nhóm`,
-        { reason: 'admin_approval_unlikely', pending_days: g.pending_days, check_count: g.check_count },
-        true
-      )) emitted++
-    }
-    // Rule 6: pending ≤ 7d, no check job → queue recheck
-    else if (g.pending_days <= PENDING_DAYS_HARD_CAP && g.check_count < CHECK_COUNT_HARD_CAP) {
-      if (await insertDecision(pool, campaignId, g.id, g.name,
-        'recheck_group', 'medium',
-        `Pending ${g.pending_days}d, check ${g.check_count}/${CHECK_COUNT_HARD_CAP} — queue recheck`,
-        { action: 'queue_check_group_membership' },
-        true
-      )) emitted++
-    }
+// Cron path — keeps the legacy insertDecision behavior for non-Hermes campaigns
+async function runGroupChecks(pool, campaignId) {
+  const groups = await gatherGroupStats(pool, campaignId)
+  const actions = evaluateGroupRules(groups)
+  let emitted = 0
+  for (const a of actions) {
+    const wrote = await insertDecision(pool, campaignId, a.target_id, a.target_name,
+      a.type, a.priority, a.reason, a.action_detail, a.auto_apply)
+    if (wrote) emitted++
   }
-
   return emitted
 }
 
@@ -200,8 +267,13 @@ async function runAutopilot(supabase) {
   const pool = supabase?._pool
   if (!pool) return { ran: 0 }
 
+  // Skip hermes_central campaigns — they consume autopilot signals INLINE in
+  // hermes-orchestrator's pre-orchestration pipeline (single source of truth).
+  // Override with HERMES_DOWN=1 to run autopilot on every campaign as fallback.
+  const hermesDownFallback = process.env.HERMES_DOWN === '1'
+  const filter = hermesDownFallback ? '' : 'AND COALESCE(hermes_central, false) = false'
   const { rows: campaigns } = await pool.query(
-    `SELECT id, name FROM campaigns WHERE is_active = true AND status IN ('running','active')`
+    `SELECT id, name FROM campaigns WHERE is_active = true AND status IN ('running','active') ${filter}`
   )
 
   let totalEmitted = 0
@@ -219,7 +291,30 @@ async function runAutopilot(supabase) {
     }
   }
 
-  return { ran: campaigns.length, emitted: totalEmitted }
+  return { ran: campaigns.length, emitted: totalEmitted, mode: hermesDownFallback ? 'fallback' : 'non-hermes' }
 }
 
-module.exports = { runAutopilot }
+// Convenience for hermes pre-orchestration: convert orchestrator context.nicks
+// shape (which has checkpoint_risk + jobs_failed + ...) into the flat shape
+// evaluateNickRules() expects, so we don't need a second DB roundtrip.
+function evaluateNickRulesFromContext(contextNicks) {
+  return evaluateNickRules((contextNicks || []).map(n => ({
+    id: n.id,
+    username: n.username,
+    status: n.status,
+    is_active: n.is_active,
+    failures_24h: n.jobs_failed || 0,
+    checkpoint_7d: n.checkpoint_risk?.recent_checkpoints_7d || 0,
+    avg_comment_gap: n.checkpoint_risk?.avg_comment_gap_seconds,
+    comment_sample: n.checkpoint_risk?.comment_sample_size || 0,
+  })))
+}
+
+module.exports = {
+  runAutopilot,
+  computeAutopilotSignals,
+  evaluateNickRules,
+  evaluateNickRulesFromContext,
+  evaluateGroupRules,
+  gatherGroupStats,
+}
