@@ -1313,7 +1313,10 @@ async function runOrchestration(campaignId, supabase) {
 
   let result
   try {
-    const raw = await callHermes('orchestrator', JSON.stringify(context), 1500)
+    // 3000 tokens for orchestrator: deepseek-reasoner (R1) burns ~1500 tokens
+    // on chain-of-thought before emitting JSON. With cap=1500 the JSON gets
+    // truncated mid-output → extractJson fails. Bump to 3000 to leave room.
+    const raw = await callHermes('orchestrator', JSON.stringify(context), 3000)
     result = extractJson(raw)
     if (!result) throw new Error('Hermes returned unparseable JSON')
   } catch (err) {
