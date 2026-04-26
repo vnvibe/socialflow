@@ -239,10 +239,12 @@ async function buildOrchestrationContext(campaignId, supabase) {
     })
   }
 
-  // Campaign groups via junction
+  // Campaign groups via junction. total_yields + engagement_rate are agent-
+  // populated signals (recordGroupYield) — Hermes uses them to prioritize
+  // groups that have actually produced engageable content vs dud groups.
   const { data: junction } = await supabase
     .from('campaign_groups')
-    .select('group_id, status, fb_groups!inner(id, fb_group_id, name, url, member_count, join_status, pending_since, last_posted_at, consecutive_skips)')
+    .select('group_id, status, fb_groups!inner(id, fb_group_id, name, url, member_count, join_status, pending_since, last_posted_at, consecutive_skips, total_yields, last_yield_at, engagement_rate)')
     .eq('campaign_id', campaignId)
 
   const groupIds = (junction || []).map(r => r.group_id).filter(Boolean)
@@ -295,6 +297,12 @@ async function buildOrchestrationContext(campaignId, supabase) {
       has_check_job: hist.has_check_job,
       last_check_at: hist.last_check_at,
       check_count: hist.check_count,
+      // Engagement signal (2026-04-26) — agent updates these via
+      // recordGroupYield in campaign-nurture. spreader/orchestrator use them
+      // to prioritize groups that actually produce engageable content.
+      total_yields: g.total_yields || 0,
+      last_yield_at: g.last_yield_at,
+      engagement_rate: g.engagement_rate ?? null,
     }
   })
 
@@ -1185,6 +1193,12 @@ async function runPreOrchestrationPipeline(context, campaignId, orchestrationId,
         last_actor_nick_id: g.last_actor_nick_id,
         last_acted_minutes_ago: g.last_acted_minutes_ago,
         active_nicks_last_hour: g.active_nicks_last_hour,
+        // Engagement performance — spreader uses to prioritize groups that
+        // produce engageable content (high yields = many actionable posts).
+        total_yields: g.total_yields,
+        last_yield_at: g.last_yield_at,
+        engagement_rate: g.engagement_rate,
+        consecutive_skips: g.consecutive_skips,
       })),
     nicks_to_assign: (context.nicks || [])
       .filter(n => n.is_active && !n.active_job && n.status === 'healthy')
