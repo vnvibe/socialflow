@@ -589,7 +589,7 @@ function DiagnosisRow({ decision, nickId }) {
             </div>
           )}
         </div>
-        <span className="text-[9px] text-app-dim shrink-0">{fmtAgo(decision.created_at)}</span>
+        <span className="text-[9px] text-app-dim shrink-0">{formatAgo(decision.created_at)}</span>
       </div>
     </div>
   )
