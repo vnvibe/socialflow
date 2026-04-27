@@ -1,25 +1,20 @@
 // Nick KPI Watcher — enforces daily KPI per nick per campaign.
 //
-// User asked: Hermes phải đảm bảo nick hoàn thành KPI trong ngày, nếu
-// thiếu thì xem nguyên nhân + đề xuất kế hoạch; nếu nick liên tục đạt
-// thì nâng KPI cho phù hợp năng lực.
+// 6 outputs per nick:
+//   • shortfall (>20% behind expected): kpi_shortfall decision (auto_apply
+//     conditional on cause — idle=true, dead/paused=false)
+//   • capability_bump: 5+ consecutive days hitting target + 0 checkpoints
+//     → raise_kpi_target +20%
+//   • capability_nerf: ≥1 checkpoint OR young+missed3d OR fail_rate>30%
+//     → lower_kpi_target -30% for 7d
 //
-// This runs as a 30-min cron. For each active nick with a KPI for today:
-//   1. Compute expected_by_now = target * (hours_since_active_start / active_window)
-//   2. Compute shortfall = expected_by_now - done
-//   3. If shortfall > 20% → diagnose cause from:
-//        - recent job_failures (errors / checkpoint risk)
-//        - last_used_at + rest gates (nick idle too long)
-//        - daily_budget hit (capped out)
-//        - warmup block (age < 14d)
-//   4. Insert a hermes_decisions row with diagnosis + proposed action
-//      (auto_apply=true for idle-nick-no-risk; auto_apply=false for
-//      anything needing user judgment)
-//   5. If nick has ≥5 consecutive days of hitting target with healthy
-//      signals, bump target +20% (up to a safety cap)
+// 2026-04-25 refactor (PR3): split into compute + apply, mirroring autopilot.
+//   - computeKpiSignals(supabase, campaignId)  → pure data, no writes
+//   - runWatcher(supabase)                     → cron path, skips hermes_central
+//   - hermes-orchestrator's runKpiWatcherPhase consumes signals INLINE
+//     for hermes_central campaigns (single source of truth)
 //
-// Pure Node + SQL — no LLM call, so it works even when the orchestrator
-// is blocked on billing/quota issues.
+// Pure Node + SQL — no LLM call, works even when LLM orchestrator is down.
 
 // supabase injected by caller (server.js / cron) to share the pool
 
@@ -249,11 +244,175 @@ async function checkCapabilityNerf(pool, accountId, campaignId) {
   return { eligible_for_nerf: false }
 }
 
+// ─── Pure compute (no writes) ──────────────────────────────
+// Returns structured signals for ONE campaign — used by both cron path
+// (which then writes hermes_decisions) and hermes-orchestrator pre-pipeline
+// (which auto-applies via executeAction). Shape:
+//   {
+//     shortfalls: [
+//       { nick_id, username, action: {type:'investigate_nick_shortfall', ...},
+//         total: {done, target, pct}, by_action: [...], cause, plan, severity, evidence }
+//     ],
+//     bumps: [{ nick_id, username, action: {type:'raise_kpi_target', ...}, streak_days, bump_pct }],
+//     nerfs: [{ nick_id, username, action: {type:'lower_kpi_target', ...}, reason, nerf_pct }],
+//   }
+async function computeKpiSignalsForCampaign(supabaseInst, campaignId) {
+  const pool = supabaseInst?._pool
+  if (!pool) return { shortfalls: [], bumps: [], nerfs: [] }
+
+  const today = vnToday()
+  const expectedFrac = await expectedProgress()
+
+  const { rows: kpis } = await pool.query(
+    `SELECT k.account_id, k.campaign_id,
+            COALESCE(k.done_likes,0) AS done_likes, COALESCE(k.target_likes,0) AS target_likes,
+            COALESCE(k.done_comments,0) AS done_comments, COALESCE(k.target_comments,0) AS target_comments,
+            COALESCE(k.done_friend_requests,0) AS done_fr, COALESCE(k.target_friend_requests,0) AS target_fr,
+            COALESCE(k.done_group_joins,0) AS done_joins, COALESCE(k.target_group_joins,0) AS target_joins,
+            a.is_active, a.status, a.username
+     FROM nick_kpi_daily k
+     JOIN accounts a ON a.id = k.account_id
+     WHERE k.date = $1 AND k.campaign_id = $2 AND a.is_active = true`,
+    [today, campaignId]
+  )
+
+  const ACTIONS = [
+    { key: 'likes',    doneCol: 'done_likes',    targetCol: 'target_likes',    label: 'Like',       handlerHint: 'campaign_nurture likes posts in joined groups' },
+    { key: 'comments', doneCol: 'done_comments', targetCol: 'target_comments', label: 'Comment',    handlerHint: 'campaign_nurture comments via AI after quality gate' },
+    { key: 'fr',       doneCol: 'done_fr',       targetCol: 'target_fr',       label: 'Kết bạn',    handlerHint: 'campaign_send_friend_request (needs connect role + age >=14d)' },
+    { key: 'joins',    doneCol: 'done_joins',    targetCol: 'target_joins',    label: 'Join group', handlerHint: 'campaign_discover_groups (scout role, age >=14d unlocks)' },
+  ]
+
+  const out = { shortfalls: [], bumps: [], nerfs: [] }
+
+  for (const row of kpis) {
+    const totalTarget = row.target_likes + row.target_comments + row.target_fr + row.target_joins
+    if (totalTarget <= 0) continue
+    const totalDone = row.done_likes + row.done_comments + row.done_fr + row.done_joins
+
+    const actionStatus = ACTIONS.map(a => {
+      const target = row[a.targetCol]
+      const done = row[a.doneCol]
+      if (target <= 0) return null
+      const expected = target * expectedFrac
+      const gap = expected - done
+      const pct = expected > 0 ? Math.round((gap / expected) * 100) : 0
+      return {
+        action: a.key, label: a.label, done, target,
+        expected: Math.round(expected),
+        gap: Math.max(0, Math.round(gap)),
+        shortfall_pct: Math.max(0, pct),
+        handler_hint: a.handlerHint,
+        status: pct >= SHORTFALL_THRESHOLD_PCT ? 'behind' : (done >= target ? 'done' : 'on_track'),
+      }
+    }).filter(Boolean)
+
+    const behindActions = actionStatus.filter(a => a.status === 'behind')
+
+    // Shortfall signal
+    if (behindActions.length > 0) {
+      const diag = await diagnose(pool, row.account_id, campaignId)
+      if (diag) {
+        const perActionPlans = behindActions.map(a => {
+          let specific = a.handler_hint
+          if (a.action === 'comments' && diag.evidence.failures_24h && Object.keys(diag.evidence.failures_24h).length) {
+            specific += ` · kiểm tra quality_gate rejection trong log`
+          }
+          if (a.action === 'fr' && diag.evidence.age_days < 14) {
+            specific += ` · nick mới ${diag.evidence.age_days}d, chờ đến 14d`
+          }
+          if (a.action === 'joins' && diag.evidence.age_days < 14) {
+            specific += ` · warmup đang chặn join_group`
+          }
+          return { ...a, plan: specific }
+        })
+        const behindSummary = behindActions.map(a => `${a.label} ${a.done}/${a.target}`).join(', ')
+        const totalPct = Math.round((totalDone / totalTarget) * 100)
+        out.shortfalls.push({
+          nick_id: row.account_id,
+          username: row.username,
+          total: { done: totalDone, target: totalTarget, pct: totalPct },
+          by_action: actionStatus,
+          cause: diag.cause,
+          plan: diag.plan,
+          severity: diag.severity,
+          evidence: diag.evidence,
+          action: {
+            type: 'investigate_nick_shortfall',
+            target_id: row.account_id,
+            target_name: row.username,
+            priority: diag.severity === 'high' ? 'high' : 'medium',
+            auto_apply: false, // shortfall is informational — user reviews
+            reason: `${diag.cause}. Hôm nay: ${totalDone}/${totalTarget} (${totalPct}%) · Thiếu: ${behindSummary}`,
+            action_detail: {
+              total: { done: totalDone, target: totalTarget, pct: totalPct },
+              by_action: actionStatus,
+              cause: diag.cause,
+              plan: diag.plan,
+              per_action_plan: perActionPlans,
+              evidence: diag.evidence,
+            },
+          },
+        })
+      }
+    }
+
+    // Capability bump
+    const cap = await checkCapability(pool, row.account_id, campaignId)
+    if (cap.eligible_for_bump) {
+      out.bumps.push({
+        nick_id: row.account_id,
+        username: row.username,
+        streak_days: cap.streak_days,
+        bump_pct: cap.bump_pct,
+        action: {
+          type: 'raise_kpi_target',
+          target_id: row.account_id,
+          target_name: row.username,
+          priority: 'low',
+          auto_apply: true,
+          reason: `${cap.streak_days} ngày liên tiếp đạt KPI, không checkpoint — auto nâng target +${cap.bump_pct}%`,
+          action_detail: { bump_pct: cap.bump_pct, streak_days: cap.streak_days },
+        },
+      })
+    }
+
+    // Capability nerf
+    const nerf = await checkCapabilityNerf(pool, row.account_id, campaignId)
+    if (nerf.eligible_for_nerf) {
+      out.nerfs.push({
+        nick_id: row.account_id,
+        username: row.username,
+        reason: nerf.reason,
+        nerf_pct: nerf.nerf_pct,
+        action: {
+          type: 'lower_kpi_target',
+          target_id: row.account_id,
+          target_name: row.username,
+          priority: 'high',
+          auto_apply: true,
+          reason: `Bảo vệ nick: ${nerf.reason} — auto giảm target -${nerf.nerf_pct}% trong 7 ngày`,
+          action_detail: { nerf_pct: nerf.nerf_pct, reason: nerf.reason },
+        },
+      })
+    }
+  }
+
+  return out
+}
+
 async function runWatcher(supabaseInst) {
   const pool = supabaseInst?._pool
   if (!pool) return
 
   const today = vnToday()
+
+  // 2026-04-25: skip hermes_central campaigns — they consume KPI signals
+  // INLINE in hermes-orchestrator's pre-orchestration pipeline (single
+  // source of truth). HERMES_DOWN=1 disables the skip so cron processes
+  // every campaign (fallback when LLM down).
+  const hermesDownFallback = process.env.HERMES_DOWN === '1'
+  const filter = hermesDownFallback ? '' : 'AND COALESCE(c.hermes_central, false) = false'
 
   // Pull today's KPI rows — keep per-action breakdown so we can
   // diagnose SPECIFIC shortfalls (e.g. likes OK but comments 0).
@@ -266,7 +425,8 @@ async function runWatcher(supabaseInst) {
             a.is_active, a.status, a.username
      FROM nick_kpi_daily k
      JOIN accounts a ON a.id = k.account_id
-     WHERE k.date = $1 AND a.is_active = true`,
+     JOIN campaigns c ON c.id = k.campaign_id
+     WHERE k.date = $1 AND a.is_active = true ${filter}`,
     [today]
   )
 
@@ -480,4 +640,10 @@ async function runWatcher(supabaseInst) {
   }
 }
 
-module.exports = { runWatcher, diagnose, checkCapability, checkCapabilityNerf }
+module.exports = {
+  runWatcher,
+  diagnose,
+  checkCapability,
+  checkCapabilityNerf,
+  computeKpiSignalsForCampaign,
+}

@@ -7,5 +7,10 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true
-  }
+  },
+  build: {
+    // Sourcemap để debug được production minified errors (vd React error #310).
+    // Cost: dist tăng ~30%, deploy chậm hơn vài giây. Worth it.
+    sourcemap: true,
+  },
 })

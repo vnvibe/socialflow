@@ -17,7 +17,10 @@ const AGENT_USER_ID = process.env.AGENT_USER_ID || null  // set when user logs i
 const POLL_MS = 15000 // Reduced polling — Realtime handles instant pickup, polling is backup only
 const MEM_PER_NICK_MB = 350 // ~350MB per Chromium instance
 const MIN_CONCURRENT = 1
-const MAX_CONCURRENT_CAP = 2 // Max 2 browser cùng lúc — match MAX_SESSIONS in session-pool
+// 2026-04-26: hardcap = 1. Mỗi máy chỉ MỘT nick tương tác trong 1 phiên — tránh
+// FB cluster detection (2-3 session cùng IP/device cùng lúc = signal mạnh).
+// Override qua env MAX_CONCURRENT chỉ khi infra có 1 proxy riêng/nick.
+const MAX_CONCURRENT_CAP = 1
 
 function calcMaxConcurrent() {
   const override = parseInt(process.env.MAX_CONCURRENT)

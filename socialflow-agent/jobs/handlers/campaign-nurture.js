@@ -144,7 +144,29 @@ async function campaignNurture(payload, supabase) {
 
   // Get groups — from target_queue (workflow chaining) or account's joined groups
   let groups = []
-  if (read_from) {
+
+  // Hermes orchestrator (post-2026-04-25 social_graph_spreader) may pin a
+  // specific group via payload.group_id. Honor it FIRST so the spreader's
+  // allocation strategy (no two nicks on same group within 45min) holds.
+  // Without this, the agent would pick from the junction and break the
+  // graph isolation that prevents FB cluster detection.
+  if (payload.group_id) {
+    const { data: pinnedRow } = await supabase
+      .from('fb_groups')
+      .select('id, fb_group_id, name, url, member_count, topic, tags, joined_via_campaign_id, ai_relevance, user_approved, consecutive_skips, last_yield_at, total_yields, language, score_tier, engagement_rate, ai_join_score, is_member, pending_approval, is_blocked, global_score')
+      .eq('id', payload.group_id)
+      .single()
+    if (pinnedRow && pinnedRow.is_member && !pinnedRow.pending_approval && !pinnedRow.is_blocked && pinnedRow.user_approved !== false) {
+      groups = [pinnedRow]
+      console.log(`[NURTURE] Hermes-pinned group: ${pinnedRow.name} (spreader allocation)`)
+    } else if (pinnedRow) {
+      console.warn(`[NURTURE] Hermes pinned group ${payload.group_id} (${pinnedRow.name}) but failed gate (member=${pinnedRow.is_member} pending=${pinnedRow.pending_approval} blocked=${pinnedRow.is_blocked}) — falling back to junction`)
+    } else {
+      console.warn(`[NURTURE] Hermes pinned group ${payload.group_id} not found in fb_groups — falling back`)
+    }
+  }
+
+  if (!groups.length && read_from) {
     const { data: queueEntries } = await supabase
       .from('target_queue')
       .select('*')

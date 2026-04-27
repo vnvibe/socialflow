@@ -27,6 +27,10 @@ const HERMES_SKILL_MAP = {
   group_evaluator: 'group_evaluator',
   reporter: 'reporter',
   self_reviewer: 'self_reviewer',
+  // Anti-detection pre-orchestration pipeline (10 nicks / 1 machine survival)
+  checkpoint_predictor: 'checkpoint_predictor',
+  traffic_conductor: 'traffic_conductor',
+  social_graph_spreader: 'social_graph_spreader',
 }
 
 function mapSkill(functionName) {

@@ -455,10 +455,15 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
-  // Script-based autopilot — every 5 min, handles pause_nick,
-  // skip_group, recheck_group, decrease_budget, alert_user based on
-  // DB rules. No LLM. Writes hermes_decisions with decision_type=
-  // 'autopilot' so the UI can tag AI vs script decisions.
+  // 2026-04-25: nick-autopilot was refactored into a signal-feeder. For
+  // hermes_central campaigns (default since migration 020), the same 6 rules
+  // now run INLINE inside hermes-orchestrator's pre-orchestration pipeline
+  // (Phase 0, before LLM skills) — single source of truth, no double-emission.
+  // This cron remains as a fallback path for:
+  //   • non-Hermes campaigns (hermes_central=false) — rare/legacy
+  //   • HERMES_DOWN=1 fallback — autopilot runs on every campaign
+  // runAutopilot itself filters by hermes_central, so this cron is a cheap
+  // no-op when all campaigns are Hermes-central (the common case).
   cron.schedule('*/5 * * * *', async () => {
     try {
       const { runAutopilot } = require('./nick-autopilot')
@@ -480,11 +485,13 @@ function initNurtureScheduler() {
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' })
 
-  // Nick KPI watcher — every 30 min during active hours. Algorithmic
-  // diagnosis (no LLM), so it works even when Hermes is blocked on
-  // provider billing. Finds underperforming nicks, writes a
-  // hermes_decisions row with cause + plan; flags nicks consistently
-  // hitting target for a capability bump.
+  // 2026-04-25: nick-kpi-watcher refactored to signal-feeder (PR3). For
+  // hermes_central campaigns (default), KPI signals (shortfall + capability
+  // bump/nerf) are computed INLINE in hermes-orchestrator's pre-orchestration
+  // pipeline (Phase 0b) — single source of truth. This cron is now a no-op
+  // for hermes_central, kept only for:
+  //   • non-Hermes campaigns (legacy)
+  //   • HERMES_DOWN=1 fallback — KPI watcher runs everywhere
   cron.schedule('*/30 * * * *', async () => {
     try {
       const { runWatcher } = require('./nick-kpi-watcher')

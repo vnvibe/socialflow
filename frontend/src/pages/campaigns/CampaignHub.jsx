@@ -1187,17 +1187,62 @@ function vnDayBounds(ymd) {
   return { from, to }
 }
 
+const PAGE_SIZE = 50
+
+// Group flat rows into [{date, label, rows}] by VN calendar day (UTC+7)
+function groupByVnDate(rows) {
+  const todayVn = vnTodayStr()
+  const yesterdayVn = vnYesterdayStr()
+  const groups = []
+  let currentDate = null
+  let currentGroup = null
+  for (const row of rows) {
+    const vnDay = row.created_at
+      ? new Date(new Date(row.created_at).getTime() + 7 * 3600000).toISOString().slice(0, 10)
+      : 'unknown'
+    if (vnDay !== currentDate) {
+      currentDate = vnDay
+      let label = vnDay
+      if (vnDay === todayVn) label = `Hôm nay · ${vnDay.slice(8, 10)}/${vnDay.slice(5, 7)}`
+      else if (vnDay === yesterdayVn) label = `Hôm qua · ${vnDay.slice(8, 10)}/${vnDay.slice(5, 7)}`
+      else if (vnDay !== 'unknown') label = `${vnDay.slice(8, 10)}/${vnDay.slice(5, 7)}/${vnDay.slice(0, 4)}`
+      currentGroup = { date: vnDay, label, rows: [] }
+      groups.push(currentGroup)
+    }
+    currentGroup.rows.push(row)
+  }
+  return groups
+}
+
+// Compact page-number list: always show first, last, current±2, with … gaps
+function pageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const set = new Set(
+    [1, total, current - 2, current - 1, current, current + 1, current + 2].filter(n => n >= 1 && n <= total)
+  )
+  const sorted = [...set].sort((a, b) => a - b)
+  const out = []
+  let prev = null
+  for (const n of sorted) {
+    if (prev !== null && n - prev > 1) out.push('…')
+    out.push(n)
+    prev = n
+  }
+  return out
+}
+
 function ActivityTab({ campaignId, campaign }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const [filterType, setFilterType] = useState('')
-  // dateMode: 'today' | 'yesterday' | 'custom' | 'all'
   const [dateMode, setDateMode] = useState('today')
   const [customDate, setCustomDate] = useState(vnTodayStr())
-  // Seed nick filter from ?account_id= in URL (KPI click-through from Overview)
   const [filterAccountId, setFilterAccountId] = useState(searchParams.get('account_id') || '')
-  const [limit, setLimit] = useState(50)
+  const [page, setPage] = useState(1)
 
-  // Keep URL param in sync with dropdown so back-button works
+  // Reset to page 1 whenever any filter changes
+  useEffect(() => { setPage(1) }, [filterType, dateMode, customDate, filterAccountId])
+
+  // Sync account_id URL param for KPI click-through
   useEffect(() => {
     const next = new URLSearchParams(searchParams)
     if (filterAccountId) next.set('account_id', filterAccountId)
@@ -1206,10 +1251,11 @@ function ActivityTab({ campaignId, campaign }) {
   }, [filterAccountId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: resp, isLoading } = useQuery({
-    queryKey: ['campaign-activity-log', campaignId, filterType, dateMode, customDate, filterAccountId, limit],
+    queryKey: ['campaign-activity-log', campaignId, filterType, dateMode, customDate, filterAccountId, page],
     queryFn: async () => {
       const params = new URLSearchParams()
-      params.set('limit', String(limit))
+      params.set('limit', String(PAGE_SIZE))
+      params.set('page', String(page))
       if (filterType) params.set('action_type', filterType)
       if (filterAccountId) params.set('account_id', filterAccountId)
 
@@ -1226,81 +1272,78 @@ function ActivityTab({ campaignId, campaign }) {
       const r = await api.get(`/campaigns/${campaignId}/activity-log?${params}`)
       return r.data
     },
-    refetchInterval: dateMode === 'today' ? 10000 : false,
+    refetchInterval: dateMode === 'today' && page === 1 ? 10000 : false,
+    keepPreviousData: true,
   })
 
   const rows = useMemo(() => {
-    const list = Array.isArray(resp?.items) ? resp.items
-      : Array.isArray(resp?.data) ? resp.data
-      : Array.isArray(resp) ? resp : []
-    // Only show user-facing actions (skip ops_monitor, daily_plan, etc. system chatter)
+    const list = Array.isArray(resp?.data) ? resp.data : []
     const keep = new Set(Object.keys(ACTION_ICON))
     return list.filter(r => keep.has(r.action_type))
   }, [resp])
 
+  const dateGroups = useMemo(() => groupByVnDate(rows), [rows])
+  const totalPages = resp?.total_pages || 1
+  const total = resp?.total || 0
+  const apiAccounts = resp?.accounts || []
+
   function exportCsv() {
     if (!rows.length) return
-    const esc = (v) => {
+    const esc = v => {
       if (v == null) return ''
       const s = String(v).replace(/"/g, '""')
-      return /[",\n]/.test(s) ? `"${s}"` : s
+      return /[",
+]/.test(s) ? `"${s}"` : s
     }
     const header = ['Thời gian', 'Nick', 'Hành động', 'Target', 'Link', 'Nội dung', 'Status']
-    const lines = [header.join(',')]
+    const csvLines = [header.join(',')]
     for (const r of rows) {
       const d = r.details || {}
-      const link = d.post_url || r.target_url || d.profile_url || ''
-      const content = d.comment_text || d.caption || ''
-      lines.push([
-        r.created_at,
-        r.account_name,
+      csvLines.push([
+        r.created_at, r.account_name,
         ACTION_LABEL[r.action_type] || r.action_type,
         r.target_name || '',
-        link,
-        content,
+        d.post_url || r.target_url || d.profile_url || '',
+        d.comment_text || d.caption || '',
         r.result_status,
       ].map(esc).join(','))
     }
-    const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const blob = new Blob(['﻿' + csvLines.join('
+')], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    const safeName = (campaign?.name || 'campaign').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_')
-    const dateStr = new Date().toISOString().slice(0, 10)
+    const safeName = (campaign?.name || 'campaign').replace(/[^ws-]/g, '').trim().replace(/s+/g, '_')
     a.href = url
-    a.download = `campaign_activity_${safeName}_${dateStr}.csv`
+    a.download = `campaign_activity_${safeName}_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
 
-  // Pull account list for filter dropdown
-  const accountIdsInRows = useMemo(() => {
-    const m = new Map()
-    for (const r of rows) {
-      if (r.account_id && !m.has(r.account_id)) m.set(r.account_id, r.account_name)
-    }
-    return [...m.entries()]
-  }, [rows])
+  const pages = pageNumbers(page, totalPages)
 
   return (
     <div className="flex flex-col h-full">
+      {/* ── Toolbar ── */}
       <div
-        className="flex items-center gap-3 px-6 py-3 flex-wrap"
-        style={{ borderBottom: '1px solid var(--border)' }}
+        className="flex items-center gap-2 px-4 py-2.5 flex-wrap"
+        style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}
       >
-        <span className="font-medium text-sm">Hoạt động</span>
+        <span className="font-semibold text-sm">Hoạt động</span>
+
         <select
           className="px-2 py-1 rounded text-xs"
           style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
+          onChange={e => setFilterType(e.target.value)}
         >
           {FILTERABLE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
+
         <select
           className="px-2 py-1 rounded text-xs"
           style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
           value={dateMode}
-          onChange={(e) => setDateMode(e.target.value)}
+          onChange={e => setDateMode(e.target.value)}
         >
           <option value="today">Hôm nay</option>
           <option value="yesterday">Hôm qua</option>
@@ -1314,60 +1357,117 @@ function ActivityTab({ campaignId, campaign }) {
             style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
             value={customDate}
             max={vnTodayStr()}
-            onChange={(e) => setCustomDate(e.target.value)}
+            onChange={e => setCustomDate(e.target.value)}
           />
         )}
-        {accountIdsInRows.length > 0 && (
+
+        {apiAccounts.length > 0 && (
           <select
             className="px-2 py-1 rounded text-xs"
             style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
             value={filterAccountId}
-            onChange={(e) => setFilterAccountId(e.target.value)}
+            onChange={e => setFilterAccountId(e.target.value)}
           >
             <option value="">Tất cả nick</option>
-            {accountIdsInRows.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            {apiAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         )}
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-xs font-mono-ui" style={{ color: 'var(--text-muted)' }}>
-            {rows.length} hoạt động
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {total.toLocaleString('vi-VN')} hoạt động
           </span>
           <button
             onClick={exportCsv}
             disabled={!rows.length}
-            className="px-3 py-1 rounded text-xs"
+            className="px-2.5 py-1 rounded text-xs"
             style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
           >
-            Export CSV
+            CSV
           </button>
         </div>
       </div>
+
+      {/* ── Feed grouped by date ── */}
       <div className="flex-1 overflow-auto">
         {isLoading ? (
-          <div className="p-8 text-center font-mono-ui text-xs" style={{ color: 'var(--text-muted)' }}>
-            Đang tải…
-          </div>
+          <div className="p-8 text-center text-xs" style={{ color: 'var(--text-muted)' }}>Đang tải…</div>
         ) : rows.length === 0 ? (
-          <div className="p-8 text-center font-mono-ui text-xs" style={{ color: 'var(--text-muted)' }}>
-            Chưa có hoạt động nào.
-          </div>
+          <div className="p-8 text-center text-xs" style={{ color: 'var(--text-muted)' }}>Chưa có hoạt động nào.</div>
         ) : (
-          <>
-            {rows.map(r => <ActivityRow key={r.id} row={r} />)}
-            {rows.length >= limit && (
-              <div className="p-4 text-center">
-                <button
-                  onClick={() => setLimit(l => l + 50)}
-                  className="px-4 py-2 rounded text-sm"
-                  style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+          dateGroups.map(group => (
+            <div key={group.date}>
+              <div
+                className="sticky top-0 z-10 px-4 py-1.5 flex items-center gap-2"
+                style={{
+                  background: 'var(--bg-elevated, var(--bg))',
+                  borderBottom: '1px solid var(--border)',
+                  borderTop: '1px solid var(--border)',
+                }}
+              >
+                <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+                  {group.label}
+                </span>
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded-full"
+                  style={{ background: 'var(--border)', color: 'var(--text-muted)' }}
                 >
-                  Tải thêm 50 hoạt động
-                </button>
+                  {group.rows.length}
+                </span>
               </div>
-            )}
-          </>
+              {group.rows.map(r => <ActivityRow key={r.id} row={r} />)}
+            </div>
+          ))
         )}
       </div>
+
+      {/* ── Pagination ── */}
+      {totalPages > 1 && (
+        <div
+          className="flex items-center justify-between px-4 py-2 flex-wrap gap-2"
+          style={{ borderTop: '1px solid var(--border)', background: 'var(--surface)' }}
+        >
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Trang {page}/{totalPages} · {total.toLocaleString('vi-VN')} mục
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-2.5 py-1 rounded text-xs disabled:opacity-30"
+              style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+            >
+              ← Trước
+            </button>
+            {pages.map((p, i) =>
+              p === '…' ? (
+                <span key={'el' + i} className="px-1 text-xs" style={{ color: 'var(--text-muted)' }}>…</span>
+              ) : (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className="w-7 h-7 rounded text-xs font-medium"
+                  style={{
+                    border: '1px solid var(--border)',
+                    background: p === page ? 'var(--hermes)' : 'var(--bg)',
+                    color: p === page ? '#fff' : 'inherit',
+                  }}
+                >
+                  {p}
+                </button>
+              )
+            )}
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="px-2.5 py-1 rounded text-xs disabled:opacity-30"
+              style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
+            >
+              Sau →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1989,6 +2089,20 @@ export default function CampaignHub() {
     onError: (err) => toast.error(err.response?.data?.error || err.message),
   })
 
+  // Agents = union of role assignments + top-level account_ids (AI_PILOT mode
+  // often sets only account_ids, leaving campaign_roles empty until Hermes
+  // creates orchestrated roles — the badge showed 0 for those campaigns).
+  // MUST be called before any early return — fixes React #310 (hook count
+  // changed between loading→loaded renders).
+  const nicksCount = useMemo(() => {
+    if (!campaign) return 0
+    const s = new Set([
+      ...((campaign.campaign_roles || []).flatMap(r => r.account_ids || [])),
+      ...(campaign.account_ids || []),
+    ])
+    return s.size
+  }, [campaign?.campaign_roles, campaign?.account_ids])
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -2018,16 +2132,6 @@ export default function CampaignHub() {
 
   const isRunning = status === 'running' || status === 'active'
   const rolesCount = campaign.campaign_roles?.length ?? campaign.roles_count ?? 0
-  // Agents = union of role assignments + top-level account_ids (AI_PILOT mode
-  // often sets only account_ids, leaving campaign_roles empty until Hermes
-  // creates orchestrated roles — the badge showed 0 for those campaigns).
-  const nicksCount = useMemo(() => {
-    const s = new Set([
-      ...((campaign.campaign_roles || []).flatMap(r => r.account_ids || [])),
-      ...(campaign.account_ids || []),
-    ])
-    return s.size
-  }, [campaign.campaign_roles, campaign.account_ids])
 
   return (
     <div className="flex flex-col h-full">

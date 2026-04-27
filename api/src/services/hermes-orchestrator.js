@@ -239,10 +239,12 @@ async function buildOrchestrationContext(campaignId, supabase) {
     })
   }
 
-  // Campaign groups via junction
+  // Campaign groups via junction. total_yields + engagement_rate are agent-
+  // populated signals (recordGroupYield) — Hermes uses them to prioritize
+  // groups that have actually produced engageable content vs dud groups.
   const { data: junction } = await supabase
     .from('campaign_groups')
-    .select('group_id, status, fb_groups!inner(id, fb_group_id, name, url, member_count, join_status, pending_since, last_posted_at, consecutive_skips)')
+    .select('group_id, status, fb_groups!inner(id, fb_group_id, name, url, member_count, join_status, pending_since, last_posted_at, consecutive_skips, total_yields, last_yield_at, engagement_rate)')
     .eq('campaign_id', campaignId)
 
   const groupIds = (junction || []).map(r => r.group_id).filter(Boolean)
@@ -295,6 +297,12 @@ async function buildOrchestrationContext(campaignId, supabase) {
       has_check_job: hist.has_check_job,
       last_check_at: hist.last_check_at,
       check_count: hist.check_count,
+      // Engagement signal (2026-04-26) — agent updates these via
+      // recordGroupYield in campaign-nurture. spreader/orchestrator use them
+      // to prioritize groups that actually produce engageable content.
+      total_yields: g.total_yields || 0,
+      last_yield_at: g.last_yield_at,
+      engagement_rate: g.engagement_rate ?? null,
     }
   })
 
@@ -458,13 +466,20 @@ async function executeAction(action, campaignId, context, supabase) {
         .eq('campaign_id', campaignId)
       const roleRow = (roles || []).find(r => (r.account_ids || []).includes(accId))
 
+      // Honor scheduled_offset_minutes from social_graph_spreader allocations:
+      // staggers job creation so 4 nicks assigned in the same orchestration cycle
+      // don't all hit FB at the same instant.
+      const offsetMin = Number(action.action_detail?.scheduled_offset_minutes) || 0
+      const scheduledAt = offsetMin > 0
+        ? new Date(Date.now() + offsetMin * 60000).toISOString()
+        : new Date().toISOString()
       const { data: inserted, error } = await supabase
         .from('jobs')
         .insert({
           type: jobType,
           priority: 2,
           status: 'pending',
-          scheduled_at: new Date().toISOString(),
+          scheduled_at: scheduledAt,
           payload: orchestratorPayload(context, {
             account_id: accId,
             role_id: roleRow?.id || null,
@@ -475,7 +490,7 @@ async function executeAction(action, campaignId, context, supabase) {
         .select('id')
         .single()
       if (error) return { ok: false, detail: error.message }
-      return { ok: true, detail: `job ${inserted.id} created` }
+      return { ok: true, detail: offsetMin > 0 ? `job ${inserted.id} scheduled +${offsetMin}min` : `job ${inserted.id} created` }
     }
 
     case 'skip_group': {
@@ -708,15 +723,614 @@ async function executeAction(action, campaignId, context, supabase) {
   }
 }
 
+// ─── Anti-detection signal builder ─────────────────────────
+// Augments orchestration context with the 3 extra signals the pre-orchestration
+// pipeline needs: per-nick action density, per-nick recent group activity,
+// and machine-wide concurrent active count. Kept best-effort — failures
+// short-circuit the pipeline but don't block the main orchestrator.
+async function buildAntiDetectSignals(accountIds, supabase) {
+  const signals = {
+    actionCounts: new Map(),       // accId → { last_1h, last_24h, last_7d }
+    nickGroupRecency: new Map(),   // accId → [{ fb_group_id, minutes_ago, action_type }]
+    groupActivity: new Map(),      // fb_group_id → { last_actor_acc, last_minutes_ago, active_nicks_last_hour }
+    concurrentActiveCount: 0,
+    personas: new Map(),           // accId → persona object | null
+  }
+  if (!accountIds.length) return signals
+
+  const since1h = new Date(Date.now() - 3600000).toISOString()
+  const since6h = new Date(Date.now() - 6 * 3600000).toISOString()
+  const since24h = new Date(Date.now() - 24 * 3600000).toISOString()
+  const since7d = new Date(Date.now() - 7 * 86400000).toISOString()
+
+  try {
+    // Action counts (last 7d covers all windows; aggregate in JS)
+    const { data: rows } = await supabase
+      .from('campaign_activity_log')
+      .select('account_id, action_type, target_type, target_id, created_at')
+      .in('account_id', accountIds)
+      .gte('created_at', since7d)
+    const now = Date.now()
+    for (const r of rows || []) {
+      const ts = new Date(r.created_at).getTime()
+      const ageMs = now - ts
+      const a = signals.actionCounts.get(r.account_id) || { last_1h: 0, last_24h: 0, last_7d: 0 }
+      a.last_7d++
+      if (ageMs <= 24 * 3600000) a.last_24h++
+      if (ageMs <= 3600000) a.last_1h++
+      signals.actionCounts.set(r.account_id, a)
+
+      // Group recency: only last 6h, only target_type=group
+      if (r.target_type === 'group' && r.target_id && ts >= new Date(since6h).getTime()) {
+        const list = signals.nickGroupRecency.get(r.account_id) || []
+        const minutesAgo = Math.floor(ageMs / 60000)
+        // Keep only most recent per group
+        const existing = list.find(g => g.fb_group_id === r.target_id)
+        if (!existing) {
+          list.push({ fb_group_id: r.target_id, minutes_ago: minutesAgo, action_type: r.action_type })
+        } else if (minutesAgo < existing.minutes_ago) {
+          existing.minutes_ago = minutesAgo
+          existing.action_type = r.action_type
+        }
+        signals.nickGroupRecency.set(r.account_id, list)
+
+        // Group-side aggregation
+        const ga = signals.groupActivity.get(r.target_id) || {
+          last_actor_acc: null, last_minutes_ago: Infinity, active_nicks_last_hour: new Set(),
+        }
+        if (minutesAgo < ga.last_minutes_ago) {
+          ga.last_minutes_ago = minutesAgo
+          ga.last_actor_acc = r.account_id
+        }
+        if (ts >= new Date(since1h).getTime()) ga.active_nicks_last_hour.add(r.account_id)
+        signals.groupActivity.set(r.target_id, ga)
+      }
+    }
+  } catch (err) {
+    console.warn(`[ANTI-DETECT] activity query failed: ${err.message}`)
+  }
+
+  try {
+    // Machine concurrency: jobs claimed/running across ALL campaigns. The agent
+    // is a per-machine process so this approximates "how many nicks are
+    // currently driving a browser session right now". The 10-nicks-on-1-machine
+    // safety threshold is configured in the conductor skill (default max_concurrent=3).
+    const { data: live } = await supabase
+      .from('jobs')
+      .select('id, status')
+      .in('status', ['claimed', 'running'])
+    signals.concurrentActiveCount = (live || []).length
+  } catch (err) {
+    console.warn(`[ANTI-DETECT] concurrency query failed: ${err.message}`)
+  }
+
+  try {
+    // Personas: opt-in via ai_pilot_memory.memory_type='persona'. If a nick has
+    // none, the conductor skill falls back to a default archetype based on
+    // session age — so absence is fine, not an error.
+    const { data: personaRows } = await supabase
+      .from('ai_pilot_memory')
+      .select('account_id, value')
+      .in('account_id', accountIds)
+      .eq('memory_type', 'persona')
+    for (const p of personaRows || []) {
+      if (p.account_id) signals.personas.set(p.account_id, p.value || null)
+    }
+  } catch {}
+
+  return signals
+}
+
+// Mutates `context` in place with anti-detect fields the new skills consume.
+function enrichContextWithAntiDetect(context, signals) {
+  // Per-nick fields
+  for (const n of context.nicks || []) {
+    const ac = signals.actionCounts.get(n.id) || { last_1h: 0, last_24h: 0, last_7d: 0 }
+    n.actions_last_1h = ac.last_1h
+    n.actions_last_24h = ac.last_24h
+    n.actions_last_7d = ac.last_7d
+    n.recent_group_actions = signals.nickGroupRecency.get(n.id) || []
+    n.persona = signals.personas.get(n.id) || null
+    // Session age: use account.created_at if exposed; orchestrator currently
+    // doesn't include it on the nick row, so skill falls back to "unknown".
+  }
+
+  // Per-group fields (map by our fb_group_id)
+  for (const g of context.groups || []) {
+    const ga = signals.groupActivity.get(g.fb_group_id)
+    if (ga) {
+      g.last_actor_nick_id = ga.last_actor_acc
+      g.last_acted_minutes_ago = ga.last_minutes_ago === Infinity ? null : ga.last_minutes_ago
+      g.active_nicks_last_hour = ga.active_nicks_last_hour.size
+    } else {
+      g.last_actor_nick_id = null
+      g.last_acted_minutes_ago = null
+      g.active_nicks_last_hour = 0
+    }
+  }
+
+  // Machine block
+  // 2026-04-26: default max=1 — strict serialization (1 nick / 1 phiên).
+  // Tránh FB cluster detection: 2+ session cùng IP/device cùng lúc = signal mạnh.
+  // Override qua env HERMES_MAX_CONCURRENT_NICKS khi có infra 1 proxy/nick.
+  context.machine = {
+    concurrent_active_now: signals.concurrentActiveCount,
+    max_concurrent_safe: Number(process.env.HERMES_MAX_CONCURRENT_NICKS) || 1,
+  }
+}
+
+// ─── KPI watcher phase: shortfall diagnosis + capability bump/nerf ─
+// Runs as part of pre-pipeline AFTER autopilot — capability_nerf needs
+// the latest checkpoint state which autopilot may have just acted on.
+// Auto-applies bumps + nerfs (deterministic rules, hours of dedup) and
+// logs shortfalls as informational rows for the orchestrator skill to
+// consume via context.kpi_signals.
+async function runKpiWatcherPhase(context, campaignId, orchestrationId, supabase) {
+  const { computeKpiSignalsForCampaign } = require('./nick-kpi-watcher')
+  const out = { shortfalls: 0, bumps_applied: 0, nerfs_applied: 0, deduped: 0 }
+
+  let signals
+  try {
+    signals = await computeKpiSignalsForCampaign(supabase, campaignId)
+  } catch (err) {
+    console.warn(`[KPI-PHASE] compute failed: ${err.message}`)
+    context.kpi_signals = { shortfalls: [], bumps: [], nerfs: [] }
+    return out
+  }
+
+  // Helper: dedup against hermes_decisions for capability_bump (7d) and
+  // capability_nerf (3d) to match the cron path's behavior. Without dedup
+  // a 5-min cycle would re-emit the same bump every tick.
+  const isDedup = async (decisionType, targetId, hours) => {
+    const since = new Date(Date.now() - hours * 3600 * 1000).toISOString()
+    const { data: recent } = await supabase
+      .from('hermes_decisions')
+      .select('id')
+      .eq('decision_type', decisionType)
+      .eq('target_id', targetId)
+      .gte('created_at', since)
+      .limit(1)
+    return (recent || []).length > 0
+  }
+
+  // 1. Capability bumps — 7d dedup
+  for (const b of signals.bumps || []) {
+    if (await isDedup('capability_bump', b.nick_id, 7 * 24)) { out.deduped++; continue }
+    let outcome = 'pending', detail = null, appliedAt = null
+    try {
+      const r = await executeAction(b.action, campaignId, context, supabase)
+      outcome = r.ok ? 'success' : 'failed'
+      detail = r.detail
+      appliedAt = new Date().toISOString()
+      if (r.ok) out.bumps_applied++
+    } catch (err) { outcome = 'failed'; detail = err.message }
+    await supabase.from('hermes_decisions').insert({
+      campaign_id: campaignId,
+      orchestration_id: orchestrationId,
+      decision_type: 'capability_bump',
+      action_type: 'raise_kpi_target',
+      target_id: b.nick_id,
+      target_name: b.username,
+      priority: b.action.priority,
+      reason: b.action.reason,
+      decision: { ...b.action, source: 'kpi_watcher' },
+      auto_apply: true,
+      auto_applied: outcome === 'success',
+      applied_at: appliedAt,
+      outcome,
+      outcome_detail: detail,
+    })
+  }
+
+  // 2. Capability nerfs — 3d dedup
+  for (const n of signals.nerfs || []) {
+    if (await isDedup('capability_nerf', n.nick_id, 3 * 24)) { out.deduped++; continue }
+    let outcome = 'pending', detail = null, appliedAt = null
+    try {
+      const r = await executeAction(n.action, campaignId, context, supabase)
+      outcome = r.ok ? 'success' : 'failed'
+      detail = r.detail
+      appliedAt = new Date().toISOString()
+      if (r.ok) out.nerfs_applied++
+    } catch (err) { outcome = 'failed'; detail = err.message }
+    await supabase.from('hermes_decisions').insert({
+      campaign_id: campaignId,
+      orchestration_id: orchestrationId,
+      decision_type: 'capability_nerf',
+      action_type: 'lower_kpi_target',
+      target_id: n.nick_id,
+      target_name: n.username,
+      priority: n.action.priority,
+      reason: n.action.reason,
+      decision: { ...n.action, source: 'kpi_watcher' },
+      auto_apply: true,
+      auto_applied: outcome === 'success',
+      applied_at: appliedAt,
+      outcome,
+      outcome_detail: detail,
+    })
+  }
+
+  // 3. Shortfalls — 2h dedup, log only (no execute, orchestrator skill decides)
+  for (const s of signals.shortfalls || []) {
+    if (await isDedup('kpi_shortfall', s.nick_id, 2)) { out.deduped++; continue }
+    out.shortfalls++
+    await supabase.from('hermes_decisions').insert({
+      campaign_id: campaignId,
+      orchestration_id: orchestrationId,
+      decision_type: 'kpi_shortfall',
+      action_type: 'investigate_nick_shortfall',
+      target_id: s.nick_id,
+      target_name: s.username,
+      priority: s.action.priority,
+      reason: s.action.reason,
+      decision: s.action.action_detail,
+      auto_apply: false,
+      auto_applied: false,
+      outcome: 'success',
+      outcome_detail: `cause=${s.cause} | total=${s.total.done}/${s.total.target}`,
+    })
+  }
+
+  // Inject signals for orchestrator skill to consider (especially shortfalls
+  // — orchestrator may emit additional assign_job for behind-action nicks).
+  context.kpi_signals = {
+    shortfalls: signals.shortfalls.map(s => ({
+      nick_id: s.nick_id,
+      username: s.username,
+      total: s.total,
+      behind: s.by_action.filter(a => a.status === 'behind').map(a => ({
+        action: a.action, label: a.label, done: a.done, target: a.target,
+        gap: a.gap, shortfall_pct: a.shortfall_pct,
+      })),
+      cause: s.cause,
+      severity: s.severity,
+    })),
+    capability_bumps_applied: out.bumps_applied,
+    capability_nerfs_applied: out.nerfs_applied,
+  }
+
+  return out
+}
+
+// ─── Autopilot phase: deterministic rules (no LLM) ─────────
+// Runs BEFORE the LLM sub-skills. The 6 autopilot rules cover safety actions
+// that don't need judgment (nick checkpoint → alert, comment burst → pause,
+// group pending timeout → skip). Reusing the same `evaluateNickRules` /
+// `evaluateGroupRules` evaluators that the cron path uses → single source of
+// rule logic. Results land in hermes_decisions with decision_type='autopilot'
+// and are also exposed in context.autopilot_signals so the orchestrator skill
+// can take them into account.
+async function runAutopilotPhase(context, campaignId, orchestrationId, supabase) {
+  const { evaluateNickRulesFromContext, evaluateGroupRules } = require('./nick-autopilot')
+  const out = { actions: [], applied: 0, skipped: 0 }
+
+  // 1. Evaluate
+  const nickActions = evaluateNickRulesFromContext(context.nicks || [])
+  const pendingGroups = (context.groups || []).filter(g => g.join_status === 'pending')
+  const groupActions = evaluateGroupRules(pendingGroups)
+  const allActions = [...nickActions, ...groupActions]
+
+  // 2. 2-hour dedup against hermes_decisions (matches the cron path's behavior
+  // — without this, every 5-min pre-pipeline tick would re-emit the same
+  // pause_nick/skip_group decisions).
+  const targetIds = allActions.map(a => a.target_id).filter(Boolean)
+  const dedupSet = new Set()
+  if (targetIds.length) {
+    try {
+      const since2h = new Date(Date.now() - 2 * 3600 * 1000).toISOString()
+      const { data: recent } = await supabase
+        .from('hermes_decisions')
+        .select('target_id, action_type')
+        .in('target_id', targetIds)
+        .gte('created_at', since2h)
+      for (const r of recent || []) {
+        dedupSet.add(`${r.target_id}|${r.action_type}`)
+      }
+    } catch (err) {
+      console.warn(`[AUTOPILOT] dedup query failed: ${err.message}`)
+    }
+  }
+
+  // 3. Apply (auto_apply=true via executeAction; auto_apply=false → log only)
+  for (const action of allActions) {
+    const dedupKey = `${action.target_id}|${action.type}`
+    if (dedupSet.has(dedupKey)) {
+      out.skipped++
+      out.actions.push({ ...action, outcome: 'deduped' })
+      continue
+    }
+
+    let outcome = 'pending', detail = null, appliedAt = null
+    if (action.auto_apply) {
+      try {
+        const r = await executeAction(action, campaignId, context, supabase)
+        outcome = r.ok ? 'success' : 'failed'
+        detail = r.detail
+        appliedAt = new Date().toISOString()
+        if (r.ok) out.applied++
+      } catch (err) {
+        outcome = 'failed'; detail = err.message
+      }
+    }
+
+    await supabase.from('hermes_decisions').insert({
+      campaign_id: campaignId,
+      orchestration_id: orchestrationId,
+      decision_type: 'autopilot',
+      action_type: action.type,
+      target_id: action.target_id || null,
+      target_name: action.target_name || null,
+      priority: action.priority || null,
+      reason: action.reason || null,
+      decision: { ...action, source: 'autopilot' },
+      auto_apply: !!action.auto_apply,
+      auto_applied: action.auto_apply && outcome === 'success',
+      applied_at: appliedAt,
+      outcome,
+      outcome_detail: detail,
+    })
+
+    out.actions.push({ ...action, outcome, outcome_detail: detail })
+  }
+
+  return out
+}
+
+// ─── Pre-orchestration anti-detection pipeline ─────────────
+// Calls the 3 sub-skills in parallel. Each is best-effort:
+//   - predictor failure → no proactive throttle, proceed
+//   - conductor failure → orchestrator schedules without timing guidance
+//   - spreader failure → orchestrator picks groups without graph guidance
+// Predictor's actions are auto-applied IMMEDIATELY (before orchestrator runs)
+// because they're risk-protective and shouldn't wait.
+async function runPreOrchestrationPipeline(context, campaignId, orchestrationId, supabase) {
+  const started = Date.now()
+  const out = { predictions: null, schedule: null, allocations: null, predictor_actions_applied: 0, autopilot_applied: 0 }
+
+  // ── PHASE 0: Autopilot deterministic rules (cheap, sync) ──
+  // Runs first so the LLM skills below see post-autopilot state. e.g., if
+  // autopilot already paused a nick for comment-burst, predictor won't waste
+  // tokens proposing the same pause.
+  let autopilotResult = { actions: [], applied: 0, skipped: 0 }
+  try {
+    autopilotResult = await runAutopilotPhase(context, campaignId, orchestrationId, supabase)
+    out.autopilot_applied = autopilotResult.applied
+    context.autopilot_signals = {
+      actions_taken: autopilotResult.actions.filter(a => a.outcome === 'success'),
+      actions_proposed: autopilotResult.actions.filter(a => !a.auto_apply),
+      total_evaluated: autopilotResult.actions.length,
+    }
+  } catch (err) {
+    console.warn(`[AUTOPILOT-PHASE] failed (proceeding without): ${err.message}`)
+    context.autopilot_signals = { actions_taken: [], actions_proposed: [], total_evaluated: 0 }
+  }
+
+  // ── PHASE 0b: KPI watcher (deterministic, after autopilot) ──
+  // Runs AFTER autopilot so capability_nerf can use post-autopilot pause
+  // state (a nick paused by autopilot won't get a nerf — already protected).
+  // Auto-applies bumps/nerfs (raise/lower_kpi_target) with 7d/3d dedup, logs
+  // shortfalls as informational rows. Orchestrator skill reads context.kpi_signals.
+  let kpiResult = { shortfalls: 0, bumps_applied: 0, nerfs_applied: 0, deduped: 0 }
+  try {
+    kpiResult = await runKpiWatcherPhase(context, campaignId, orchestrationId, supabase)
+    out.kpi_bumps_applied = kpiResult.bumps_applied
+    out.kpi_nerfs_applied = kpiResult.nerfs_applied
+    out.kpi_shortfalls = kpiResult.shortfalls
+  } catch (err) {
+    console.warn(`[KPI-PHASE] failed (proceeding without): ${err.message}`)
+    context.kpi_signals = { shortfalls: [], capability_bumps_applied: 0, capability_nerfs_applied: 0 }
+  }
+
+  // Build sub-context for each skill — pass only what they need to keep token cost low
+  const predictorInput = {
+    machine: context.machine,
+    nicks: (context.nicks || []).map(n => ({
+      id: n.id,
+      username: n.username,
+      status: n.status,
+      session_age_days: n.session_age_days || null,
+      recent_checkpoints_7d: n.checkpoint_risk?.recent_checkpoints_7d || 0,
+      avg_comment_gap_seconds: n.checkpoint_risk?.avg_comment_gap_seconds ?? null,
+      comment_sample_size: n.checkpoint_risk?.comment_sample_size || 0,
+      actions_last_1h: n.actions_last_1h || 0,
+      actions_last_24h: n.actions_last_24h || 0,
+      actions_last_7d: n.actions_last_7d || 0,
+      failed_jobs_24h: n.jobs_failed || 0,
+      patterns: n.checkpoint_risk?.patterns || [],
+      budget_caps: n.budget_caps || {},
+    })),
+  }
+
+  const nowDate = new Date()
+  // Build a kpi-shortfall lookup so conductor can tighten rest for behind nicks
+  const kpiShortfallByNick = new Map()
+  for (const s of context.kpi_signals?.shortfalls || []) {
+    kpiShortfallByNick.set(s.nick_id, {
+      total_pct: s.total?.pct ?? null,
+      severity: s.severity,
+      cause: s.cause,
+    })
+  }
+  const conductorInput = {
+    now_iso: nowDate.toISOString(),
+    now_hour_local: nowDate.getUTCHours() + 7, // VN time approx
+    max_concurrent: context.machine?.max_concurrent_safe || 1,
+    currently_active_count: context.machine?.concurrent_active_now || 0,
+    nicks: (context.nicks || []).map(n => ({
+      id: n.id,
+      username: n.username,
+      is_active: n.is_active,
+      status: n.status,
+      active_job: n.active_job,
+      is_resting: false, // computed by orchestrator's rest gate; conductor can re-derive from idle_minutes
+      minutes_since_last_action: n.idle_minutes,
+      actions_today: n.actions_last_24h || 0,
+      daily_budget_remaining: Object.fromEntries(
+        Object.entries(n.budget_caps || {}).map(([k, v]) => [k, Math.max(0, (v.max || 0) - (v.used || 0))])
+      ),
+      risk_score: null, // filled by predictor result later if available
+      persona: n.persona,
+      session_history_today: [],
+      // KPI shortfall hint — conductor uses this to tighten rest_after_minutes
+      // (90 phút thay vì 180-300) cho nick đang behind, để có thêm session/ngày.
+      kpi_shortfall: kpiShortfallByNick.get(n.id) || null,
+    })),
+  }
+
+  const spreaderInput = {
+    now_iso: nowDate.toISOString(),
+    min_gap_minutes_per_group: 45,
+    min_gap_minutes_same_nick_same_group: 360,
+    campaign_groups: (context.groups || [])
+      .filter(g => g.join_status === 'member')
+      .map(g => ({
+        id: g.id,
+        name: g.name,
+        fb_group_id: g.fb_group_id,
+        join_status: g.join_status,
+        member_count: g.member_count,
+        last_actor_nick_id: g.last_actor_nick_id,
+        last_acted_minutes_ago: g.last_acted_minutes_ago,
+        active_nicks_last_hour: g.active_nicks_last_hour,
+        // Engagement performance — spreader uses to prioritize groups that
+        // produce engageable content (high yields = many actionable posts).
+        total_yields: g.total_yields,
+        last_yield_at: g.last_yield_at,
+        engagement_rate: g.engagement_rate,
+        consecutive_skips: g.consecutive_skips,
+      })),
+    nicks_to_assign: (context.nicks || [])
+      .filter(n => n.is_active && !n.active_job && n.status === 'healthy')
+      .map(n => ({
+        id: n.id,
+        username: n.username,
+        recent_group_actions: n.recent_group_actions || [],
+      })),
+  }
+
+  // Fire all three in parallel
+  const callSafe = async (task, input) => {
+    try {
+      const raw = await callHermes(task, JSON.stringify(input), 1500)
+      return extractJson(raw)
+    } catch (err) {
+      console.warn(`[ANTI-DETECT] ${task} failed: ${err.message}`)
+      return null
+    }
+  }
+
+  const [predictorResult, conductorResult, spreaderResult] = await Promise.all([
+    callSafe('checkpoint_predictor', predictorInput),
+    callSafe('traffic_conductor', conductorInput),
+    callSafe('social_graph_spreader', spreaderInput),
+  ])
+
+  // Auto-apply predictor's protective actions BEFORE orchestrator runs.
+  // This way pause_nick / decrease_budget take effect first, and the orchestrator
+  // sees the throttled state when it decides assign_job.
+  if (predictorResult) {
+    out.predictions = predictorResult.predictions || []
+    const actions = predictorResult.actions || []
+    for (const action of actions) {
+      if (!action.auto_apply) continue
+      let outcome = 'pending', detail = null, appliedAt = null
+      try {
+        const r = await executeAction(action, campaignId, context, supabase)
+        outcome = r.ok ? 'success' : 'failed'
+        detail = r.detail
+        appliedAt = new Date().toISOString()
+        if (r.ok) out.predictor_actions_applied++
+      } catch (err) {
+        outcome = 'failed'; detail = err.message
+      }
+      await supabase.from('hermes_decisions').insert({
+        campaign_id: campaignId,
+        orchestration_id: orchestrationId,
+        decision_type: 'checkpoint_predictor',
+        action_type: action.type,
+        target_id: action.target_id || null,
+        target_name: action.target_name || null,
+        priority: action.priority || null,
+        reason: action.reason || null,
+        context_summary: predictorResult.summary || null,
+        decision: action,
+        auto_apply: true,
+        auto_applied: outcome === 'success',
+        applied_at: appliedAt,
+        outcome,
+        outcome_detail: detail,
+      })
+    }
+    // Backfill risk_score onto context.nicks for downstream consumers
+    for (const p of out.predictions || []) {
+      const nick = (context.nicks || []).find(n => n.id === p.nick_id)
+      if (nick) nick.risk_score = p.risk_score
+    }
+  }
+
+  if (conductorResult) {
+    out.schedule = conductorResult.schedule || []
+    await supabase.from('hermes_decisions').insert({
+      campaign_id: campaignId,
+      orchestration_id: orchestrationId,
+      decision_type: 'traffic_conductor',
+      decision: conductorResult,
+      auto_apply: false,
+      auto_applied: false,
+      outcome: 'success',
+      context_summary: conductorResult.summary || null,
+    })
+  }
+
+  if (spreaderResult) {
+    out.allocations = spreaderResult.allocations || []
+    await supabase.from('hermes_decisions').insert({
+      campaign_id: campaignId,
+      orchestration_id: orchestrationId,
+      decision_type: 'social_graph_spreader',
+      decision: spreaderResult,
+      auto_apply: false,
+      auto_applied: false,
+      outcome: 'success',
+      context_summary: spreaderResult.summary || null,
+    })
+  }
+
+  console.log(`[ANTI-DETECT] campaign=${campaignId} autopilot=${out.autopilot_applied} kpi(b/n/s)=${out.kpi_bumps_applied || 0}/${out.kpi_nerfs_applied || 0}/${out.kpi_shortfalls || 0} predictor_actions=${out.predictor_actions_applied} schedule=${out.schedule?.length || 0} alloc=${out.allocations?.length || 0} (${Date.now() - started}ms)`)
+  return out
+}
+
 // ─── Main orchestration run ────────────────────────────────
 async function runOrchestration(campaignId, supabase) {
   const started = Date.now()
   const orchestrationId = randomUUID()
   const context = await buildOrchestrationContext(campaignId, supabase)
 
+  // Anti-detect pipeline: enrich context, run 3 sub-skills, auto-apply predictor.
+  // Toggleable via env var so we can disable quickly if a sub-skill misbehaves.
+  if (process.env.HERMES_ANTIDETECT_DISABLED !== '1') {
+    try {
+      const accIds = (context.nicks || []).map(n => n.id)
+      const signals = await buildAntiDetectSignals(accIds, supabase)
+      enrichContextWithAntiDetect(context, signals)
+      const preIntel = await runPreOrchestrationPipeline(context, campaignId, orchestrationId, supabase)
+      // Inject pre-intel results so the orchestrator skill prompt can read
+      // schedule + allocations when deciding assign_job timing/group.
+      context.checkpoint_predictions = preIntel.predictions
+      context.traffic_schedule = preIntel.schedule
+      context.graph_allocations = preIntel.allocations
+    } catch (err) {
+      console.warn(`[ORCHESTRATOR] anti-detect pipeline failed (proceeding without): ${err.message}`)
+    }
+  }
+
   let result
   try {
-    const raw = await callHermes('orchestrator', JSON.stringify(context), 1500)
+    // 3000 tokens for orchestrator: deepseek-reasoner (R1) burns ~1500 tokens
+    // on chain-of-thought before emitting JSON. With cap=1500 the JSON gets
+    // truncated mid-output → extractJson fails. Bump to 3000 to leave room.
+    const raw = await callHermes('orchestrator', JSON.stringify(context), 3000)
     result = extractJson(raw)
     if (!result) throw new Error('Hermes returned unparseable JSON')
   } catch (err) {
@@ -1165,4 +1779,10 @@ module.exports = {
   buildReviewContext,
   runDailyReview,
   applyReviewRecommendations,
+  // Anti-detect pipeline (exported for tests + ad-hoc invocation)
+  buildAntiDetectSignals,
+  enrichContextWithAntiDetect,
+  runPreOrchestrationPipeline,
+  runAutopilotPhase,
+  runKpiWatcherPhase,
 }
