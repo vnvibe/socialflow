@@ -1292,8 +1292,7 @@ function ActivityTab({ campaignId, campaign }) {
     const esc = v => {
       if (v == null) return ''
       const s = String(v).replace(/"/g, '""')
-      return /[",
-]/.test(s) ? `"${s}"` : s
+      return /[",\n]/.test(s) ? `"${s}"` : s
     }
     const header = ['Thời gian', 'Nick', 'Hành động', 'Target', 'Link', 'Nội dung', 'Status']
     const csvLines = [header.join(',')]
@@ -1308,11 +1307,10 @@ function ActivityTab({ campaignId, campaign }) {
         r.result_status,
       ].map(esc).join(','))
     }
-    const blob = new Blob(['﻿' + csvLines.join('
-')], { type: 'text/csv;charset=utf-8' })
+    const blob = new Blob(['﻿' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    const safeName = (campaign?.name || 'campaign').replace(/[^ws-]/g, '').trim().replace(/s+/g, '_')
+    const safeName = (campaign?.name || 'campaign').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_')
     a.href = url
     a.download = `campaign_activity_${safeName}_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
