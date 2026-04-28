@@ -1,7 +1,7 @@
 const { supabase } = require('../lib/supabase')
 const handlers = require('./handlers')
 const os = require('os')
-const { closeAll } = require('../browser/session-pool')
+const { closeAll, closeSession } = require('../browser/session-pool')
 const { classifyError, shouldDisableAccount, isRetryable, getRetryDelayMs } = require('../lib/error-classifier')
 const { postCooldown } = require('../lib/randomizer')
 const { getMinGapMs, checkWarmup } = require('../lib/hard-limits')
@@ -11,6 +11,26 @@ const { getMinGapMs, checkWarmup } = require('../lib/hard-limits')
 // is still used for secondary reads (accounts, campaigns, etc.) where a
 // single round-trip per cycle is acceptable.
 const apiClient = require('../lib/api-client')
+
+// ─── Per-nick slot cache (slot scheduler) ────────────────────────────
+// Map: account_id → { active, next, fetchedAt }
+// TTL 60s — slots span 15-30 min so 60s staleness is fine; reduces API hits
+// from one per poll cycle (every 15s) to one per minute per nick.
+const slotCache = new Map()
+const SLOT_CACHE_TTL = 60000
+const slotOutOfWindowLog = new Set() // suppress repeat "outside slot" logs per nick
+async function getSlotForAccount(accId) {
+  const cached = slotCache.get(accId)
+  if (cached && Date.now() - cached.fetchedAt < SLOT_CACHE_TTL) return cached
+  const fresh = await apiClient.getActiveSlot(accId)
+  if (!fresh) return cached || null  // API failure: fall back to last known
+  const entry = { ...fresh, fetchedAt: Date.now() }
+  slotCache.set(accId, entry)
+  return entry
+}
+function invalidateSlotCache(accId) {
+  if (accId) slotCache.delete(accId)
+}
 
 const AGENT_ID = process.env.AGENT_ID || `${os.hostname()}-${process.pid}`
 const AGENT_USER_ID = process.env.AGENT_USER_ID || null  // set when user logs in via Electron
@@ -367,9 +387,49 @@ async function _pollInner() {
         } catch {}
       }
 
-      // Per-nick active hours check (Asia/Ho_Chi_Minh timezone)
-      // 24/7 mode: active_hours_start=0 AND active_hours_end=24 → bypass entirely
+      // ─── PRIMARY GATE: per-nick slot scheduler ─────────────
+      // Slots are gen'd by Hermes-side cron based on personality (chronotype,
+      // preferred_windows, action_mix). Within each slot the nick can act;
+      // outside the window we yield the IP so other nicks (or no-one) can.
+      // This guarantees only ONE nick from this machine touches FB at a time
+      // AND each nick's daily activity looks like organic check-ins, not a
+      // bulk batch.
+      //
+      // Fallback: if API returns null (network blip), we let active_hours
+      // below decide so jobs don't stop entirely.
+      let __slot = null
       if (accId && !UTILITY_TYPES.includes(job.type)) {
+        const slotInfo = await getSlotForAccount(accId)
+        if (slotInfo) {
+          __slot = slotInfo.active || null
+          if (!__slot) {
+            const nextStart = slotInfo.next?.start_at
+            const logKey = `slot_oow:${accId}`
+            if (!slotOutOfWindowLog.has(logKey)) {
+              slotOutOfWindowLog.add(logKey)
+              const remainMin = nextStart
+                ? Math.max(0, Math.round((new Date(nextStart).getTime() - Date.now()) / 60000))
+                : null
+              const next = remainMin != null ? `next slot in ${remainMin}min` : 'no upcoming slot today'
+              console.log(`[POLLER] Nick ${accId.slice(0,8)} outside slot window — ${next} (suppressing further logs)`)
+            }
+            continue
+          } else {
+            // Inside a slot — clear suppression flag so re-entry logs again
+            slotOutOfWindowLog.delete(`slot_oow:${accId}`)
+            // Per-action quota in this slot (other action types still allowed).
+            if (actionType) {
+              const target = (__slot.target_actions || {})[actionType]
+              const done = (__slot.done_actions || {})[actionType] || 0
+              if (target > 0 && done >= target) continue
+            }
+          }
+        }
+      }
+
+      // Per-nick active hours check (Asia/Ho_Chi_Minh timezone) — fallback
+      // when slot info is unavailable. 24/7 mode: start=0 AND end=24 → bypass.
+      if (accId && !__slot && !UTILITY_TYPES.includes(job.type)) {
         const cached = accountStatusCache.get(accId)
         if (cached) {
           const startH = cached.active_hours_start ?? 7
@@ -579,11 +639,48 @@ async function _pollInner() {
         nickHourlyActions.set(accId, hourly)
       }
 
+      // Capture the slot at claim time so the .finally hook can credit
+      // done_actions back to it. __slot is the current active slot (or null
+      // if API down → fallback path). Slot.id stays valid even if status
+      // flips later because slot writes are idempotent on (id, action).
+      const __claimedSlot = __slot
+
       console.log(`[JOB] Claimed ${job.type} (${job.id}) [${pool.interactionNicks.size}/${MAX_CONCURRENT} browser${pool.httpOnlyNicks.size ? ` +${pool.httpOnlyNicks.size} http-only` : ''}]`)
 
       // Fire & forget — don't await, allows concurrent execution
-      executeJob(job).finally(() => {
+      executeJob(job).finally(async () => {
         pool.release(accId, job.id)
+
+        // ─── Slot accounting ──────────────────────────────
+        // Map handler action → slot bucket. Only successful, recognized
+        // action types tick the slot. Skipped/failed jobs do not (job
+        // status is set inside executeJob, not visible here, so we tick
+        // optimistically — overcounting by a missed retry is acceptable).
+        const SLOT_ACTION_MAP_LOCAL = {
+          comment: 'comment',
+          nurture_react: 'react',
+          friend_request: 'friend_request',
+          join_group: 'join_group',
+        }
+        if (__claimedSlot?.id && actionType && SLOT_ACTION_MAP_LOCAL[actionType]) {
+          try {
+            const updated = await apiClient.recordSlotAction(
+              __claimedSlot.id,
+              SLOT_ACTION_MAP_LOCAL[actionType],
+              1
+            )
+            // Slot just hit its full quota → close browser, wait next slot.
+            if (updated?.slot?.status === 'done') {
+              console.log(`[POLLER] Slot done for ${accId.slice(0,8)} (${__claimedSlot.id.slice(0,8)}) — closing browser, waiting next slot`)
+              try { await closeSession(accId) } catch {}
+              invalidateSlotCache(accId)
+            }
+          } catch (err) {
+            console.warn(`[POLLER] recordSlotAction failed: ${err.message}`)
+          }
+        }
+        // Always invalidate the cache once a job ran — done_actions changed.
+        if (accId) invalidateSlotCache(accId)
 
         // Update cooldown with actual value (overwrite pessimistic)
         if (isPostJob && accId) {
@@ -825,6 +922,11 @@ async function executeJob(job) {
       console.log(`[JOB] Account ${job.payload.account_id} marked as ${newStatus}`)
       // Invalidate status cache immediately
       accountStatusCache.delete(job.payload.account_id)
+      // Close the dead browser so the next poll doesn't reuse it. The nick
+      // is now is_active=false so a fresh getSession would be skipped anyway,
+      // but an idle session left over from before the failure would linger
+      // for IDLE_TIMEOUT_MS. Tear it down right now.
+      try { await closeSession(job.payload.account_id) } catch {}
 
       // Fire-and-forget cookie-death postmortem — Hermes reads the last 2h of
       // activity log + budget snapshot and stores a `checkpoint_pattern`

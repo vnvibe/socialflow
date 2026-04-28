@@ -190,6 +190,39 @@ async function heartbeat({ agentId = AGENT_ID, hostname, platform, userId, stats
 }
 
 /**
+ * GET /agent-jobs/active-slot — returns current active slot + next slot
+ * for an account. Poller uses this to gate job claiming: if active=null,
+ * the nick is outside its scheduled window or in IP cool-down → skip.
+ *
+ * Response: { active: slot|null, next: slot|null, now: iso }
+ */
+async function getActiveSlot(accountId) {
+  try {
+    const { data } = await client.get('/active-slot', { params: { account_id: accountId } })
+    return data
+  } catch (err) {
+    if (err.response?.status === 404) return { active: null, next: null }
+    console.warn(`[API-CLIENT] getActiveSlot failed for ${accountId?.slice(0,8)}: ${err.message}`)
+    return null // null → caller treats as "unknown, allow as fallback"
+  }
+}
+
+/**
+ * POST /agent-jobs/slot-action — increment done_actions for a slot.
+ * Called after each successful user-facing action so the slot can flip
+ * to status=done when all action targets are met.
+ */
+async function recordSlotAction(slotId, actionType, delta = 1) {
+  try {
+    const { data } = await client.post('/slot-action', { slot_id: slotId, action_type: actionType, delta })
+    return data
+  } catch (err) {
+    console.warn(`[API-CLIENT] recordSlotAction failed: ${err.message}`)
+    return null
+  }
+}
+
+/**
  * GET /agent/config — runtime knobs (rest/session/timeout/viewport)
  * controlled from Hermes settings UI. Uses a separate axios instance
  * because the route lives outside /agent-jobs.
@@ -226,4 +259,6 @@ module.exports = {
   getExcludedUserIds,
   heartbeat,
   getRuntimeConfig,
+  getActiveSlot,
+  recordSlotAction,
 }

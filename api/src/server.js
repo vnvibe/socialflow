@@ -3,6 +3,7 @@ const Fastify = require('fastify')
 const { supabase } = require('./lib/supabase')
 const { initScheduler } = require('./services/campaign-scheduler')
 const { initNurtureScheduler } = require('./services/nurture-scheduler')
+const { initSlotScheduler } = require('./services/slot-scheduler')
 
 const app = Fastify({ logger: true })
 
@@ -85,6 +86,7 @@ const start = async () => {
     // Start schedulers
     initScheduler()
     initNurtureScheduler()
+    initSlotScheduler()
 
     console.log(`SocialFlow API running on port ${port}`)
   } catch (err) {
