@@ -21,28 +21,32 @@ const cron = require('node-cron')
 const { supabase: _sbFromLib } = require('../lib/supabase')
 
 // ─── Defaults applied when nick has no row in nick_personality ──────
+// Tuned for ~10 nicks/machine. Math: 10 × 4 bursts × (~18min session + ~10min
+// IP gap) ≈ 18.7h per day → fits inside 06:00-24:00 active band. If FB gets
+// stricter, lengthen IP_GAP and/or drop bursts_per_day to 3.
 const DEFAULT_PERSONALITY = {
   chronotype: 'spread',
   preferred_windows: [
-    { start_h: 7, end_h: 11, weight: 1 },
-    { start_h: 13, end_h: 17, weight: 1 },
-    { start_h: 19, end_h: 22, weight: 1.2 },
+    { start_h: 6, end_h: 11, weight: 1 },
+    { start_h: 12, end_h: 17, weight: 1.1 },
+    { start_h: 18, end_h: 23, weight: 1.2 },
   ],
-  bursts_per_day: 3,
-  session_min_minutes: 15,
-  session_max_minutes: 30,
-  gap_min_minutes: 90,
-  gap_max_minutes: 240,
-  skip_day_chance: 0.05,
-  daily_shift_minutes: 60,
+  bursts_per_day: 4,
+  session_min_minutes: 14,
+  session_max_minutes: 22,
+  gap_min_minutes: 60,
+  gap_max_minutes: 180,
+  skip_day_chance: 0.03,
+  daily_shift_minutes: 45,
   action_mix: { react: 0.5, comment: 0.25, share: 0.05, scroll_only: 0.2 },
   budget_volatility: 1.0,
 }
 
 // IP cool-down between any two bursts on the same agent (any nick → any nick).
-// Random in this range so the gap looks organic.
-const IP_GAP_MIN_SEC = 10 * 60
-const IP_GAP_MAX_SEC = 25 * 60
+// Random in this range so the gap looks organic. Tightened from 10-25 to 7-15
+// to fit 10 nicks × 4 bursts in the active band.
+const IP_GAP_MIN_SEC = 7 * 60
+const IP_GAP_MAX_SEC = 15 * 60
 
 const VN_OFFSET_MS = 7 * 3600 * 1000
 
