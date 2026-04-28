@@ -199,7 +199,8 @@ const JOB_ACTION_MAP = {
   campaign_send_friend_request: 'friend_request',
   campaign_scan_members: 'scan', campaign_group_monitor: 'scan',
   campaign_opportunity_react: 'comment', comment_post: 'comment',
-  nurture_feed: 'nurture_react',
+  campaign_nurture: 'comment', campaign_interact_profile: 'comment',
+  nurture_feed: 'nurture_react', join_group: 'join_group',
 }
 
 let pollFails = 0
