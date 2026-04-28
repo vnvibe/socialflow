@@ -20,6 +20,16 @@ const providerList = [
     ]
   },
   {
+    key: 'kimi', name: 'Kimi (Moonshot)', color: 'bg-cyan-500',
+    models: [
+      { value: 'kimi-k2-0711-preview', label: 'Kimi K2 Preview' },
+      { value: 'kimi-k2-turbo-preview', label: 'Kimi K2 Turbo' },
+      { value: 'moonshot-v1-128k', label: 'Moonshot V1 128k' },
+      { value: 'moonshot-v1-32k', label: 'Moonshot V1 32k' },
+      { value: 'moonshot-v1-8k', label: 'Moonshot V1 8k' },
+    ]
+  },
+  {
     key: 'anthropic', name: 'Anthropic', color: 'bg-orange-500',
     models: [
       { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
