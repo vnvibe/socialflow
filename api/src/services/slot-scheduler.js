@@ -235,7 +235,7 @@ async function generateSlotsForDate(vnDate, opts = {}) {
   // 1) Fetch all eligible accounts (active, not checkpoint/disabled).
   const { data: accounts, error: accErr } = await supabase
     .from('accounts')
-    .select('id, user_id, status, is_active')
+    .select('id, owner_id, status, is_active')
     .eq('is_active', true)
     .in('status', ['healthy', 'active'])
   if (accErr) throw accErr
@@ -244,8 +244,8 @@ async function generateSlotsForDate(vnDate, opts = {}) {
     return { generated: 0, skipped: 0 }
   }
 
-  // 2) For each user_id, look up profiles.preferred_executor_id → agent_id.
-  const userIds = [...new Set(accounts.map(a => a.user_id).filter(Boolean))]
+  // 2) For each owner_id, look up profiles.preferred_executor_id → agent_id.
+  const userIds = [...new Set(accounts.map(a => a.owner_id).filter(Boolean))]
   const agentByUser = new Map()
   if (userIds.length) {
     const { data: profs } = await supabase
@@ -289,7 +289,7 @@ async function generateSlotsForDate(vnDate, opts = {}) {
     if (skip) {
       skippedRows.push({
         account_id: acc.id,
-        agent_id: agentByUser.get(acc.user_id) || null,
+        agent_id: agentByUser.get(acc.owner_id) || null,
         date: vnDate,
         slot_index: 0,
         start_at: vnToUtc(vnDate, 12, 0).toISOString(),
@@ -300,12 +300,12 @@ async function generateSlotsForDate(vnDate, opts = {}) {
       continue
     }
     const bursts = generateRawBursts(p, vnDate)
-    const agentId = agentByUser.get(acc.user_id) || '__none__'
+    const agentId = agentByUser.get(acc.owner_id) || '__none__'
     if (!slotsByAgent.has(agentId)) slotsByAgent.set(agentId, [])
     for (const b of bursts) {
       slotsByAgent.get(agentId).push({
         accountId: acc.id,
-        agentId: agentByUser.get(acc.user_id) || null,
+        agentId: agentByUser.get(acc.owner_id) || null,
         startAt: b.startAt,
         endAt: b.endAt,
         personality: p,
