@@ -1,46 +1,25 @@
 const { supabase } = require('../lib/supabase')
+const { getApiClient } = require('../lib/api-client')
 const handlers = require('./handlers')
 const os = require('os')
-const { closeAll, closeSession } = require('../browser/session-pool')
+const { closeAll } = require('../browser/session-pool')
 const { classifyError, shouldDisableAccount, isRetryable, getRetryDelayMs } = require('../lib/error-classifier')
 const { postCooldown } = require('../lib/randomizer')
 const { getMinGapMs, checkWarmup } = require('../lib/hard-limits')
-// Audit 2026-04-14: job lifecycle (GET pending, claim, status updates, fail,
-// cancel-inactive, failures log) moved to REST API. Direct pg access from
-// local Windows across the internet was too slow + flaky. supabase client
-// is still used for secondary reads (accounts, campaigns, etc.) where a
-// single round-trip per cycle is acceptable.
-const apiClient = require('../lib/api-client')
 
-// ─── Per-nick slot cache (slot scheduler) ────────────────────────────
-// Map: account_id → { active, next, fetchedAt }
-// TTL 60s — slots span 15-30 min so 60s staleness is fine; reduces API hits
-// from one per poll cycle (every 15s) to one per minute per nick.
-const slotCache = new Map()
-const SLOT_CACHE_TTL = 60000
-const slotOutOfWindowLog = new Set() // suppress repeat "outside slot" logs per nick
-async function getSlotForAccount(accId) {
-  const cached = slotCache.get(accId)
-  if (cached && Date.now() - cached.fetchedAt < SLOT_CACHE_TTL) return cached
-  const fresh = await apiClient.getActiveSlot(accId)
-  if (!fresh) return cached || null  // API failure: fall back to last known
-  const entry = { ...fresh, fetchedAt: Date.now() }
-  slotCache.set(accId, entry)
-  return entry
-}
-function invalidateSlotCache(accId) {
-  if (accId) slotCache.delete(accId)
-}
+// Use REST API for job lifecycle when AGENT_SECRET / AGENT_SECRET_KEY is available.
+// config.js (embedded in exe) uses AGENT_SECRET_KEY — check both.
+let _pollerCfg = {}
+try { _pollerCfg = require('../lib/config') } catch {}
+const useApi = () => !!(process.env.AGENT_SECRET || process.env.AGENT_SECRET_KEY || _pollerCfg.AGENT_SECRET_KEY)
+const api = getApiClient()
 
 const AGENT_ID = process.env.AGENT_ID || `${os.hostname()}-${process.pid}`
 const AGENT_USER_ID = process.env.AGENT_USER_ID || null  // set when user logs in via Electron
-const POLL_MS = 15000 // Reduced polling — Realtime handles instant pickup, polling is backup only
+const POLL_MS = process.env.DATABASE_URL ? 5000 : 15000 // Self-hosted: 5s (no Realtime), Cloud: 15s (Realtime handles instant)
 const MEM_PER_NICK_MB = 350 // ~350MB per Chromium instance
 const MIN_CONCURRENT = 1
-// 2026-04-26: hardcap = 1. Mỗi máy chỉ MỘT nick tương tác trong 1 phiên — tránh
-// FB cluster detection (2-3 session cùng IP/device cùng lúc = signal mạnh).
-// Override qua env MAX_CONCURRENT chỉ khi infra có 1 proxy riêng/nick.
-const MAX_CONCURRENT_CAP = 1
+const MAX_CONCURRENT_CAP = 2 // Max 2 browser cùng lúc — match MAX_SESSIONS in session-pool
 
 function calcMaxConcurrent() {
   const override = parseInt(process.env.MAX_CONCURRENT)
@@ -167,43 +146,22 @@ const groupVisitLog = new Map()        // fb_group_id → [{ nickId, ts }]
 const BUDGET_CACHE_TTL = 60000         // 1 min
 const STATUS_CACHE_TTL = 60000         // 1 min
 const MAX_HOURLY_ACTIONS = 50          // cumulative across all types
-// Randomized ranges — avoid fixed patterns that FB can detect.
-// Windows come from the Hermes runtime config (see agentRuntime below) so
-// the admin can tune them from the Hermes Settings UI. The initial values
-// below are defaults; fetchAndApplyRuntime() refreshes them every 5 min.
+// Randomized ranges — avoid fixed patterns that FB can detect
 const randBetween = (min, max) => Math.floor(min + Math.random() * (max - min))
-const agentRuntime = {
-  rest_min_minutes: 20,
-  rest_max_minutes: 60,
-  session_min_minutes: 25,
-  session_max_minutes: 45,
-}
-const randSessionMax = () => randBetween(agentRuntime.session_min_minutes, agentRuntime.session_max_minutes) * 60 * 1000
-const randRestMs = () => randBetween(agentRuntime.rest_min_minutes, agentRuntime.rest_max_minutes) * 60 * 1000
-// Smart stagger: if a nick has already rested this long AND another healthy
-// nick is also currently resting, short-circuit the rest so at least one nick
-// stays working. Prevents the "both rest, agent does nothing" pattern that
-// kills throughput with a small nick pool.
-const MIN_REST_BEFORE_STAGGER_EARLY_RELEASE = 15 * 60 * 1000   // 15 min floor
+const randSessionMax = () => randBetween(25, 45) * 60 * 1000   // 25-45 min
+const randRestMs = () => randBetween(45, 120) * 60 * 1000      // 45-120 min
 
-// Only map jobs with a SINGLE primary action. Multi-action jobs (nurture,
-// interact_profile) do their own per-action budget checks inside the
-// handler — we don't want the poller-level pre-claim check to reject
-// the whole job just because ONE of its sub-actions is full.
-// campaign_nurture: does comment+like+share+visit → handler skips whichever
-//                   is full, still executes the rest.
-// campaign_interact_profile: does like+comment on target profile posts.
 const JOB_ACTION_MAP = {
   post_page: 'post', post_page_graph: 'post', post_group: 'post', post_profile: 'post',
-  campaign_post: 'post', campaign_discover_groups: 'join_group',
-  campaign_send_friend_request: 'friend_request',
+  campaign_post: 'post', campaign_nurture: 'like', campaign_discover_groups: 'join_group',
+  campaign_send_friend_request: 'friend_request', campaign_interact_profile: 'like',
   campaign_scan_members: 'scan', campaign_group_monitor: 'scan',
   campaign_opportunity_react: 'comment', comment_post: 'comment',
-  campaign_nurture: 'comment', campaign_interact_profile: 'comment',
-  nurture_feed: 'nurture_react', join_group: 'join_group',
+  nurture_feed: 'nurture_react',
 }
 
 let pollFails = 0
+let poller_idleAssignWarned = false
 
 // Cache user preferences to avoid querying on every poll
 let preferenceCache = { data: [], fetchedAt: 0 }
@@ -213,76 +171,71 @@ async function getExcludedUserIds() {
   const now = Date.now()
   if (now - preferenceCache.fetchedAt < PREF_CACHE_TTL) return preferenceCache.data
 
-  try {
-    const ids = await apiClient.getExcludedUserIds(AGENT_ID)
-    preferenceCache = { data: ids || [], fetchedAt: now }
-  } catch (err) {
-    console.warn(`[POLLER] getExcludedUserIds failed: ${err.message}`)
-    // Return cached data on failure; empty array if no cache yet
-  }
+  // Users who have a preferred_executor_id that is NOT this agent → exclude them
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, preferred_executor_id')
+    .not('preferred_executor_id', 'is', null)
+    .neq('preferred_executor_id', AGENT_ID)
+
+  preferenceCache = { data: (profiles || []).map(p => p.id), fetchedAt: now }
   return preferenceCache.data
 }
 
-// Audit 2026-04-12: re-entrancy guard. Realtime can fire N events at once
-// (e.g. 5 new campaign_nurture rows), each triggering poll(). Without a
-// guard, all N polls read the same pending job, all N UPDATE with
-// WHERE status='pending', Supabase returns error:null for all (0-row
-// update is NOT an error), and the job executes N times in parallel.
 let _polling = false
+let _lastPollAt = 0
+
+let _pollCount = 0
 async function poll() {
-  if (_polling) return  // another poll() is already running
-  _polling = true
-  try { await _pollInner() } finally { _polling = false }
-}
-async function _pollInner() {
+  if (_polling) return  // prevent concurrent polls (realtime + interval race)
   if (pool.isBusy()) return  // all interaction slots taken
 
+  _polling = true
+  _lastPollAt = Date.now()
+  _pollCount++
+  // Log every 12th poll (~60s) to confirm poller is alive
+  if (_pollCount <= 3 || _pollCount % 12 === 0) {
+    console.log(`[POLL #${_pollCount}] checking... (slots: ${MAX_CONCURRENT - pool.interactionNicks.size}, nicks running: ${pool.interactionNicks.size})`)
+  }
   try {
     const slots = MAX_CONCURRENT - pool.interactionNicks.size
+    let jobs, pollError
 
-    // Fetch via REST API (moved off direct pg for latency + reliability).
-    // Server-side does ORDER BY priority ASC, scheduled_at ASC, LIMIT slots.
-    let jobs = []
-    try {
+    if (useApi()) {
+      // ── REST API mode: job polling via HTTP ──
+      try {
+        jobs = await api.getPendingJobs(slots)
+      } catch (err) {
+        pollError = err
+        console.error(`[POLL] API error: ${err.message}`)
+      }
+    } else {
+      // ── Direct DB mode (legacy fallback) ──
+      let query = supabase
+        .from('jobs')
+        .select('*')
+        .eq('status', 'pending')
+        .lte('scheduled_at', new Date().toISOString())
+        .order('priority', { ascending: true })
+        .order('scheduled_at', { ascending: true })
+        .limit(slots)
+
       if (AGENT_USER_ID) {
-        jobs = await apiClient.getPendingJobs({ slots, userId: AGENT_USER_ID })
+        query = query.eq('created_by', AGENT_USER_ID)
       } else {
         const excludedUserIds = await getExcludedUserIds()
-        jobs = await apiClient.getPendingJobs({ slots, excludeUserIds: excludedUserIds })
-      }
-    } catch (err) {
-      pollFails++
-      if (pollFails === 1 || pollFails % 4 === 0) {
-        console.error(`[POLL ERROR] /agent-jobs/pending ${err.message} (failed ${pollFails}x)`)
-      }
-      return
-    }
-
-    // Audit 2026-04-21: the global nurture-gate was starving nicks who had
-    // ONLY check_group_membership pending while another nick (Thúy) had
-    // nurture jobs piling up that produced 0 results every run. Diệu with
-    // 162 membership pending never got to run because of Thúy's 8 nurture.
-    // Make the gate PER-NICK: defer a nick's membership only when that
-    // SAME nick has nurture/FR pending. Other nicks proceed normally.
-    const nurturePendingByAcc = new Map()
-    const needsNurtureGate = (jobs || []).some(j => j.type === 'check_group_membership')
-    if (needsNurtureGate) {
-      // Collect all account_ids that appear in the batch (cheap)
-      const accIds = [...new Set((jobs || []).map(j => j.payload?.account_id).filter(Boolean))]
-      if (accIds.length > 0) {
-        const { data: pendRows } = await supabase
-          .from('jobs')
-          .select('payload')
-          .in('type', ['campaign_nurture', 'campaign_send_friend_request'])
-          .eq('status', 'pending')
-          .lte('scheduled_at', new Date().toISOString())
-        for (const row of pendRows || []) {
-          const aid = row.payload?.account_id
-          if (aid) nurturePendingByAcc.set(aid, (nurturePendingByAcc.get(aid) || 0) + 1)
+        if (excludedUserIds.length > 0) {
+          query = query.not('created_by', 'in', `(${excludedUserIds.join(',')})`)
         }
       }
-    }
 
+      const result = await query
+      jobs = result.data
+      if (result.error) {
+        pollError = result.error
+        console.error(`[POLL] Query error: ${result.error.message}`)
+      }
+    }
     if (!jobs?.length) {
       // No pending jobs — BUT check if any jobs are currently running before closing browsers
       const hasRunningJobs = pool.runningJobs && pool.runningJobs.size > 0
@@ -302,15 +255,6 @@ async function _pollInner() {
     for (const job of jobs) {
       const accId = job.payload?.account_id
       const isPostJob = POST_TYPES.includes(job.type)
-
-      // Per-nick defer: only hold membership when THIS nick has nurture/FR pending.
-      if (job.type === 'check_group_membership') {
-        const myPend = (accId && nurturePendingByAcc.get(accId)) || 0
-        if (myPend > 0) {
-          console.log(`[POLLER] Defer check_group_membership for ${accId?.slice(0,8)}: ${myPend} of its own nurture/FR pending first`)
-          continue
-        }
-      }
 
       // 1 nick = 1 browser = 1 job tại 1 thời điểm
       // Job sau ĐỢI job trước xong — không skip, không cancel, chỉ defer
@@ -343,16 +287,24 @@ async function _pollInner() {
       // Phase 15 fix: diagnostic jobs (check_health, check_group_membership,
       // fetch_source_cookie) MUST bypass this gate — they're the mechanism to
       // RECOVER an inactive nick. Only cancel user-facing interaction jobs.
+      // Only check_health bypasses — it's the ONLY job that should touch
+      // an inactive account (to verify if cookie was refreshed by user).
+      // fetch_source_cookie, warmup_browse etc. must NOT run on expired/
+      // checkpoint accounts — opening a browser without valid session is
+      // suspicious behavior that FB can flag.
       const BYPASS_ACTIVE_CHECK = new Set([
-        'check_health', 'check_engagement', 'check_group_membership',
-        'fetch_source_cookie', 'warmup_browse',
+        'check_health',
       ])
       if (accId && !BYPASS_ACTIVE_CHECK.has(job.type)) {
         const statusOk = await checkAccountActive(accId)
         if (!statusOk) {
           // Auto-cancel job for inactive nick — prevent infinite skip loop
           try {
-            try { await apiClient.cancelInactiveJob({ jobId: job.id, accountId: accId }) } catch {}
+            if (useApi()) {
+              await api.cancelInactiveJob(job.id, accId)
+            } else {
+              await supabase.from('jobs').update({ status: 'cancelled', error_message: 'account_not_active' }).eq('id', job.id).eq('status', 'pending')
+            }
           } catch {}
           console.log(`[POLLER] Nick ${accId.slice(0,8)} not active — CANCELLED ${job.type} job ${job.id}`)
           continue
@@ -367,7 +319,7 @@ async function _pollInner() {
           if (warning.risk_level === 'critical') {
             // Critical: pause nick, cancel job
             try {
-              try { await apiClient.updateJobStatus(job.id, { status: 'cancelled', error_message: 'risk_level_critical' }) } catch {}
+              await supabase.from('jobs').update({ status: 'cancelled', error_message: 'risk_level_critical' }).eq('id', job.id).eq('status', 'pending')
               await supabase.from('accounts').update({ status: 'at_risk' }).eq('id', accId)
               await supabase.from('notifications').insert({
                 user_id: job.created_by || job.payload?.owner_id,
@@ -388,49 +340,9 @@ async function _pollInner() {
         } catch {}
       }
 
-      // ─── PRIMARY GATE: per-nick slot scheduler ─────────────
-      // Slots are gen'd by Hermes-side cron based on personality (chronotype,
-      // preferred_windows, action_mix). Within each slot the nick can act;
-      // outside the window we yield the IP so other nicks (or no-one) can.
-      // This guarantees only ONE nick from this machine touches FB at a time
-      // AND each nick's daily activity looks like organic check-ins, not a
-      // bulk batch.
-      //
-      // Fallback: if API returns null (network blip), we let active_hours
-      // below decide so jobs don't stop entirely.
-      let __slot = null
+      // Per-nick active hours check (Asia/Ho_Chi_Minh timezone)
+      // 24/7 mode: active_hours_start=0 AND active_hours_end=24 → bypass entirely
       if (accId && !UTILITY_TYPES.includes(job.type)) {
-        const slotInfo = await getSlotForAccount(accId)
-        if (slotInfo) {
-          __slot = slotInfo.active || null
-          if (!__slot) {
-            const nextStart = slotInfo.next?.start_at
-            const logKey = `slot_oow:${accId}`
-            if (!slotOutOfWindowLog.has(logKey)) {
-              slotOutOfWindowLog.add(logKey)
-              const remainMin = nextStart
-                ? Math.max(0, Math.round((new Date(nextStart).getTime() - Date.now()) / 60000))
-                : null
-              const next = remainMin != null ? `next slot in ${remainMin}min` : 'no upcoming slot today'
-              console.log(`[POLLER] Nick ${accId.slice(0,8)} outside slot window — ${next} (suppressing further logs)`)
-            }
-            continue
-          } else {
-            // Inside a slot — clear suppression flag so re-entry logs again
-            slotOutOfWindowLog.delete(`slot_oow:${accId}`)
-            // Per-action quota in this slot (other action types still allowed).
-            if (actionType) {
-              const target = (__slot.target_actions || {})[actionType]
-              const done = (__slot.done_actions || {})[actionType] || 0
-              if (target > 0 && done >= target) continue
-            }
-          }
-        }
-      }
-
-      // Per-nick active hours check (Asia/Ho_Chi_Minh timezone) — fallback
-      // when slot info is unavailable. 24/7 mode: start=0 AND end=24 → bypass.
-      if (accId && !__slot && !UTILITY_TYPES.includes(job.type)) {
         const cached = accountStatusCache.get(accId)
         if (cached) {
           const startH = cached.active_hours_start ?? 7
@@ -549,32 +461,16 @@ async function _pollInner() {
         }
       }
 
-      // Per-nick rest period (20-60min random gap).
-      // Smart stagger: if another resting nick exists AND this nick has
-      // already rested >= 15 min, release early. Ensures with 2-3 healthy
-      // nicks we never have ALL of them in rest simultaneously.
+      // Per-nick rest period (45-120min random gap)
       if (accId) {
         const rest = nickRestUntil.get(accId)
         if (rest && Date.now() < rest.until) {
-          const restedMs = rest.durationMin * 60000 - (rest.until - Date.now())
-          // Check other nicks also resting
-          let othersResting = 0
-          for (const [otherId, otherRest] of nickRestUntil.entries()) {
-            if (otherId !== accId && otherRest.until > Date.now()) othersResting++
+          const remainMin = Math.round((rest.until - Date.now()) / 60000)
+          if (!nickSessionStart.has(`${accId}_restlog`) || Date.now() - nickSessionStart.get(`${accId}_restlog`) > 300000) {
+            console.log(`[POLLER] Nick ${accId.slice(0,8)} resting (${remainMin}/${rest.durationMin}min)`)
+            nickSessionStart.set(`${accId}_restlog`, Date.now())
           }
-          const canStaggerEarly = othersResting > 0 && restedMs >= MIN_REST_BEFORE_STAGGER_EARLY_RELEASE
-          if (canStaggerEarly) {
-            console.log(`[POLLER] Nick ${accId.slice(0,8)} early-release from rest (${Math.round(restedMs/60000)}min rested, ${othersResting} other nick${othersResting > 1 ? 's' : ''} also resting)`)
-            nickRestUntil.delete(accId)
-            // fall through to the rest of the per-nick gates
-          } else {
-            const remainMin = Math.round((rest.until - Date.now()) / 60000)
-            if (!nickSessionStart.has(`${accId}_restlog`) || Date.now() - nickSessionStart.get(`${accId}_restlog`) > 300000) {
-              console.log(`[POLLER] Nick ${accId.slice(0,8)} resting (${remainMin}/${rest.durationMin}min)`)
-              nickSessionStart.set(`${accId}_restlog`, Date.now())
-            }
-            continue
-          }
+          continue
         }
         if (rest && Date.now() >= rest.until) nickRestUntil.delete(accId)
       }
@@ -603,17 +499,26 @@ async function _pollInner() {
         }
       }
 
-      // Claim via REST — server returns 409 if already claimed by another
-      // poll cycle / agent. API does the atomic UPDATE WHERE status='pending'
-      // and checks rowCount, so the duplicate-execution race from the old
-      // supabase.from('jobs').update() path is gone.
-      let claimOk = null
-      try {
-        claimOk = await apiClient.claimJob(job.id, AGENT_ID)
-      } catch (err) {
-        console.warn(`[JOB] Claim ${job.id} threw: ${err.message}`)
+      // Claim job (atomic — only succeeds if still pending)
+      let claimOk = false
+      if (useApi()) {
+        try {
+          await api.claimJob(job.id)
+          claimOk = true
+        } catch (err) {
+          if (err.status !== 409) console.error(`[POLL] Claim API error: ${err.message}`)
+        }
+      } else {
+        const { data: claimed, error } = await supabase.from('jobs')
+          .update({ status: 'claimed', agent_id: AGENT_ID, started_at: new Date() })
+          .eq('id', job.id)
+          .eq('status', 'pending')
+          .select('id')
+        claimOk = !error && claimed?.length > 0
       }
+
       if (!claimOk) {
+        // Another agent/poll claimed it — release pool slot
         if (accId) pool.release(accId, job.id)
         continue
       }
@@ -640,48 +545,11 @@ async function _pollInner() {
         nickHourlyActions.set(accId, hourly)
       }
 
-      // Capture the slot at claim time so the .finally hook can credit
-      // done_actions back to it. __slot is the current active slot (or null
-      // if API down → fallback path). Slot.id stays valid even if status
-      // flips later because slot writes are idempotent on (id, action).
-      const __claimedSlot = __slot
-
       console.log(`[JOB] Claimed ${job.type} (${job.id}) [${pool.interactionNicks.size}/${MAX_CONCURRENT} browser${pool.httpOnlyNicks.size ? ` +${pool.httpOnlyNicks.size} http-only` : ''}]`)
 
       // Fire & forget — don't await, allows concurrent execution
-      executeJob(job).finally(async () => {
+      executeJob(job).finally(() => {
         pool.release(accId, job.id)
-
-        // ─── Slot accounting ──────────────────────────────
-        // Map handler action → slot bucket. Only successful, recognized
-        // action types tick the slot. Skipped/failed jobs do not (job
-        // status is set inside executeJob, not visible here, so we tick
-        // optimistically — overcounting by a missed retry is acceptable).
-        const SLOT_ACTION_MAP_LOCAL = {
-          comment: 'comment',
-          nurture_react: 'react',
-          friend_request: 'friend_request',
-          join_group: 'join_group',
-        }
-        if (__claimedSlot?.id && actionType && SLOT_ACTION_MAP_LOCAL[actionType]) {
-          try {
-            const updated = await apiClient.recordSlotAction(
-              __claimedSlot.id,
-              SLOT_ACTION_MAP_LOCAL[actionType],
-              1
-            )
-            // Slot just hit its full quota → close browser, wait next slot.
-            if (updated?.slot?.status === 'done') {
-              console.log(`[POLLER] Slot done for ${accId.slice(0,8)} (${__claimedSlot.id.slice(0,8)}) — closing browser, waiting next slot`)
-              try { await closeSession(accId) } catch {}
-              invalidateSlotCache(accId)
-            }
-          } catch (err) {
-            console.warn(`[POLLER] recordSlotAction failed: ${err.message}`)
-          }
-        }
-        // Always invalidate the cache once a job ran — done_actions changed.
-        if (accId) invalidateSlotCache(accId)
 
         // Update cooldown with actual value (overwrite pessimistic)
         if (isPostJob && accId) {
@@ -738,6 +606,8 @@ async function _pollInner() {
       console.error(`[POLL ERROR] ${err.message} (failed ${pollFails}x, retrying every ${POLL_MS / 1000}s)`)
     }
     return
+  } finally {
+    _polling = false
   }
   if (pollFails > 0) {
     console.log(`[POLLER] Reconnected after ${pollFails} poll failures`)
@@ -810,10 +680,14 @@ async function executeJob(job) {
     if (err.code === 'SESSION_POOL_BUSY' || err.message === 'SESSION_POOL_BUSY') {
       console.log(`[JOB] Session pool busy, requeue ${handlerKey} (${job.id}) for retry in 30s`)
       try {
-        await apiClient.updateJobStatus(job.id, {
-          status: 'pending',
-          scheduled_at: new Date(Date.now() + 30000).toISOString(),
-        })
+        if (useApi()) {
+          await api.updateJobStatus(job.id, 'pending', { scheduled_at: new Date(Date.now() + 30000).toISOString() })
+        } else {
+          await supabase.from('jobs').update({
+            status: 'pending',
+            scheduled_at: new Date(Date.now() + 30000).toISOString(),
+          }).eq('id', job.id)
+        }
       } catch {}
       return // skip the rest of the error handling — not a real failure
     }
@@ -839,117 +713,82 @@ async function executeJob(job) {
       }
       // Requeue with 60s delay — don't increment attempt counter, don't fail
       try {
-        await apiClient.updateJobStatus(job.id, {
-          status: 'pending',
-          scheduled_at: new Date(Date.now() + 60000).toISOString(),
-          error_message: 'BROWSER_CRASH — auto-retry after clearing profile lock',
-        })
+        if (useApi()) {
+          await api.updateJobStatus(job.id, 'pending', {
+            scheduled_at: new Date(Date.now() + 60000).toISOString(),
+            error_message: 'BROWSER_CRASH — auto-retry after clearing profile lock',
+          })
+        } else {
+          await supabase.from('jobs').update({
+            status: 'pending',
+            scheduled_at: new Date(Date.now() + 60000).toISOString(),
+            error_message: 'BROWSER_CRASH — auto-retry after clearing profile lock',
+          }).eq('id', job.id)
+        }
       } catch {}
       console.log(`[JOB] BROWSER_CRASH ${handlerKey} (${job.id}) — cleared lock, requeue in 60s (no penalty)`)
       return // skip rest of error handling
     }
 
-    // ─── Save to job_failures table (via REST) ─────────
+    // ─── Save to job_failures table ────────────────────
+    const failureData = {
+      job_id: job.id,
+      account_id: job.payload?.account_id || null,
+      campaign_id: job.payload?.campaign_id || null,
+      error_type: classified.type,
+      error_message: err.message,
+      error_stack: err.stack?.substring(0, 2000),
+      handler_name: handlerKey,
+      page_url: err.pageUrl || null,
+      attempt: nextAttempt,
+      will_retry: isRetryable(classified) && nextAttempt < maxAttempts,
+      next_retry_at: isRetryable(classified) && nextAttempt < maxAttempts
+        ? new Date(Date.now() + getRetryDelayMs(classified, nextAttempt - 1)).toISOString() : null,
+    }
     try {
-      await apiClient.recordFailure({
-        job_id: job.id,
-        account_id: job.payload?.account_id || null,
-        campaign_id: job.payload?.campaign_id || null,
-        error_type: classified.type,
-        error_message: err.message,
-        error_stack: err.stack?.substring(0, 2000),
-        handler_name: handlerKey,
-        page_url: err.pageUrl || null,
-        attempt: nextAttempt,
-        will_retry: isRetryable(classified) && nextAttempt < maxAttempts,
-        next_retry_at: isRetryable(classified) && nextAttempt < maxAttempts
-          ? new Date(Date.now() + getRetryDelayMs(classified, nextAttempt - 1)).toISOString() : null,
-      })
+      if (useApi()) {
+        await api.recordJobFailure(failureData)
+      } else {
+        await supabase.from('job_failures').insert(failureData)
+      }
     } catch (insertErr) {
       console.error(`[JOB] Failed to save job_failure:`, insertErr.message)
     }
 
-    // ─── CHECKPOINT double-check: require 2 CHECKPOINT errors in last hour ──
-    // First strike → queue health check, don't disable yet (false positives common)
+    // ─── CHECKPOINT → disable immediately, no double-check ──
+    // Checkpoint = Facebook requires manual verification (selfie, ID, etc.)
+    // No point retrying or health-checking — disable right away
     if (classified.type === 'CHECKPOINT' && job.payload?.account_id) {
-      try {
-        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-        const { count: recentCheckpoints } = await supabase
-          .from('job_failures')
-          .select('id', { count: 'exact', head: true })
-          .eq('account_id', job.payload.account_id)
-          .eq('error_type', 'CHECKPOINT')
-          .gte('created_at', oneHourAgo)
-
-        if ((recentCheckpoints || 0) < 2) {
-          console.log(`[JOB] CHECKPOINT first strike for ${job.payload.account_id.slice(0, 8)} — queueing health check, NOT disabling`)
-          // Queue a health check to confirm
-          try {
-            const { data: existing } = await supabase.from('jobs')
-              .select('id')
-              .eq('type', 'check-health')
-              .eq('payload->>account_id', job.payload.account_id)
-              .in('status', ['pending', 'claimed', 'running'])
-              .limit(1)
-            if (!existing?.length) {
-              await supabase.from('jobs').insert({
-                type: 'check-health',
-                priority: 1,
-                payload: { account_id: job.payload.account_id, action: 'check-health', auto_refresh: true },
-                status: 'pending',
-                scheduled_at: new Date(Date.now() + 30000).toISOString(),
-                created_by: job.created_by,
-              })
-            }
-          } catch {}
-          // Mark job as failed (single attempt) but don't disable account
-          try {
-            await apiClient.failJob(job.id, { error_message: 'CHECKPOINT first strike — health check queued', attempt: nextAttempt })
-          } catch {}
-          return // bypass disable
-        }
-        console.log(`[JOB] CHECKPOINT confirmed (${recentCheckpoints} in last hour) — disabling account`)
-      } catch (checkErr) {
-        console.warn(`[JOB] CHECKPOINT double-check failed: ${checkErr.message}`)
-      }
+      console.log(`[JOB] CHECKPOINT detected for ${job.payload.account_id.slice(0, 8)} — disabling account immediately`)
     }
 
     // ─── Update account status if needed ───────────────
     if (shouldDisableAccount(classified) && job.payload?.account_id) {
       const newStatus = classified.newStatus || 'checkpoint'
-      await supabase.from('accounts')
-        .update({ status: newStatus, is_active: false })
-        .eq('id', job.payload.account_id)
-      console.log(`[JOB] Account ${job.payload.account_id} marked as ${newStatus}`)
+
+      // Prefer new API endpoint — atomically sets status + cancels all pending jobs + notifies user
+      if (useApi()) {
+        try {
+          const axios = require('axios')
+          const API_URL = process.env.API_URL || _pollerCfg.API_URL || 'http://localhost:3000'
+          const _secret = process.env.AGENT_SECRET || process.env.AGENT_SECRET_KEY || _pollerCfg.AGENT_SECRET_KEY
+          await axios.patch(
+            `${API_URL}/accounts/${job.payload.account_id}/status`,
+            { status: newStatus, reason: err.message?.substring(0, 200), detected_at: new Date().toISOString() },
+            { headers: { 'X-Agent-Key': _secret }, timeout: 10000 }
+          )
+          console.log(`[JOB] Account ${job.payload.account_id.slice(0,8)} → ${newStatus} (via API, jobs cancelled + user notified)`)
+        } catch (apiErr) {
+          // Fallback: direct DB update
+          await supabase.from('accounts').update({ status: newStatus, is_active: false }).eq('id', job.payload.account_id)
+          console.log(`[JOB] Account ${job.payload.account_id.slice(0,8)} → ${newStatus} (DB fallback, API failed: ${apiErr.message})`)
+        }
+      } else {
+        await supabase.from('accounts').update({ status: newStatus, is_active: false }).eq('id', job.payload.account_id)
+        console.log(`[JOB] Account ${job.payload.account_id} marked as ${newStatus}`)
+      }
       // Invalidate status cache immediately
       accountStatusCache.delete(job.payload.account_id)
-      // Close the dead browser so the next poll doesn't reuse it. The nick
-      // is now is_active=false so a fresh getSession would be skipped anyway,
-      // but an idle session left over from before the failure would linger
-      // for IDLE_TIMEOUT_MS. Tear it down right now.
-      try { await closeSession(job.payload.account_id) } catch {}
-
-      // Fire-and-forget cookie-death postmortem — Hermes reads the last 2h of
-      // activity log + budget snapshot and stores a `checkpoint_pattern`
-      // memory + a `checkpoint_analysis` decision row. Poller does NOT wait
-      // for the result (analyzer runs ~10-30s).
-      try {
-        const API_URL = process.env.API_URL || process.env.API_BASE_URL
-        const AGENT_KEY = process.env.AGENT_SECRET_KEY
-        if (API_URL && AGENT_KEY) {
-          fetch(`${API_URL}/ai-hermes/cookie-death`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Agent-Key': AGENT_KEY },
-            body: JSON.stringify({
-              account_id: job.payload.account_id,
-              death_type: classified.type,
-              death_message: err.message.slice(0, 500),
-              window_hours: 2,
-            }),
-          }).then(r => r.ok && console.log(`[COOKIE-DEATH] postmortem fired for ${job.payload.account_id?.slice(0,8)}`))
-            .catch(e => console.warn(`[COOKIE-DEATH] fire failed: ${e.message}`))
-        }
-      } catch (e) { console.warn(`[COOKIE-DEATH] dispatch failed: ${e.message}`) }
 
       // Auto-queue health check to try refreshing cookie (only for SESSION_EXPIRED, not CHECKPOINT)
       if (classified.type === 'SESSION_EXPIRED') {
@@ -997,11 +836,21 @@ async function executeJob(job) {
 
     // ─── Skip errors — mark done with skip result ──────
     if (err.message.startsWith('SKIP_')) {
-      await apiClient.updateJobStatus(job.id, {
-        status: 'done',
-        result: { skipped: true, reason: err.message },
-        error_message: err.message,
-      })
+      if (useApi()) {
+        try {
+          await api.updateJobStatus(job.id, 'done', {
+            result: { skipped: true, reason: err.message },
+            error_message: err.message,
+          })
+        } catch {}
+      } else {
+        await supabase.from('jobs').update({
+          status: 'done',
+          result: { skipped: true, reason: err.message },
+          finished_at: new Date(),
+          error_message: err.message,
+        }).eq('id', job.id)
+      }
       console.log(`[JOB] Skipped ${job.id}: ${err.message}`)
 
       // Track consecutive skips per campaign+role — prevent infinite loop
@@ -1042,19 +891,37 @@ async function executeJob(job) {
     if (canRetry) {
       const retryDelayMs = getRetryDelayMs(classified, nextAttempt - 1)
       const retryAfter = new Date(Date.now() + retryDelayMs)
-      await apiClient.updateJobStatus(job.id, {
-        status: 'pending',
-        attempt: nextAttempt,
-        scheduled_at: retryAfter.toISOString(),
-        error_message: `[${classified.type}] ${err.message}`,
-      })
+      if (useApi()) {
+        try {
+          await api.updateJobStatus(job.id, 'pending', {
+            attempt: nextAttempt,
+            scheduled_at: retryAfter.toISOString(),
+            error_message: `[${classified.type}] ${err.message}`,
+          })
+        } catch { /* fallback below */ }
+      } else {
+        await supabase.from('jobs').update({
+          status: 'pending',
+          attempt: nextAttempt,
+          scheduled_at: retryAfter.toISOString(),
+          error_message: `[${classified.type}] ${err.message}`
+        }).eq('id', job.id)
+      }
       console.log(`[JOB] Retry #${nextAttempt} in ${Math.ceil(retryDelayMs / 60000)}min [${classified.type}]`)
     } else {
       const reason = !isRetryable(classified) ? classified.type : `max_attempts (${maxAttempts})`
-      await apiClient.failJob(job.id, {
-        error_message: `[${classified.type}] ${err.message}`,
-        attempt: nextAttempt,
-      })
+      if (useApi()) {
+        try {
+          await api.failJob(job.id, `[${classified.type}] ${err.message}`, nextAttempt)
+        } catch { /* fallback below */ }
+      } else {
+        await supabase.from('jobs').update({
+          status: 'failed',
+          attempt: nextAttempt,
+          error_message: `[${classified.type}] ${err.message}`,
+          finished_at: new Date()
+        }).eq('id', job.id)
+      }
       console.log(`[JOB] Failed permanently: ${reason} (${job.id})`)
 
       // Notify user on permanent failure (if alert worthy)
@@ -1075,24 +942,78 @@ async function executeJob(job) {
 }
 
 async function updateJobStatus(id, status, result = null, error = null) {
-  const update = { status }
-  if (result) update.result = result
-  if (error) update.error_message = error
-  await apiClient.updateJobStatus(id, update)
+  if (useApi()) {
+    try {
+      const extra = {}
+      if (result) extra.result = result
+      if (error) extra.error_message = error
+      await api.updateJobStatus(id, status, extra)
+    } catch (err) {
+      console.error(`[JOB] API status update failed (${id} → ${status}): ${err.message}`)
+      // Fallback to direct DB
+      await supabase.from('jobs').update({
+        status,
+        ...(result && { result }),
+        ...(error && { error_message: error }),
+        ...(status === 'done' || status === 'failed' ? { finished_at: new Date() } : {})
+      }).eq('id', id)
+    }
+    return
+  }
+  await supabase.from('jobs').update({
+    status,
+    ...(result && { result }),
+    ...(error && { error_message: error }),
+    ...(status === 'done' || status === 'failed' ? { finished_at: new Date() } : {})
+  }).eq('id', id)
 }
 
+// Track consecutive stale recovery failures — rate-limit the warning log
+let _staleRecoveryFailCount = 0
+let _lastStaleWarnAt = 0
+
 async function recoverStaleJobs() {
-  // Reset jobs stuck in 'claimed' or 'running' for > 10 minutes (agent likely crashed).
-  // API does the SELECT + UPDATE server-side in one call — saves 2 round trips.
-  try {
-    const res = await apiClient.recoverStaleJobs()
-    if (res?.recovered > 0) {
-      console.log(`[POLLER] Recovered ${res.recovered}/${res.total_stale} stale jobs`)
+  if (useApi()) {
+    try {
+      const result = await api.recoverStaleJobs()
+      if (result.recovered > 0) {
+        console.log(`[POLLER] Recovered ${result.recovered}/${result.total_stale} stale jobs via API`)
+      }
+      // Reset fail counter on success
+      _staleRecoveryFailCount = 0
+    } catch (err) {
+      // Silent fail — don't spam console with error. Warn at most every 10 min
+      // when API is consistently unreachable. Transient errors are ignored.
+      _staleRecoveryFailCount++
+      const now = Date.now()
+      if (_staleRecoveryFailCount === 1 || (now - _lastStaleWarnAt > 10 * 60 * 1000)) {
+        console.warn(`[POLLER] Stale recovery skipped (${_staleRecoveryFailCount}x): ${err.message}`)
+        _lastStaleWarnAt = now
+      }
     }
-  } catch (err) {
-    console.warn(`[POLLER] recoverStaleJobs failed: ${err.message}`)
+    return
   }
-  return
+
+  // Direct DB fallback
+  const staleTime = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+  const { data: stale } = await supabase
+    .from('jobs')
+    .select('id, type, status, started_at')
+    .in('status', ['claimed', 'running'])
+    .lt('started_at', staleTime)
+
+  for (const job of (stale || [])) {
+    const nextAttempt = (job.attempt || 0) + 1
+    await supabase.from('jobs').update({
+      status: 'pending',
+      agent_id: null,
+      started_at: null,
+      scheduled_at: new Date().toISOString(),
+      attempt: nextAttempt,
+      error_message: 'Agent crashed or timed out, retrying'
+    }).eq('id', job.id)
+    console.log(`[POLLER] Recovered stale job ${job.type} (${job.id}) - was ${job.status} since ${job.started_at}`)
+  }
   if ((stale || []).length > 0) {
     console.log(`[POLLER] Recovered ${stale.length} stale jobs`)
   }
@@ -1290,35 +1211,12 @@ async function checkSharedPostSwarm() {
   }
 }
 
-async function syncRuntimeConfig() {
-  const remote = await apiClient.getRuntimeConfig()
-  if (!remote || typeof remote !== 'object') return
-  let changed = false
-  for (const k of Object.keys(agentRuntime)) {
-    if (remote[k] !== undefined && remote[k] !== null && remote[k] !== agentRuntime[k]) {
-      agentRuntime[k] = remote[k]
-      changed = true
-    }
-  }
-  if (changed) {
-    console.log(`[POLLER] Hermes runtime config synced: rest=${agentRuntime.rest_min_minutes}-${agentRuntime.rest_max_minutes}min, session=${agentRuntime.session_min_minutes}-${agentRuntime.session_max_minutes}min`)
-  }
-}
-
 function startPoller() {
   const userInfo = AGENT_USER_ID ? ` | user: ${process.env.AGENT_USER_EMAIL || AGENT_USER_ID}` : ''
   const totalGB = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1)
   const freeGB = (os.freemem() / 1024 / 1024 / 1024).toFixed(1)
-  console.log(`[POLLER] Starting — max ${MAX_CONCURRENT} concurrent nicks (auto-scale, ${freeGB}/${totalGB}GB RAM), Realtime+Polling hybrid${userInfo}`)
-
-  // Pull Hermes-controlled runtime config now + every 5 min.
-  // User tweaks rest/session/timeout from /hermes/settings → Agent Playwright
-  // and the agent picks up the new values on the next sync without a restart.
-  syncRuntimeConfig().catch(() => {})
-  const runtimeInterval = setInterval(() => {
-    syncRuntimeConfig().catch(() => {})
-  }, 5 * 60 * 1000)
-
+  const mode = useApi() ? 'REST API' : 'Direct DB'
+  console.log(`[POLLER] Starting — max ${MAX_CONCURRENT} concurrent nicks (auto-scale, ${freeGB}/${totalGB}GB RAM), mode: ${mode}${userInfo}`)
   recoverStaleJobs().then(() => poll())
   const pollInterval = setInterval(poll, POLL_MS)
   const recoverInterval = setInterval(recoverStaleJobs, 2 * 60 * 1000)
@@ -1329,32 +1227,69 @@ function startPoller() {
     checkSharedPostSwarm().catch(err => console.warn(`[SWARM] Error: ${err.message}`))
   }, 5 * 60 * 1000)
 
-  // ── Supabase Realtime: instant job pickup ──
-  // Subscribe to INSERT events on jobs table — triggers poll() immediately
-  let realtimeChannel = null
-  try {
-    realtimeChannel = supabase
-      .channel('jobs-realtime')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'jobs',
-        filter: 'status=eq.pending',
-      }, (payload) => {
-        const jobType = payload.new?.type || '?'
-        console.log(`[REALTIME] New job: ${jobType} — triggering immediate poll`)
-        // Debounce: don't poll if we just polled < 2s ago
-        poll()
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[REALTIME] ✓ Subscribed to jobs table — instant pickup enabled')
-        } else if (status === 'CHANNEL_ERROR') {
-          console.warn('[REALTIME] ⚠️ Channel error — falling back to polling only')
+  // ── Idle nick auto-assign: every 5 min, find healthy nicks with no recent jobs
+  //    but assigned to a running campaign_role → queue a task for them.
+  const idleAssignInterval = setInterval(async () => {
+    try {
+      const axios = require('axios')
+      const API_URL = process.env.API_URL || _pollerCfg.API_URL || 'http://localhost:3000'
+      const AGENT_SECRET = process.env.AGENT_SECRET || process.env.AGENT_SECRET_KEY || _pollerCfg.AGENT_SECRET_KEY
+      if (!AGENT_SECRET) return // only works when REST-API auth is set
+      const headers = { 'X-Agent-Key': AGENT_SECRET }
+      const { data } = await axios.get(`${API_URL}/accounts/idle-assignable`, { headers, timeout: 10000 })
+      const list = Array.isArray(data) ? data : []
+      for (const nick of list) {
+        try {
+          // Activate via API — will mark healthy + queue appropriate job
+          await axios.post(`${API_URL}/accounts/${nick.id}/activate`, {}, { headers, timeout: 10000 })
+          console.log(`[POLLER] Auto-assigned job to idle nick: ${nick.username} (role: ${nick.role})`)
+        } catch (e) {
+          // activate may 404 if nick needs JWT auth — silent skip
         }
-      })
-  } catch (err) {
-    console.warn(`[REALTIME] Failed to subscribe: ${err.message} — polling only`)
+      }
+    } catch (err) {
+      // Silent — /idle-assignable may not exist on older API; rate-limit log
+      if (!poller_idleAssignWarned) {
+        console.warn(`[POLLER] Idle auto-assign skipped: ${err.message}`)
+        poller_idleAssignWarned = true
+        setTimeout(() => { poller_idleAssignWarned = false }, 10 * 60 * 1000)
+      }
+    }
+  }, 5 * 60 * 1000)
+
+  // ── Realtime: instant job pickup ──
+  let realtimeChannel = null
+  const { config: _dbConfig } = require('../lib/supabase')
+  const _useVpsProxy = !!(process.env.DATABASE_URL || _dbConfig?.DATABASE_URL || _dbConfig?.API_URL || process.env.API_URL)
+  if (_useVpsProxy) {
+    // VPS mode (direct PG or HTTP proxy): polling every 5s is fast enough, no Realtime needed
+    console.log('[POLLER] Polling mode only (VPS mode, no realtime)')
+  } else {
+    // Supabase cloud: use Realtime subscription for instant pickup
+    try {
+      realtimeChannel = supabase
+        .channel('jobs-realtime')
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'jobs',
+          filter: 'status=eq.pending',
+        }, (payload) => {
+          const jobType = payload.new?.type || '?'
+          console.log(`[REALTIME] New job: ${jobType} — triggering immediate poll`)
+          if (Date.now() - _lastPollAt < 2000) return
+          poll()
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('[REALTIME] ✓ Subscribed to jobs table — instant pickup enabled')
+          } else if (status === 'CHANNEL_ERROR') {
+            console.warn('[REALTIME] ⚠️ Channel error — falling back to polling only')
+          }
+        })
+    } catch (err) {
+      console.warn(`[REALTIME] Failed to subscribe: ${err.message} — polling only`)
+    }
   }
 
   // Export stop function for agent.js shutdown handler
@@ -1363,7 +1298,7 @@ function startPoller() {
     clearInterval(pollInterval)
     clearInterval(recoverInterval)
     clearInterval(opportunityInterval)
-    clearInterval(runtimeInterval)
+    clearInterval(idleAssignInterval)
     if (realtimeChannel) {
       try { await supabase.removeChannel(realtimeChannel) } catch {}
     }
