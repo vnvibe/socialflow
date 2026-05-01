@@ -281,6 +281,49 @@ module.exports = async (fastify) => {
     return { success: true }
   })
 
+  // GET /accounts/:id/voice-profile — Per-nick content voice (tone, slang, vocab)
+  // Used by Hermes to generate comments/captions in this nick's distinctive style.
+  fastify.get('/:id/voice-profile', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data, error } = await supabase
+      .from('nick_personality')
+      .select('account_id, voice_profile, preset_name')
+      .eq('account_id', req.params.id)
+      .maybeSingle()
+    if (error) return reply.code(500).send({ error: error.message })
+    return data || { account_id: req.params.id, voice_profile: {}, preset_name: null }
+  })
+
+  // PUT /accounts/:id/voice-profile — Update voice profile.
+  // Body: { voice_profile: {...} } — JSONB blob (see Hermes format_voice_profile_block).
+  fastify.put('/:id/voice-profile', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { voice_profile, preset_name } = req.body || {}
+    if (voice_profile != null && typeof voice_profile !== 'object') {
+      return reply.code(400).send({ error: 'voice_profile must be an object' })
+    }
+
+    // Verify nick belongs to this user (or admin)
+    const { data: acc } = await supabase
+      .from('accounts').select('id, owner_id').eq('id', req.params.id).maybeSingle()
+    if (!acc) return reply.code(404).send({ error: 'Account not found' })
+    if (req.user.role !== 'admin' && acc.owner_id !== req.user.id) {
+      return reply.code(403).send({ error: 'Forbidden' })
+    }
+
+    // Upsert (nick_personality might not exist yet)
+    const { data, error } = await supabase
+      .from('nick_personality')
+      .upsert({
+        account_id: req.params.id,
+        voice_profile: voice_profile || {},
+        ...(preset_name !== undefined && { preset_name }),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'account_id' })
+      .select('account_id, voice_profile, preset_name')
+      .single()
+    if (error) return reply.code(500).send({ error: error.message })
+    return data
+  })
+
   // GET /accounts/:id/fanpages - List fanpages (paginated when offset param present, array otherwise)
   fastify.get('/:id/fanpages', { preHandler: fastify.authenticate }, async (req, reply) => {
     const paginated = req.query.offset !== undefined
