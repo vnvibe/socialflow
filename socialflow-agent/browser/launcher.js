@@ -109,11 +109,17 @@ async function launchBrowser(account, options = {}) {
       '--hide-crash-restore-bubble',
       '--suppress-message-center-popups',
       '--noerrdialogs',
+      // Block FB's permission prompts that hover over the page and break JS evaluation
+      '--disable-notifications',
+      '--disable-popup-blocking',
+      '--deny-permission-prompts',
+      '--disable-features=TranslateUI,WebContentsForceDark',
       // Launch minimized — visible to FB but not cluttering user's screen
       '--start-minimized',
       ...(headless ? ['--disable-gpu'] : []),
     ],
     ignoreDefaultArgs: ['--enable-automation'],
+    permissions: [], // empty = deny ALL permission requests by default
     ...(proxyConfig && {
       proxy: {
         server: `${proxyConfig.type || 'http'}://${proxyConfig.host}:${proxyConfig.port}`,
