@@ -28,13 +28,15 @@ for (const line of envContent.split('\n')) {
   if (match) envVars[match[1].trim()] = match[2].trim()
 }
 
-// Validate required vars
-const required = ['API_URL', 'AGENT_SECRET_KEY']
-for (const key of required) {
-  if (!envVars[key]) {
-    console.error(`[ERROR] Missing required env var: ${key}`)
-    process.exit(1)
-  }
+// Accept either AGENT_SECRET (canonical, matches API server) or AGENT_SECRET_KEY (legacy)
+const agentSecret = envVars.AGENT_SECRET || envVars.AGENT_SECRET_KEY
+if (!envVars.API_URL) {
+  console.error('[ERROR] Missing required env var: API_URL')
+  process.exit(1)
+}
+if (!agentSecret) {
+  console.error('[ERROR] Missing required env var: AGENT_SECRET (or AGENT_SECRET_KEY)')
+  process.exit(1)
 }
 
 console.log('[OK] .env loaded')
@@ -48,7 +50,7 @@ module.exports = {
   FRONTEND_URL: ${JSON.stringify(envVars.FRONTEND_URL || 'https://socialflow888.vercel.app')},
   AGENT_ID: ${JSON.stringify(envVars.AGENT_ID || '')},
   API_URL: ${JSON.stringify(envVars.API_URL || '')},
-  AGENT_SECRET_KEY: ${JSON.stringify(envVars.AGENT_SECRET_KEY || '')},
+  AGENT_SECRET_KEY: ${JSON.stringify(agentSecret)},
 }
 `
 fs.writeFileSync(CONFIG_PATH, configContent)
