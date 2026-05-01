@@ -38,6 +38,7 @@
     ],
     "asarUnpack": [
       "agent.js",
+      "package.json",
       "browser/**/*",
       "jobs/**/*",
       "lib/**/*",
