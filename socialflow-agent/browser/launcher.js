@@ -5,87 +5,80 @@ const fs = require('fs')
 
 const PROFILES_DIR = path.join(os.homedir(), '.socialflow', 'profiles')
 
-// Per-nick deterministic fingerprint pool — each account.id hashes to
-// a fixed (UA, viewport) combo so a nick always looks the same browser
-// across sessions, but different nicks in the same campaign cluster
-// don't all share the exact same UA string. FB's fingerprint-based
-// multi-account clustering looks for identical UA+viewport across
-// co-located logins; spreading these across the pool reduces that
-// signal. 10 modern Chrome/Edge UAs + 5 common desktop viewports =
-// 50 fingerprint cells.
-const UA_POOL = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36 Edg/127.0.0.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-]
-const VIEWPORT_POOL = [
-  { width: 1366, height: 768 },
-  { width: 1440, height: 900 },
-  { width: 1536, height: 864 },
-  { width: 1600, height: 900 },
-  { width: 1920, height: 1080 },
-]
-
-function pickFingerprint(accountId) {
-  const seed = String(accountId || '')
-  const hex1 = seed.match(/^([0-9a-f]{8})/i)
-  const hex2 = seed.match(/^[0-9a-f]+-([0-9a-f]+)/i)
-  let uaIdx, vpIdx
-  if (hex1) {
-    uaIdx = parseInt(hex1[1], 16) % UA_POOL.length
-  } else {
-    let h = 0
-    for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0
-    uaIdx = Math.abs(h) % UA_POOL.length
+/**
+ * Parse "name=value; name2=value2; ..." cookie header format into Playwright
+ * cookie objects. Returns [] on bad input. Defaults to .facebook.com domain.
+ */
+function parseCookieString(str) {
+  if (!str || typeof str !== 'string') return []
+  const out = []
+  for (const pair of str.split(';')) {
+    const trimmed = pair.trim()
+    if (!trimmed) continue
+    const eq = trimmed.indexOf('=')
+    if (eq < 0) continue
+    const name = trimmed.slice(0, eq).trim()
+    const value = trimmed.slice(eq + 1).trim()
+    if (!name || !value) continue
+    out.push({ name, value, domain: '.facebook.com', path: '/' })
   }
-  if (hex2 && hex2[1]) {
-    vpIdx = parseInt(hex2[1].slice(0, 4), 16) % VIEWPORT_POOL.length
-  } else {
-    let h = 131 // prime salt
-    for (let i = 0; i < seed.length; i++) h = ((h << 3) + h + seed.charCodeAt(i)) | 0
-    vpIdx = Math.abs(h) % VIEWPORT_POOL.length
-  }
-  return { userAgent: UA_POOL[uaIdx], viewport: VIEWPORT_POOL[vpIdx] }
+  return out
 }
 
-// Revert to launch() + newContext({storageState}) — launchPersistentContext
-// (attempted 2026-04-20 for full cookie/fingerprint independence) broke
-// group-page scraping: nicks appeared logged-in but posts_found dropped
-// to 0 on every visit. Session state didn't fully carry across the
-// migration. Going back to the classic pattern; cookies + localStorage
-// are persisted via storageState, which was sufficient for months prior.
+/**
+ * Clear leftover profile lock files from a crashed browser session.
+ * Without this, Chromium refuses to launch with "ProcessSingleton: failed to lock"
+ * causing launchPersistentContext to throw "Target ... has been closed".
+ */
+function clearProfileLock(userDataDir) {
+  const lockFiles = [
+    path.join(userDataDir, 'SingletonLock'),
+    path.join(userDataDir, 'SingletonCookie'),
+    path.join(userDataDir, 'SingletonSocket'),
+    path.join(userDataDir, 'lockfile'),
+    path.join(userDataDir, 'Default', 'LOCK'),
+    path.join(userDataDir, 'Default', 'Cookies-journal'),
+  ]
+  let cleared = 0
+  for (const lockFile of lockFiles) {
+    try {
+      if (fs.existsSync(lockFile)) {
+        fs.unlinkSync(lockFile)
+        cleared++
+      }
+    } catch (e) { /* file in use or doesn't exist — ignore */ }
+  }
+  if (cleared > 0) {
+    console.log(`[BROWSER] Cleared ${cleared} stale lock file(s) in ${userDataDir}`)
+  }
+  return cleared
+}
+
 async function launchBrowser(account, options = {}) {
-  const profileDir = path.join(PROFILES_DIR, account.id)
-  fs.mkdirSync(profileDir, { recursive: true })
+  const accountId = account.id || 'default'
+  const profileDir = path.join(PROFILES_DIR, accountId)
+  const userDataDir = path.join(profileDir, 'browser-data')
+  fs.mkdirSync(userDataDir, { recursive: true })
 
   const storageFile = path.join(profileDir, 'storage.json')
+
+  // Clear stale lock files from previous crashed session — must run BEFORE launch
+  clearProfileLock(userDataDir)
+
+  // Clear crash flags so Chromium won't show "Restore pages?" dialog
+  const prefsFile = path.join(userDataDir, 'Default', 'Preferences')
+  try {
+    if (fs.existsSync(prefsFile)) {
+      let prefs = fs.readFileSync(prefsFile, 'utf8')
+      prefs = prefs.replace(/"exit_type"\s*:\s*"Crashed"/g, '"exit_type":"Normal"')
+      prefs = prefs.replace(/"exited_cleanly"\s*:\s*false/g, '"exited_cleanly":true')
+      fs.writeFileSync(prefsFile, prefs)
+    }
+  } catch {}
+
   const proxyConfig = account.proxy || null
 
   const headless = options.headless !== undefined ? options.headless : process.env.HEADLESS === 'true'
-
-  const launchOptions = {
-    headless,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-infobars',
-      ...(headless ? ['--disable-gpu'] : []),
-    ],
-    ...(proxyConfig && {
-      proxy: {
-        server: `${proxyConfig.type || 'http'}://${proxyConfig.host}:${proxyConfig.port}`,
-        username: proxyConfig.username,
-        password: proxyConfig.password
-      }
-    })
-  }
 
   let browserType = chromium
   if (account.browser_type === 'camoufox') {
@@ -93,30 +86,145 @@ async function launchBrowser(account, options = {}) {
     const camoPath = getCamoufoxPath()
     if (fs.existsSync(camoPath)) {
       browserType = firefox
-      launchOptions.executablePath = camoPath
     } else {
       console.warn('[WARN] Camoufox not found, falling back to Chromium')
     }
   }
 
-  const browser = await browserType.launch(launchOptions)
-
-  const fp = pickFingerprint(account.id)
+  // Dùng launchPersistentContext — mỗi nick có browser data riêng biệt
+  // Tránh fingerprint trùng + cookies không bị mix giữa các nick
   const contextOptions = {
-    userAgent: account.user_agent || fp.userAgent,
-    viewport: account.viewport || fp.viewport,
+    headless,
+    userAgent: account.user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    viewport: account.viewport || { width: 1366, height: 768 },
     locale: 'vi-VN',
     timezoneId: account.timezone || 'Asia/Ho_Chi_Minh',
-    ...(fs.existsSync(storageFile) && { storageState: storageFile })
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+      '--disable-infobars',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-session-crashed-bubble',
+      '--hide-crash-restore-bubble',
+      '--suppress-message-center-popups',
+      '--noerrdialogs',
+      // Launch minimized — visible to FB but not cluttering user's screen
+      '--start-minimized',
+      ...(headless ? ['--disable-gpu'] : []),
+    ],
+    ignoreDefaultArgs: ['--enable-automation'],
+    ...(proxyConfig && {
+      proxy: {
+        server: `${proxyConfig.type || 'http'}://${proxyConfig.host}:${proxyConfig.port}`,
+        username: proxyConfig.username,
+        password: proxyConfig.password
+      }
+    }),
+    ...(account.browser_type === 'camoufox' && { executablePath: getCamoufoxPath() }),
   }
 
-  const context = await browser.newContext(contextOptions)
+  const context = await browserType.launchPersistentContext(userDataDir, contextOptions)
+  const browser = context // persistent context IS the browser
 
-  await context.addInitScript(() => {
+  // ── Sync cookies from DB into browser context ──
+  // Persistent context auto-loads cookies from profile dir. But when user
+  // updates `accounts.cookie_string` in DB (Sửa cookie UI), profile dir still
+  // has the OLD expired cookies → checkpoint loop. Solution: if DB
+  // cookie_string c_user differs from profile c_user, profile is stale → use DB.
+  // Profile-side rotated cookies (FB refreshes xs every ~30min) are saved back
+  // to DB by releaseSession() so DB stays current.
+  if (account.cookie_string) {
+    try {
+      const dbCookies = parseCookieString(account.cookie_string)
+      const dbCUser = dbCookies.find(c => c.name === 'c_user')?.value
+      const dbXs = dbCookies.find(c => c.name === 'xs')?.value
+      if (dbCUser && dbXs) {
+        const profileCookies = await context.cookies(['https://www.facebook.com'])
+        const profileCUser = profileCookies.find(c => c.name === 'c_user')?.value
+        const profileXs = profileCookies.find(c => c.name === 'xs')?.value
+
+        const profileEmpty = !profileCUser || !profileXs
+        const profileMismatch = profileCUser !== dbCUser || profileXs !== dbXs
+
+        if (profileEmpty || profileMismatch) {
+          // Clear stale profile cookies + inject DB cookies
+          await context.clearCookies()
+          await context.addCookies(dbCookies.map(c => ({
+            ...c,
+            domain: c.domain || '.facebook.com',
+            path: c.path || '/',
+            secure: true,
+            httpOnly: c.name === 'xs' || c.name === 'fr',
+            sameSite: 'None',
+          })))
+          const reason = profileEmpty ? 'profile empty' : 'cookie_string newer than profile'
+          console.log(`[BROWSER] 🍪 Injected DB cookies for ${account.username || accountId} (${reason}, ${dbCookies.length} cookies)`)
+        } else {
+          console.log(`[BROWSER] Profile cookies match DB for ${account.username || accountId}, keeping rotated tokens`)
+        }
+      }
+    } catch (err) {
+      console.warn(`[BROWSER] Cookie sync failed for ${account.username || accountId}: ${err.message}`)
+    }
+  }
+
+  // ── Anti-detection + Consistent fingerprint per account ──
+  // Generate deterministic fingerprint seed from account ID
+  // Same account always produces same canvas/webgl/audio hash across sessions
+  const fpSeed = accountId.split('').reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0)
+  const fpAbs = Math.abs(fpSeed)
+
+  await context.addInitScript((seed) => {
+    // Basic anti-detect
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] })
-    window.chrome = { runtime: {} }
-  })
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] })
+    window.chrome = { runtime: {}, loadTimes: () => ({}) }
+
+    // Consistent canvas fingerprint — adds tiny deterministic noise per account
+    const origToDataURL = HTMLCanvasElement.prototype.toDataURL
+    HTMLCanvasElement.prototype.toDataURL = function(type) {
+      const ctx = this.getContext('2d')
+      if (ctx && this.width > 0 && this.height > 0) {
+        try {
+          // Add 1 invisible pixel with account-specific color
+          const r = (seed * 13) % 256, g = (seed * 7) % 256, b = (seed * 3) % 256
+          ctx.fillStyle = `rgba(${r},${g},${b},0.01)` // nearly invisible
+          ctx.fillRect(0, 0, 1, 1)
+        } catch {}
+      }
+      return origToDataURL.apply(this, arguments)
+    }
+
+    // Consistent WebGL fingerprint
+    const origGetParam = WebGLRenderingContext.prototype.getParameter
+    WebGLRenderingContext.prototype.getParameter = function(param) {
+      // UNMASKED_VENDOR_WEBGL / UNMASKED_RENDERER_WEBGL
+      if (param === 37445) return 'Google Inc. (Intel)'
+      if (param === 37446) {
+        const renderers = [
+          'ANGLE (Intel, Intel(R) UHD Graphics 630, OpenGL 4.5)',
+          'ANGLE (Intel, Intel(R) UHD Graphics 620, OpenGL 4.5)',
+          'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, OpenGL 4.5)',
+          'ANGLE (Intel, Intel(R) HD Graphics 530, OpenGL 4.5)',
+        ]
+        return renderers[Math.abs(seed) % renderers.length]
+      }
+      return origGetParam.apply(this, arguments)
+    }
+
+    // Consistent AudioContext fingerprint
+    const origGetFloatFreq = AnalyserNode.prototype.getFloatFrequencyData
+    AnalyserNode.prototype.getFloatFrequencyData = function(arr) {
+      origGetFloatFreq.call(this, arr)
+      // Add deterministic tiny noise
+      for (let i = 0; i < arr.length; i++) {
+        arr[i] += ((seed + i) % 100) * 0.0001
+      }
+    }
+  }, fpAbs)
+
+  console.log(`[BROWSER] Launched persistent context for ${account.username || accountId} → ${userDataDir}`)
 
   return { browser, context, profileDir, storageFile }
 }
@@ -146,4 +254,4 @@ async function humanType(page, selector, text) {
   }
 }
 
-module.exports = { launchBrowser, saveAndClose, delay, humanType, getCamoufoxPath }
+module.exports = { launchBrowser, saveAndClose, delay, humanType, getCamoufoxPath, clearProfileLock }
