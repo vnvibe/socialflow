@@ -144,29 +144,7 @@ async function campaignNurture(payload, supabase) {
 
   // Get groups — from target_queue (workflow chaining) or account's joined groups
   let groups = []
-
-  // Hermes orchestrator (post-2026-04-25 social_graph_spreader) may pin a
-  // specific group via payload.group_id. Honor it FIRST so the spreader's
-  // allocation strategy (no two nicks on same group within 45min) holds.
-  // Without this, the agent would pick from the junction and break the
-  // graph isolation that prevents FB cluster detection.
-  if (payload.group_id) {
-    const { data: pinnedRow } = await supabase
-      .from('fb_groups')
-      .select('id, fb_group_id, name, url, member_count, topic, tags, joined_via_campaign_id, ai_relevance, user_approved, consecutive_skips, last_yield_at, total_yields, language, score_tier, engagement_rate, ai_join_score, is_member, pending_approval, is_blocked, global_score')
-      .eq('id', payload.group_id)
-      .single()
-    if (pinnedRow && pinnedRow.is_member && !pinnedRow.pending_approval && !pinnedRow.is_blocked && pinnedRow.user_approved !== false) {
-      groups = [pinnedRow]
-      console.log(`[NURTURE] Hermes-pinned group: ${pinnedRow.name} (spreader allocation)`)
-    } else if (pinnedRow) {
-      console.warn(`[NURTURE] Hermes pinned group ${payload.group_id} (${pinnedRow.name}) but failed gate (member=${pinnedRow.is_member} pending=${pinnedRow.pending_approval} blocked=${pinnedRow.is_blocked}) — falling back to junction`)
-    } else {
-      console.warn(`[NURTURE] Hermes pinned group ${payload.group_id} not found in fb_groups — falling back`)
-    }
-  }
-
-  if (!groups.length && read_from) {
+  if (read_from) {
     const { data: queueEntries } = await supabase
       .from('target_queue')
       .select('*')
@@ -385,11 +363,7 @@ async function campaignNurture(payload, supabase) {
       console.log(`[NURTURE] Warming up nick: browsing feed...`)
       logger.log('visit_group', { target_type: 'feed', target_name: 'Warm-up browse', details: { phase: 'warmup' } })
       try {
-        // Audit 2026-04-12: 15s timeout (was 30s) — a slow warmup nav was
-        // burning half the session before real work. Warmup failure must not
-        // crash the job; the inner try/catch swallows it and the handler
-        // continues straight to the main loop.
-        await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 15000 })
+        await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30000 })
         await R.sleepRange(3000, 6000)
         // Scroll feed naturally
         for (let s = 0; s < R.randInt(2, 4); s++) {
@@ -399,7 +373,7 @@ async function campaignNurture(payload, supabase) {
         await humanMouseMove(page)
         console.log(`[NURTURE] Warm-up done, starting campaign work`)
       } catch (err) {
-        console.warn(`[NURTURE] Warm-up failed for ${account.username}: ${err.message} — continuing anyway`)
+        console.warn(`[NURTURE] Warm-up failed: ${err.message}`)
       }
     }
 
@@ -437,44 +411,7 @@ async function campaignNurture(payload, supabase) {
       } catch {}
     }
 
-    let _groupIdx = 0
     for (const group of groupsToVisit) {
-      _groupIdx++
-      // Mid-session idle pause — 20% chance between groups, 30-120s.
-      // Real users don't visit one group right after another at a
-      // constant pace — they pause (read, get coffee, get distracted).
-      // Skip for first group (just started session).
-      if (_groupIdx > 1 && Math.random() < 0.2) {
-        const idleMs = 30000 + Math.floor(Math.random() * 90000) // 30-120s
-        console.log(`[NURTURE] 💤 Idle pause ${Math.round(idleMs/1000)}s (distracted-user simulation)`)
-        await new Promise(r => setTimeout(r, idleMs))
-      }
-
-      // Feed detour — 12% chance between groups, navigate to home feed,
-      // scroll briefly, come back. Real users don't go group→group→group
-      // linearly; they bounce off the home feed occasionally. Break
-      // 'linear traversal' bot pattern that FB graph analytics could see.
-      if (_groupIdx > 1 && Math.random() < 0.12) {
-        try {
-          console.log(`[NURTURE] 🏠 Home feed detour`)
-          await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {})
-          await R.sleepRange(2000, 4000)
-          // 2-4 natural scrolls on feed
-          const scrollCount = 2 + Math.floor(Math.random() * 3)
-          for (let s = 0; s < scrollCount; s++) {
-            try { await humanScroll(page) } catch {}
-            await R.sleepRange(2500, 5500)
-          }
-          // Occasionally scroll up too (re-check earlier post)
-          if (Math.random() < 0.35) {
-            try { await page.evaluate(() => window.scrollBy(0, -(200 + Math.random() * 400))) } catch {}
-            await R.sleepRange(1500, 3000)
-          }
-        } catch (e) {
-          console.warn(`[NURTURE] Home detour threw (non-fatal): ${e.message}`)
-        }
-      }
-
       // Group visit rate limit: max 2 nicks in same group within 30 min
       if (!canVisitGroup(group.fb_group_id, account_id)) {
         console.log(`[NURTURE] ⏭️ Skip "${group.name}" — group visit rate limit (${GROUP_VISIT_MAX} nicks/30min)`)
@@ -486,16 +423,8 @@ async function campaignNurture(payload, supabase) {
 
       try {
         // Stay on DESKTOP Facebook (cookies work, no login overlay)
-        // Force chronological feed view. Plain /groups/{ID} sometimes lands
-        // on About page (cold session / no hydrated membership). Using
-        // ?sorting_setting=CHRONOLOGICAL is the community-tested fix
-        // (kevinzg/facebook-scraper#935) — pins FB to the feed + ordered
-        // newest first, dramatically fewer About-page redirects than /posts.
-        const baseUrl = (group.url || `https://www.facebook.com/groups/${group.fb_group_id}`)
+        const groupUrl = (group.url || `https://www.facebook.com/groups/${group.fb_group_id}`)
           .replace('://m.facebook.com', '://www.facebook.com')
-          .replace(/\/+$/, '')
-          .replace(/\?.*$/, '')
-        const groupUrl = `${baseUrl}/?sorting_setting=CHRONOLOGICAL`
         console.log(`[NURTURE] Visiting: ${group.name || group.fb_group_id}`)
         logger.log('visit_group', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: groupUrl })
 
@@ -567,20 +496,18 @@ async function campaignNurture(payload, supabase) {
         // ═══ AI GROUP EVALUATION ═══
         // AI decides if group is relevant — replaces hardcoded keyword/language checks
         // If AI fails → skip this group THIS RUN (not failure, will retry next time)
-        // Cache result in ai_relevance for 7 days.
-        // Defensive: orchestrator-created jobs historically missed `topic` in
-        // payload → crashed on toLowerCase. Coerce to '' if undefined.
-        const topicKey = String(topic || '').toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50) || 'default'
+        // Cache result in ai_relevance for 7 days
+        const topicKey = topic.toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
         const cachedEval = group.ai_relevance?.[topicKey]
-        const CACHE_TTL = 7 * 24 * 3600 * 1000
+        const CACHE_TTL = 2 * 24 * 3600 * 1000 // 2 days (was 7 — too long for volatile group content)
         const cacheValid = cachedEval?.evaluated_at && (Date.now() - new Date(cachedEval.evaluated_at).getTime()) < CACHE_TTL
 
         if (cacheValid) {
-          const cachedDecision = cachedEval.decision || (cachedEval.relevant === false && cachedEval.score < 3 ? 'reject' : cachedEval.relevant && cachedEval.score >= 5 ? 'engage' : 'observe')
+          const cachedDecision = cachedEval.decision || (cachedEval.score >= 3 || cachedEval.relevant ? 'engage' : 'reject')
           result.aiDecision = { action: cachedDecision, score: cachedEval.score, tier: cachedEval.tier, reason: cachedEval.reason || 'cached' }
 
           if (cachedDecision === 'reject') {
-            console.log(`[NURTURE] Skip evaluate for ${account.username}: cached REJECT on "${group.name}" (score: ${cachedEval.score}, reason: ${cachedEval.reason || 'cached'})`)
+            console.log(`[NURTURE] Skip "${group.name}" — cached REJECT (score: ${cachedEval.score}, reason: ${cachedEval.reason || 'cached'})`)
             result.errors.push('skipped: cached reject')
             groupResults.push(result)
             continue
@@ -647,13 +574,11 @@ async function campaignNurture(payload, supabase) {
                 language: aiResult.language || 'unknown',
               }
 
-              // Decision rules: script uses these thresholds
-              if (aiResult.relevant && aiResult.score >= 5) {
-                aiDecision.action = 'engage'     // high confidence — like + comment
-              } else if (aiResult.relevant || aiResult.score >= 3) {
-                aiDecision.action = 'observe'    // medium confidence — like only, no comment
+              // Decision rules: lowered thresholds for more engagement
+              if (aiResult.score >= 3 || aiResult.relevant) {
+                aiDecision.action = 'engage'     // like + comment (was: score >= 5)
               } else {
-                aiDecision.action = 'reject'     // low confidence — skip entirely
+                aiDecision.action = 'reject'     // skip entirely
               }
 
               console.log(`[NURTURE] AI eval "${group.name}" → ${aiDecision.action.toUpperCase()} (score:${aiDecision.score}, tier:${aiDecision.tier}) — ${aiDecision.reason} [${aiGroupEvalsThisRun}/${MAX_AI_GROUP_EVALS}]`)
@@ -688,21 +613,20 @@ async function campaignNurture(payload, supabase) {
               result.aiDecision = aiDecision
 
               if (aiDecision.action === 'reject') {
-                console.log(`[NURTURE] Skip evaluate for ${account.username}: AI reject on "${group.name}" (score:${aiDecision.score}, reason:${aiDecision.reason})`)
                 result.errors.push(`skipped: AI decision=reject (score:${aiDecision.score}, reason:${aiDecision.reason})`)
                 groupResults.push(result)
                 continue
               }
             } else {
               // Page didn't load posts — skip this run, DON'T cache, retry next time
-              console.log(`[NURTURE] Skip evaluate for ${account.username}: could not extract posts on "${group.name}" (DOM empty, will retry)`)
+              console.log(`[NURTURE] ⚠️ "${group.name}" — could not extract posts for AI eval, will retry`)
               result.errors.push('skipped: no posts for AI eval')
               groupResults.push(result)
               continue
             }
           } catch (aiErr) {
             // AI failed — NOT a failure, just skip this group this run
-            console.log(`[NURTURE] Skip evaluate for ${account.username}: AI eval threw on "${group.name}": ${aiErr.message}`)
+            console.log(`[NURTURE] ⚠️ AI eval failed for "${group.name}": ${aiErr.message} — will retry next run`)
             // Continue to next group, don't block, don't cache
             result.errors.push('skipped: AI eval failed (will retry)')
             groupResults.push(result)
@@ -746,33 +670,6 @@ async function campaignNurture(payload, supabase) {
           const debugPath = require('path').join(__dirname, '..', '..', 'debug', `nurture-dom-${Date.now()}.json`)
           fs.writeFileSync(debugPath, JSON.stringify(debugInfo, null, 2))
           console.log(`[NURTURE] DOM: ${debugInfo.articlesCount} articles, ${debugInfo.likeButtonsCount} like btns, logged=${debugInfo.isLoggedIn}, url=${debugInfo.url}`)
-
-          // Member verification: if page shows 'Tham gia nhóm' / 'Join group'
-          // button AND only 2-3 articles visible, the nick is actually NOT
-          // a member even though DB says so. Flip is_member=false + skip
-          // so scheduler stops assigning this group. DB membership drift
-          // (DB stale) was observed for Thúy's 2 groups — all 81 nurture
-          // runs failed with posts_found:0 until caught here.
-          const body = debugInfo.bodyText || ''
-          const joinButtonVisible = /Tham gia nhóm|Join group|Join this group/i.test(body)
-          if (joinButtonVisible && debugInfo.articlesCount < 3) {
-            console.log(`[NURTURE] ❌ ${account.username} NOT actual member of "${group.name}" — FB shows Join button. Flipping is_member=false.`)
-            try {
-              await supabase.from('fb_groups')
-                .update({ is_member: false, pending_approval: false, join_status: 'not_member' })
-                .eq('id', group.id)
-            } catch (uErr) {
-              console.warn(`[NURTURE] is_member flip failed: ${uErr.message}`)
-            }
-            logger.log('visit_group', {
-              target_type: 'group', target_id: group.fb_group_id, target_name: group.name,
-              target_url: groupUrl, result_status: 'skipped',
-              details: { reason: 'not_actual_member', body_snippet: body.substring(0, 100) },
-            })
-            result.errors.push('skipped: not_actual_member')
-            groupResults.push(result)
-            continue
-          }
         } catch (e) { console.warn('[NURTURE] DOM debug failed:', e.message) }
 
         // ===== LIKE POSTS (desktop, JS-based) =====
@@ -858,71 +755,19 @@ async function campaignNurture(payload, supabase) {
               await btn.scrollIntoViewIfNeeded()
               await R.sleepRange(800, 1500)
 
-              // Reaction variety: 75% Like, 15% Love, 7% Haha, 3% Wow.
-              // All-Like pattern across every post is a bot signal; real
-              // users vary emotion. When picking non-Like, hover 500-900ms
-              // on the Like button first to trigger the reaction tray,
-              // then click the specific emoji. Fallback to plain click if
-              // the tray doesn't appear.
-              const reactionRoll = Math.random()
-              let reactionType = 'like'
-              if (reactionRoll >= 0.97) reactionType = 'wow'
-              else if (reactionRoll >= 0.90) reactionType = 'haha'
-              else if (reactionRoll >= 0.75) reactionType = 'love'
-
-              const reactionLabels = {
-                like: ['Like', 'Thích'],
-                love: ['Love', 'Yêu thích'],
-                haha: ['Haha'],
-                wow: ['Wow'],
-              }
-
-              let reactionDone = false
-              if (reactionType !== 'like') {
-                try {
-                  // Hover the Like button to open reaction tray
-                  await btn.hover().catch(() => {})
-                  await R.sleepRange(500, 900)
-                  const labels = reactionLabels[reactionType]
-                  reactionDone = await page.evaluate((labels) => {
-                    const buttons = document.querySelectorAll('div[role="button"], div[aria-label]')
-                    for (const b of buttons) {
-                      const lab = (b.getAttribute('aria-label') || '').trim()
-                      if (labels.some(l => lab === l || lab.startsWith(l + ':') || lab.startsWith(l + ' '))) {
-                        const visible = b.offsetParent !== null || b.getBoundingClientRect().width > 0
-                        if (visible) {
-                          const rect = b.getBoundingClientRect()
-                          const x = rect.left + rect.width / 2
-                          const y = rect.top + rect.height / 2
-                          const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
-                          b.dispatchEvent(new MouseEvent('mousedown', opts))
-                          b.dispatchEvent(new MouseEvent('mouseup', opts))
-                          b.dispatchEvent(new MouseEvent('click', opts))
-                          return true
-                        }
-                      }
-                    }
-                    return false
-                  }, labels)
-                  if (reactionDone) console.log(`[NURTURE] Reaction: ${reactionType}`)
-                } catch {}
-              }
-
-              if (!reactionDone) {
-                // Plain Like click (default + fallback)
-                await page.evaluate((idx) => {
-                  const el = document.querySelector(`[data-nurture-like="${idx}"]`)
-                  if (!el) return
-                  const rect = el.getBoundingClientRect()
-                  const x = rect.left + rect.width / 2
-                  const y = rect.top + rect.height / 2
-                  const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
-                  el.dispatchEvent(new MouseEvent('mousedown', opts))
-                  el.dispatchEvent(new MouseEvent('mouseup', opts))
-                  el.dispatchEvent(new MouseEvent('click', opts))
-                }, i)
-                reactionType = 'like'
-              }
+              // Click using dispatchEvent for React compatibility
+              await page.evaluate((idx) => {
+                const el = document.querySelector(`[data-nurture-like="${idx}"]`)
+                if (!el) return
+                // Dispatch full mouse event sequence for React
+                const rect = el.getBoundingClientRect()
+                const x = rect.left + rect.width / 2
+                const y = rect.top + rect.height / 2
+                const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y }
+                el.dispatchEvent(new MouseEvent('mousedown', opts))
+                el.dispatchEvent(new MouseEvent('mouseup', opts))
+                el.dispatchEvent(new MouseEvent('click', opts))
+              }, i)
 
               await R.sleepRange(1500, 2500)
 
@@ -935,7 +780,7 @@ async function campaignNurture(payload, supabase) {
                 p_action_type: 'like',
               })
               console.log(`[NURTURE] Liked #${totalLikes} (session: ${tracker.get('like')}/${maxLikesSession})`)
-              logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { post_url: likeableInfo[i]?.postUrl || null, reactions: likeableInfo[i]?.reactions || 0, comments: likeableInfo[i]?.commentCount || 0, reaction_type: reactionType } })
+              logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { post_url: likeableInfo[i]?.postUrl || null, reactions: likeableInfo[i]?.reactions || 0, comments: likeableInfo[i]?.commentCount || 0 } })
 
               // Human delay between likes (minGapSeconds: 2)
               await R.sleepRange(2000, 5000)
@@ -949,57 +794,26 @@ async function campaignNurture(payload, supabase) {
         // ===== COMMENT ON POSTS (desktop — click comment button in feed) =====
         // Gate: only comment if AI decision is 'engage' (not 'observe')
         const canComment = result.aiDecision?.action !== 'observe' // observe = like only
-        if (!canComment) {
-          console.log(`[NURTURE] Skip evaluate for ${account.username}: AI observe on "${group.name}" (like-only, no comment)`)
-        } else if (!commentCheck.allowed) {
-          console.log(`[NURTURE] Skip evaluate for ${account.username}: comment budget exhausted (used ${commentBudget.used}/${commentBudget.max}) on "${group.name}"`)
-        } else if (tracker.get('comment') >= maxCommentsSession) {
-          console.log(`[NURTURE] Skip evaluate for ${account.username}: session comment cap hit (${tracker.get('comment')}/${maxCommentsSession}) on "${group.name}"`)
-        }
+        // Diagnostic: track where comment pipeline stops
+        const commentDebug = { commentable: 0, eligible: 0, ai_selected: 0, attempted: 0, quality_rejected: 0, no_box: 0, gen_failed: 0 }
+        result.comment_debug = commentDebug
         if (canComment && commentCheck.allowed && tracker.get('comment') < maxCommentsSession) {
           const maxComments = getActionParams(parsed_plan, 'comment', { countMin: 1, countMax: 2 }).count
 
-          // Cross-session dedup — query BOTH comment_logs AND campaign_activity_log
-          // so we catch comments posted when comment_logs insert may have
-          // silently failed (CHECK constraint violation on 'posting' status
-          // left the table empty historically). Query by owner_id — no
-          // matter which nick posted, we treat it as the user's existing
-          // comment on that post.
-          const ownerId = payload.owner_id || payload.created_by
+          // Get ALL previously commented posts for this USER (never comment same post twice, ANY campaign)
+          const { data: prevComments } = await supabase
+            .from('comment_logs')
+            .select('post_url, fb_post_id')
+            .eq('owner_id', payload.owner_id || payload.created_by)
+            .not('post_url', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(1000)
           const commentedUrls = new Set()
           const commentedPostIds = new Set()
-          try {
-            const { data: prevComments } = await supabase
-              .from('comment_logs')
-              .select('post_url, fb_post_id')
-              .eq('owner_id', ownerId)
-              .not('post_url', 'is', null)
-              .order('created_at', { ascending: false })
-              .limit(1000)
-            for (const c of (prevComments || [])) {
-              if (c.post_url) commentedUrls.add(c.post_url)
-              if (c.fb_post_id) commentedPostIds.add(c.fb_post_id)
-            }
-          } catch {}
-          try {
-            const { data: prevLogs } = await supabase
-              .from('campaign_activity_log')
-              .select('details, target_url')
-              .eq('owner_id', ownerId)
-              .in('action_type', ['comment', 'opportunity_comment'])
-              .eq('result_status', 'success')
-              .order('created_at', { ascending: false })
-              .limit(1000)
-            for (const l of (prevLogs || [])) {
-              const u = l.details?.post_url
-              if (u) {
-                commentedUrls.add(u)
-                const m = u.match(/(?:posts|permalink)\/(\d+)/) || u.match(/story_fbid=(\d+)/)
-                if (m) commentedPostIds.add(m[1])
-              }
-            }
-          } catch {}
-          console.log(`[NURTURE] Dedup: loaded ${commentedUrls.size} commented URLs + ${commentedPostIds.size} post IDs for this user`)
+          for (const c of (prevComments || [])) {
+            if (c.post_url) commentedUrls.add(c.post_url)
+            if (c.fb_post_id) commentedPostIds.add(c.fb_post_id)
+          }
 
           // === EXPAND "See more" / "Xem thêm" links to get full post content ===
           // FB truncates long posts behind these links — click them so AI sees full context
@@ -1028,166 +842,149 @@ async function campaignNurture(payload, supabase) {
             }
           } catch {}
 
-          // Hybrid: attach GraphQL post sniffer BEFORE scrolling so we
-          // passively capture post payloads regardless of whether DOM
-          // selectors match. If DOM extraction yields 0 (FB DOM drift),
-          // we can still fall back on captured posts instead of skipping
-          // the whole group. Reuses the same extractor fetch_source_cookie
-          // uses — that path returns 6-10 posts reliably.
-          const sniffedPosts = []
-          let sniffer = null
-          try {
-            const { extractPostsFromGraphQL } = require('./fetch-source-cookie')
-            sniffer = async (response) => {
-              try {
-                const url = response.url()
-                if (!url.includes('/api/graphql')) return
-                if (response.status() !== 200) return
-                const text = await response.text().catch(() => '')
-                if (!text || text.length < 200) return
-                const found = extractPostsFromGraphQL(text)
-                if (found.length > 0) sniffedPosts.push(...found)
-              } catch {}
-            }
-            page.on('response', sniffer)
-          } catch (snifErr) {
-            console.warn(`[NURTURE] GraphQL sniffer setup failed: ${snifErr.message}`)
-          }
-
           // Scroll to trigger FB lazy-loading of feed posts. Without this,
           // DOM at `domcontentloaded` may only contain the group header/about
           // article and zero actual posts. Retry up to 2 times if post count
           // is too low after the first pass.
           let commentableInfo = []
-          // Stats 2026-04-21: posts_found>0 dropped to 7-15% for all nicks
-          // — FB lazy-loads more aggressively now, old 3x scroll is insufficient.
-          // Bump to 5 retries with longer waits + wait for networkidle between.
-          for (let _scrollAttempt = 0; _scrollAttempt < 5; _scrollAttempt++) {
+          for (let _scrollAttempt = 0; _scrollAttempt < 3; _scrollAttempt++) {
             if (_scrollAttempt > 0) {
-              console.log(`[NURTURE] Scroll attempt ${_scrollAttempt + 1}/5 for "${group.name}" — previous had ${commentableInfo.length} posts`)
+              console.log(`[NURTURE] Scroll attempt ${_scrollAttempt + 1}/3 for "${group.name}" — previous had ${commentableInfo.length} posts`)
             }
             await humanScroll(page)
-            await R.sleepRange(2000, 3500)
-            if (_scrollAttempt < 4) {
+            await R.sleepRange(1500, 2500)
+            if (_scrollAttempt < 2) {
               await humanScroll(page)
-              await R.sleepRange(1500, 2500)
+              await R.sleepRange(1000, 2000)
             }
-            // Let FB finish any in-flight fetches before snapshotting DOM
-            try { await page.waitForLoadState('networkidle', { timeout: 4000 }) } catch {}
 
             // Extract ALL posts with content + tag comment buttons
             commentableInfo = await page.evaluate(() => {
-              // 2026 FB Comet DOM: feed posts live in div[role="feed"] > children
-              // with aria-posinset. Legacy [role="article"] only catches header/
-              // pinned wrappers (2 per page vs 10+ actual feed posts). Research
-              // (MasuRii/FBScrapeIdeas + thanh2004nguyen/facebook-group-scraper)
-              // shows data-ad-rendering-role="story_message" is the current
-              // stable post-body marker in Comet architecture. Walk up to the
-              // feed-item wrapper from each message.
-              const candidates = []
-              const seen = new Set()
-
-              // Strategy 1: walk up from story_message markers (most reliable 2026)
-              for (const marker of document.querySelectorAll('[data-ad-rendering-role="story_message"]')) {
-                const wrap = marker.closest('div[role="article"], div[data-pagelet^="FeedUnit"], div[aria-posinset]') || marker.parentElement?.parentElement?.parentElement
-                if (wrap && !seen.has(wrap)) { seen.add(wrap); candidates.push(wrap) }
-              }
-
-              // Strategy 2: feed-scoped articles with aria-posinset (ARIA feed pattern)
-              const feed = document.querySelector('div[role="feed"]')
-              if (feed) {
-                for (const el of feed.querySelectorAll('div[aria-posinset], div[role="article"], div[data-pagelet^="FeedUnit"]')) {
-                  if (!seen.has(el)) { seen.add(el); candidates.push(el) }
-                }
-              }
-
-              // Strategy 3: legacy fallbacks (older FB layouts / non-group pages)
-              if (candidates.length < 3) {
-                for (const sel of ['[data-pagelet^="FeedUnit"]', '[role="article"]', '[data-ft]']) {
-                  for (const el of document.querySelectorAll(sel)) {
-                    if (!seen.has(el)) { seen.add(el); candidates.push(el) }
-                  }
-                }
-              }
-
-              // Strategy 4: any post-body marker wrapped up (last resort)
-              if (candidates.length === 0) {
-                for (const marker of document.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"]')) {
-                  const wrap = marker.closest('div[class][style], div[data-visualcompletion="ignore-dynamic"]') || marker.parentElement?.parentElement
-                  if (wrap && !seen.has(wrap)) { seen.add(wrap); candidates.push(wrap) }
-                }
-              }
-              const articles = candidates
+              const articles = document.querySelectorAll('[role="article"]')
               const results = []
-              for (const article of articles.slice(0, 15)) {
-              // Skip nested (comment articles)
-              const parent = article.parentElement?.closest('[role="article"]')
-              if (parent && parent !== article) continue
+              const diag = { total: articles.length, skipped: { nested: 0, no_content: 0, comment: 0 } }
 
-              // Extract post body — 2026 Comet primary marker is
-              // data-ad-rendering-role="story_message". Keep legacy
-              // data-ad-preview/comet-preview as fallback for older layouts.
-              let body = ''
-              const bodyEl = article.querySelector('[data-ad-rendering-role="story_message"], [data-ad-preview="message"], [data-ad-comet-preview="message"]')
-              if (bodyEl) body = bodyEl.innerText.trim()
-              if (!body || body.length < 10) {
-                for (const d of article.querySelectorAll('div[dir="auto"]')) {
-                  const t = d.innerText.trim()
-                  if (t.length > body.length && t.length < 5000) body = t
+              // Build a set of COMMENT-section articles to exclude.
+              // Comment articles have aria-label containing "Comment by/Bình luận của"
+              // or sit inside a [role="article"][aria-label*="omment"] wrapper.
+              const commentArticles = new Set()
+              for (const a of articles) {
+                const label = (a.getAttribute('aria-label') || '').toLowerCase()
+                if (label.includes('comment by') || label.includes('bình luận của') ||
+                    label.includes('reply') || label.includes('trả lời của')) {
+                  commentArticles.add(a)
+                  // Also mark all descendants as comments (replies to replies)
+                  for (const sub of a.querySelectorAll('[role="article"]')) commentArticles.add(sub)
                 }
               }
-              if (body.length < 10) continue
 
-              // Extract author
-              const authorEl = article.querySelector('a[role="link"] strong, h2 a, h3 a')
-              const author = authorEl ? authorEl.textContent.trim() : ''
+              for (const article of [...articles].slice(0, 20)) {
+                // Skip comment articles (not feed posts)
+                if (commentArticles.has(article)) { diag.skipped.comment++; continue }
 
-              // Extract post URL — the FB timestamp link (<abbr>'s wrapping
-              // <a>) is the most reliable permalink source. In Comet layouts
-              // it often sits OUTSIDE the story_message wrapper, so we also
-              // walk up to the nearest [role="article"] or aria-posinset
-              // ancestor and search there. Without this, many posts come
-              // back with postUrl=null and "Xem bài" link disappears in UI.
-              let postUrl = null
-              const scope = article.closest('[role="article"], div[aria-posinset], [data-pagelet^="FeedUnit"]') || article
-              // Strategy 1: abbr timestamp's ancestor <a>
-              const abbrEl = scope.querySelector('abbr')
-              if (abbrEl) {
-                const abbrLink = abbrEl.closest('a[href*="/posts/"], a[href*="/permalink/"], a[href*="/groups/"]')
-                if (abbrLink?.href) postUrl = abbrLink.href.split('?')[0]
-              }
-              // Strategy 2: any permalink anchor in scope
-              if (!postUrl) {
-                for (const link of scope.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"]')) {
-                  const href = link.href || ''
-                  if (href.match(/\/(posts|permalink)\/\d+/) || href.includes('story_fbid')) {
-                    postUrl = href.split('?')[0]; break
+                // Skip only if this article is INSIDE another non-comment article
+                // (e.g. nested repost that we'll catch via the outer article).
+                // We used to skip anything with a parent [role="article"], which was too
+                // aggressive — FB wraps many post types in outer containers now.
+                let parent = article.parentElement
+                let isNested = false
+                while (parent) {
+                  if (parent.getAttribute && parent.getAttribute('role') === 'article') {
+                    if (!commentArticles.has(parent)) { isNested = true }
+                    break
+                  }
+                  parent = parent.parentElement
+                }
+                if (isNested) { diag.skipped.nested++; continue }
+
+                // Extract post body — expanded selector list (FB changes DOM often)
+                let body = ''
+                const bodySelectors = [
+                  '[data-ad-preview="message"]',
+                  '[data-ad-comet-preview="message"]',
+                  'div[data-ad-preview]',
+                  '[data-testid="post_message"]',
+                  'div[data-testid*="post"]',
+                ]
+                for (const sel of bodySelectors) {
+                  const el = article.querySelector(sel)
+                  if (el?.innerText?.trim()?.length > body.length) body = el.innerText.trim()
+                }
+                // Fallback: longest div[dir="auto"] that's not a button label
+                if (body.length < 3) {
+                  for (const d of article.querySelectorAll('div[dir="auto"]')) {
+                    // Skip if inside a toolbar/button (like/comment/share labels)
+                    if (d.closest('[role="button"]') || d.closest('[role="group"]')) continue
+                    const t = (d.innerText || '').trim()
+                    if (t.length > body.length && t.length < 5000 && t.length > 3) body = t
                   }
                 }
-              }
-              // Strategy 3: look at sibling wrapper (Comet sometimes puts
-              // the permalink link outside the story_message but in same
-              // parent feed unit)
-              if (!postUrl && scope !== article && scope.parentElement) {
-                for (const link of scope.parentElement.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"]')) {
+                // Further fallback: longest <span> text (video/shared posts use spans)
+                if (body.length < 3) {
+                  for (const s of article.querySelectorAll('span')) {
+                    if (s.closest('[role="button"]') || s.closest('[role="group"]')) continue
+                    const t = (s.innerText || '').trim()
+                    if (t.length > body.length && t.length > 20 && t.length < 2000) body = t
+                  }
+                }
+
+                // Extract author — try many heading patterns
+                let author = ''
+                const authorSelectors = [
+                  'h2 a[role="link"] strong',
+                  'h3 a[role="link"] strong',
+                  'h2 a strong',
+                  'h3 a strong',
+                  'h2 a[role="link"]',
+                  'h3 a[role="link"]',
+                  'h2 a',
+                  'h3 a',
+                  'a[role="link"] strong',
+                  'strong a',
+                  '[data-ad-comet-preview="message"] + * a',
+                ]
+                for (const sel of authorSelectors) {
+                  const el = article.querySelector(sel)
+                  const t = el?.textContent?.trim()
+                  if (t && t.length > 0 && t.length < 80) { author = t; break }
+                }
+
+                // Extract post URL — expanded patterns incl. pfbid format (current FB)
+                let postUrl = null
+                const urlCandidates = article.querySelectorAll(
+                  'a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="/videos/"], a[href*="/photos/"]'
+                )
+                for (const link of urlCandidates) {
                   const href = link.href || ''
-                  if (href.match(/\/(posts|permalink)\/\d+/)) { postUrl = href.split('?')[0]; break }
+                  // Accept pfbid format + numeric + photo/video URLs with story_fbid
+                  if (href.match(/\/(posts|permalink)\/(pfbid[\w]+|\d+)/) ||
+                      href.includes('story_fbid=') ||
+                      href.match(/\/(videos|photos)\/\d+/)) {
+                    postUrl = href.split('?')[0]
+                    break
+                  }
                 }
-              }
 
-              // Check translated
-              const isTranslated = /ẩn bản gốc|xem bản gốc|see original|đã dịch|bản dịch/i.test(article.innerText || '')
-
-              // Tag comment button
-              const toolbar = article.querySelector('[role="group"]') || article
-              for (const btn of toolbar.querySelectorAll('[role="button"], a')) {
-                const l = (btn.getAttribute('aria-label') || '').toLowerCase()
-                const t = (btn.innerText || '').trim().toLowerCase()
-                if (l.includes('comment') || l.includes('bình luận') || /^(comment|bình luận)$/i.test(t)) {
-                  btn.setAttribute('data-nurture-comment', results.length)
-                  break
+                // Skip only if NO content at all (no body, no url, no author)
+                if (body.length < 3 && !postUrl && !author) {
+                  diag.skipped.no_content++
+                  continue
                 }
-              }
+
+                // Check translated
+                const isTranslated = /ẩn bản gốc|xem bản gốc|see original|đã dịch|bản dịch/i.test(article.innerText || '')
+
+                // Tag comment button — expanded search
+                const toolbar = article.querySelector('[role="group"]') || article
+                for (const btn of toolbar.querySelectorAll('[role="button"], a')) {
+                  const l = (btn.getAttribute('aria-label') || '').toLowerCase()
+                  const t = (btn.innerText || '').trim().toLowerCase()
+                  if (l.includes('comment') || l.includes('bình luận') || l === 'leave a comment' ||
+                      /^(comment|bình luận|viết bình luận|write a comment)$/i.test(t)) {
+                    btn.setAttribute('data-nurture-comment', results.length)
+                    break
+                  }
+                }
 
               // Fix 2 (Phase 6): grab up to 5 already-visible thread comments so the AI
               // can answer the actual discussion instead of restating the post body.
@@ -1217,49 +1014,61 @@ async function campaignNurture(payload, supabase) {
                 }
               } catch {}
 
-              // Keep up to 1500 chars per post (was 400) — AI needs context
-              results.push({ index: results.length, postUrl, body: body.substring(0, 1500), author, isTranslated, threadComments })
+                // Keep up to 1500 chars per post (was 400) — AI needs context
+                results.push({ index: results.length, postUrl, body: body.substring(0, 1500), author, isTranslated, threadComments })
+              }
+              // Return both posts + diagnostics so the agent can log why extraction failed
+              return { posts: results, diag }
+            })
+
+            // Unwrap — support both old shape (array) and new shape ({posts, diag})
+            const _extractResult = commentableInfo
+            if (_extractResult && !Array.isArray(_extractResult) && _extractResult.posts) {
+              commentableInfo = _extractResult.posts
+              if (_scrollAttempt === 0 || commentableInfo.length === 0) {
+                const d = _extractResult.diag
+                console.log(`[NURTURE] DOM scan: ${d.total} articles, skipped: nested=${d.skipped.nested} no_content=${d.skipped.no_content} comment=${d.skipped.comment} → kept=${commentableInfo.length}`)
+              }
             }
-            return results
-          })
 
             // If we got >= 2 posts, stop scrolling. Otherwise retry.
             if (commentableInfo.length >= 2) break
           } // end scroll retry loop
 
-          // Detach GraphQL sniffer — we either captured enough by now or
-          // the page is done loading anyway.
-          if (sniffer) {
-            try { page.off('response', sniffer) } catch {}
-          }
+          // Debug: save screenshot + DOM JSON if 0 posts extracted (even if likes worked)
+          if (commentableInfo.length === 0) {
+            try {
+              const { saveDebugScreenshot } = require('./post-utils')
+              await saveDebugScreenshot(page, `nurture-zero-${account_id}`)
 
-          // Hybrid fallback: DOM extraction yielded 0 → merge in sniffed
-          // posts from GraphQL. Dedupe by id (GraphQL) / postUrl. Map to
-          // the same shape commentableInfo uses. threadComments empty
-          // (API doesn't carry visible thread context); AI falls back
-          // to post body only when no thread present.
-          if (commentableInfo.length === 0 && sniffedPosts.length > 0) {
-            const seen = new Set()
-            const mapped = []
-            for (const p of sniffedPosts) {
-              const key = p.id || p.postUrl
-              if (!key || seen.has(key)) continue
-              seen.add(key)
-              if (!p.msg || p.msg.length < 10) continue
-              mapped.push({
-                index: mapped.length,
-                postUrl: p.postUrl || null,
-                body: p.msg.substring(0, 1500),
-                author: p.authorName || '',
-                isTranslated: false,
-                threadComments: [],
-                _source: 'graphql',
+              // Dump DOM info for diagnosis — what DOES exist on the page?
+              const domDump = await page.evaluate(() => {
+                const articles = [...document.querySelectorAll('[role="article"]')].slice(0, 10)
+                return {
+                  articlesCount: articles.length,
+                  articleSamples: articles.map((a, i) => ({
+                    idx: i,
+                    ariaLabel: (a.getAttribute('aria-label') || '').substring(0, 120),
+                    hasH2: !!a.querySelector('h2'),
+                    hasH3: !!a.querySelector('h3'),
+                    hasRoleGroup: !!a.querySelector('[role="group"]'),
+                    bodyTextLen: (a.innerText || '').length,
+                    bodyTextPreview: (a.innerText || '').substring(0, 200).replace(/\s+/g, ' '),
+                    hasPostLink: !!a.querySelector('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"]'),
+                  })),
+                }
               })
-              if (mapped.length >= 15) break
-            }
-            if (mapped.length > 0) {
-              console.log(`[NURTURE] 🔌 DOM empty → using ${mapped.length} posts from GraphQL sniffer for "${group.name}"`)
-              commentableInfo = mapped
+              const fs = require('fs')
+              const path = require('path')
+              const debugDir = path.join(__dirname, '..', '..', 'debug')
+              try { fs.mkdirSync(debugDir, { recursive: true }) } catch {}
+              fs.writeFileSync(
+                path.join(debugDir, `nurture-zero-dom-${account_id}-${Date.now()}.json`),
+                JSON.stringify(domDump, null, 2)
+              )
+              console.log(`[NURTURE] ⚠️ 0 commentable posts extracted — debug saved (screenshot + DOM dump)`)
+            } catch (e) {
+              console.log(`[NURTURE] ⚠️ 0 commentable posts extracted — debug save failed: ${e.message}`)
             }
           }
 
@@ -1278,12 +1087,14 @@ async function campaignNurture(payload, supabase) {
             return true
           })
 
+          commentDebug.commentable = commentableInfo.length
+          commentDebug.eligible = eligible.length
           console.log(`[NURTURE] Extracted ${commentableInfo.length} posts, ${eligible.length} eligible for comment`)
 
           // === SMART SKIP: 0 eligible posts → record skip + move to next group ===
           if (eligible.length === 0) {
             await recordGroupSkip(supabase, account_id, group.fb_group_id)
-            console.log(`[NURTURE] Skip evaluate for ${account.username}: 0 eligible posts on "${group.name}" (extracted ${commentableInfo.length}, filtered out all)`)
+            console.log(`[NURTURE] Skip "${group.name}" — 0 eligible posts (consecutive skips will increment)`)
           } else {
             // Has eligible posts → record yield (resets consecutive_skips)
             await recordGroupYield(supabase, account_id, group.fb_group_id, eligible.length)
@@ -1345,7 +1156,7 @@ async function campaignNurture(payload, supabase) {
               const evaluated = await evaluatePosts({
                 posts: eligible,
                 campaign: campaignData,
-                nick: { id: account.id, username: account.username, created_at: account.created_at, mission: config?.nick_mission, persona_config: account.persona_config },
+                nick: { username: account.username, created_at: account.created_at, mission: config?.nick_mission },
                 group: { name: group.name, member_count: group.member_count, description: group.description },
                 topic,
                 maxPicks: Math.min(maxComments, eligible.length),
@@ -1378,7 +1189,7 @@ async function campaignNurture(payload, supabase) {
                 try {
                   await scanGroupPosts({
                     posts: eligible, group: { ...group, fb_group_id: group.fb_group_id },
-                    campaign: campaignData, nick: { id: account.id, username: account.username, persona_config: account.persona_config },
+                    campaign: campaignData, nick: { username: account.username },
                     topic, ownerId: payload.owner_id, brandConfig,
                     supabase, campaignId: campaign_id,
                   })
@@ -1426,46 +1237,22 @@ async function campaignNurture(payload, supabase) {
                   console.warn(`[NURTURE] shared_posts upsert failed: ${poolErr.message}`)
                 }
               } else {
-                // Emergency warmup fallback — ai-brain Tier 2 should have
-                // picked 1 post, but in production we still see evaluated=[]
-                // daily (AI returns empty JSON / all posts flagged ad / parse
-                // fail — silent catch → returns []). Without this, 0-comment
-                // days persist even when 14 eligible posts sit on the page.
-                // Condition: 3+ eligible (group is active). Post choice:
-                // longest non-spam body — substantive enough to write a
-                // contextual reply. No brand push (score=0 → ad path skips).
-                if (eligible.length >= 3) {
-                  const candidate = eligible
-                    .filter(p => (p.body || '').length >= 30 && !/inbox|liên hệ|giảm giá|mua ngay/i.test(p.body || ''))
-                    .sort((a, b) => (b.body?.length || 0) - (a.body?.length || 0))[0]
-                  if (candidate) {
-                    aiSelected = [candidate]
-                    console.log(`[NURTURE] AI evaluate empty; emergency warmup fallback → post #${candidate.index} (body len=${candidate.body.length})`)
-                    logger.log('ai_evaluate_posts', {
-                      target_type: 'group', target_name: group.name, result_status: 'fallback',
-                      details: { total_eligible: eligible.length, selected: 1, reason: 'emergency_warmup' },
-                    })
-                  } else {
-                    console.log(`[NURTURE] AI empty + no non-spam candidate — skipping "${group.name}"`)
-                    logger.log('ai_evaluate_posts', {
-                      target_type: 'group', target_name: group.name, result_status: 'skipped',
-                      details: { total_eligible: eligible.length, selected: 0, reason: 'no_relevant_posts' },
-                    })
-                  }
-                } else {
-                  console.log(`[NURTURE] AI Brain says NO posts worth engaging in "${group.name}" (${eligible.length} eligible, below threshold 3)`)
-                  logger.log('ai_evaluate_posts', {
-                    target_type: 'group', target_name: group.name, result_status: 'skipped',
-                    details: { total_eligible: eligible.length, selected: 0, reason: 'no_relevant_posts' },
-                  })
-                }
+                console.log(`[NURTURE] AI Brain says NO posts worth engaging in "${group.name}" (topic: ${topic})`)
+                result.errors.push(`ai_eval: 0/${eligible.length} posts scored >= 5`)
+                logger.log('ai_evaluate_posts', {
+                  target_type: 'group', target_name: group.name, result_status: 'skipped',
+                  details: { total_eligible: eligible.length, selected: 0, reason: 'no_relevant_posts' },
+                })
               }
             } catch (err) {
               console.warn(`[NURTURE] AI Brain evaluation failed: ${err.message}, falling back to simple selection`)
+              result.errors.push(`ai_eval_error: ${err.message}`)
               // Fallback: take first N eligible posts
               aiSelected = eligible.slice(0, maxComments)
             }
           }
+
+          commentDebug.ai_selected = aiSelected.length
 
           // Language gate: 0 comments if nick can't speak group's language
           const commentsToDo = allowCommentInGroup
@@ -1477,114 +1264,59 @@ async function campaignNurture(payload, supabase) {
           for (const post of aiSelected) {
             if (commented >= commentsToDo) break
 
-            // Every failure path in this loop MUST write to activity_log
-            // so we can see WHY comments fail from DB. Before these logs
-            // the loop had 5 silent `continue`s — agent runs, no comments,
-            // no error visible anywhere. User demand: "nếu lỗi phải nói rõ".
-            const logFail = (step, extra = {}) => {
-              console.log(`[NURTURE] ❌ Comment skip on post #${post.index}: ${step} ${JSON.stringify(extra)}`)
-              try {
-                logger.log('comment', {
-                  target_type: 'group', target_id: group.fb_group_id,
-                  target_name: group.name, target_url: group.url,
-                  result_status: 'failed',
-                  details: { step, post_index: post.index, post_url: post.postUrl, post_body_len: (post.body || '').length, ...extra },
-                })
-              } catch {}
-            }
-
             try {
               const thisPostUrl = post.postUrl
-              if (thisPostUrl && commentedUrls.has(thisPostUrl)) {
-                logFail('dedup_local_url', { url: thisPostUrl })
-                continue
-              }
+              if (thisPostUrl && commentedUrls.has(thisPostUrl)) continue
               // Cross-nick dedup by fb_post_id
               if (thisPostUrl) {
                 const m = thisPostUrl.match(/(?:posts|permalink)\/(\d+)/) || thisPostUrl.match(/story_fbid=(\d+)/)
-                if (m && commentedPostIds.has(m[1])) {
-                  logFail('dedup_cross_nick', { fb_post_id: m[1] })
-                  continue
-                }
+                if (m && commentedPostIds.has(m[1])) { console.log(`[NURTURE] Skip post ${m[1]} — already commented by another nick`); continue }
               }
 
-              // Try tagged button first, then fallback strategies — DOM
-              // may have re-rendered since extraction (scroll, lazy load)
-              // and the attribute can get wiped. Fallbacks: find button
-              // by post body match (most reliable) or URL substring.
+              commentDebug.attempted++
+              // Try data-attribute first (fast), then re-find by searching articles for matching post
               let commentBtn = await page.$(`[data-nurture-comment="${post.index}"]`)
-              if (!commentBtn) {
-                commentBtn = await page.evaluateHandle((postBody, postUrlPart) => {
-                  const articles = document.querySelectorAll('[role="article"], [data-ad-rendering-role="story_message"], div[aria-posinset]')
-                  for (const article of articles) {
-                    const t = (article.innerText || '')
-                    const matchesBody = postBody && postBody.length > 30 && t.includes(postBody.substring(0, 80))
-                    const matchesUrl = postUrlPart && article.querySelector(`a[href*="${postUrlPart}"]`)
-                    if (matchesBody || matchesUrl) {
-                      const toolbar = article.querySelector('[role="group"]') || article
-                      for (const btn of toolbar.querySelectorAll('[role="button"], a')) {
-                        const l = (btn.getAttribute('aria-label') || '').toLowerCase()
-                        const tx = (btn.innerText || '').trim().toLowerCase()
-                        if (l.includes('comment') || l.includes('bình luận') || /^(comment|bình luận)$/i.test(tx)) {
-                          return btn
-                        }
+              if (!commentBtn && post.postUrl) {
+                // FB may have re-rendered DOM — find article containing this post's URL, then find comment button
+                commentBtn = await page.evaluate((postUrl) => {
+                  for (const article of document.querySelectorAll('[role="article"]')) {
+                    const parent = article.parentElement?.closest('[role="article"]')
+                    if (parent && parent !== article) continue
+                    const link = article.querySelector(`a[href*="${postUrl.split('?')[0].split('/').pop()}"]`)
+                    if (!link) continue
+                    const toolbar = article.querySelector('[role="group"]') || article
+                    for (const btn of toolbar.querySelectorAll('[role="button"], a')) {
+                      const l = (btn.getAttribute('aria-label') || '').toLowerCase()
+                      const t = (btn.innerText || '').trim().toLowerCase()
+                      if (l.includes('comment') || l.includes('bình luận') || /^(comment|bình luận)$/i.test(t)) {
+                        btn.setAttribute('data-nurture-refound', '1')
+                        return true
                       }
                     }
                   }
-                  return null
-                }, post.body || '', (post.postUrl || '').split('/').slice(-2, -1)[0] || '')
-                const asElement = commentBtn && await commentBtn.asElement()
-                commentBtn = asElement || null
-                if (commentBtn) console.log(`[NURTURE] Comment button fallback-matched for post #${post.index}`)
+                  return false
+                }, post.postUrl)
+                if (commentBtn) commentBtn = await page.$('[data-nurture-refound="1"]')
               }
+              if (!commentBtn) { commentDebug.no_box++; continue }
 
-              if (!commentBtn) {
-                logFail('button_not_found')
-                continue
-              }
-
+              // Post text already extracted during AI selection
               const postText = post.body || ''
               const postAuthor = post.author || ''
 
-              if (postText.length < 15) {
-                logFail('body_too_short', { len: postText.length })
-                continue
-              }
+              // Final safety: skip if too short
+              if (postText.length < 15) { continue }
 
               await commentBtn.scrollIntoViewIfNeeded()
-              // Human "re-read" behavior: before clicking comment, 40%
-              // chance to scroll up a bit (re-check post body), pause,
-              // scroll back. Real users do this when composing a reply.
-              if (Math.random() < 0.4) {
-                try {
-                  await page.evaluate(() => window.scrollBy(0, -(150 + Math.random() * 200)))
-                  await R.sleepRange(800, 2000) // "re-reading" pause
-                  await page.evaluate(() => window.scrollBy(0, 120 + Math.random() * 200))
-                  await R.sleepRange(300, 700)
-                } catch {}
-              } else {
-                // Just a shorter "reading" pause before engaging
-                await R.sleepRange(1200, 3500)
-              }
               await R.sleepRange(500, 1000)
-              try {
-                await commentBtn.click({ force: true, timeout: 5000 })
-              } catch (clickErr) {
-                logFail('button_click_failed', { err: clickErr.message })
-                continue
-              }
+              await commentBtn.click({ force: true, timeout: 5000 })
               await R.sleepRange(1500, 2500)
 
-              // Comment input selectors — 2026 Comet uses Lexical editor
-              // (div[data-lexical-editor="true"] + contenteditable). Include
-              // as primary for newer layouts; keep legacy contenteditable as
-              // fallback.
+              // Find comment textbox (desktop contenteditable)
               const desktopCommentSels = [
-                'div[contenteditable="true"][data-lexical-editor="true"][role="textbox"]',
                 'div[contenteditable="true"][role="textbox"][aria-label*="comment" i]',
                 'div[contenteditable="true"][role="textbox"][aria-label*="bình luận" i]',
                 'div[contenteditable="true"][role="textbox"]',
-                'div[contenteditable="true"][aria-describedby]',
               ]
               let commentBox = null
               for (const sel of desktopCommentSels) {
@@ -1598,7 +1330,7 @@ async function campaignNurture(payload, supabase) {
               }
 
               if (!commentBox) {
-                logFail('textbox_not_found', { selectors_tried: desktopCommentSels.length })
+                commentDebug.no_box++
                 result.errors.push('comment: no comment box')
                 continue
               }
@@ -1629,23 +1361,8 @@ async function campaignNurture(payload, supabase) {
               }
 
               // === AD TRIGGER: trust AI's contextual decision (no keyword matching) ===
-              // hasAdOpportunity comes from evaluatePosts() which already considered brandConfig.
-              // In-brand-group boost: if group name contains brand name AND the post is asking
-              // for advice in the brand's domain, treat as ad opportunity even if AI score was
-              // low or ad_opportunity flag was false — missing these is a direct lead leak
-              // (observed 2026-04-21: Phương Nam asked for chatbot advice in OpenClaw VN group
-              // and bot deflected with a counter-question instead of proposing OpenClaw).
-              const brandNameLower = String(brandConfig?.brand_name || '').toLowerCase()
-              const groupNameLower = (group?.name || '').toLowerCase()
-              const inBrandGroup = brandNameLower && groupNameLower.includes(brandNameLower)
-              const postRequestsAdvice = /(xin\s*gợi\s*ý|cho\s*(em|mình|mk|m)?\s*hỏi|tư\s*vấn|giúp\s*(em|mình|với)|chia\s*sẻ\s*(chút\s*)?kinh\s*nghiệm|các\s*bác\s*cho)/i.test(postText)
-              const brandGroupAdBoost = inBrandGroup && postRequestsAdvice && brandConfig?.brand_name
-              if (brandGroupAdBoost && !hasAdOpportunity) {
-                console.log(`[NURTURE] 📢 In-brand-group advice request — boosting to ad opportunity for post #${post.index}`)
-              }
-              const adGatePasses = (hasAdOpportunity || brandGroupAdBoost) &&
-                                   ((evaluation?.score || 0) >= 6 || brandGroupAdBoost)
-              if (canDoAdComment && adCommentsToday < AD_COMMENT_DAILY_LIMIT && adGatePasses && brandConfig?.brand_name) {
+              // hasAdOpportunity comes from evaluatePosts() which already considered brandConfig
+              if (canDoAdComment && adCommentsToday < AD_COMMENT_DAILY_LIMIT && hasAdOpportunity && brandConfig?.brand_name && (evaluation?.score || 0) >= 6) {
                 try {
                   // Extract any existing comments from the post to avoid duplicating brand mentions
                   const existingComments = Array.isArray(post.comments)
@@ -1661,6 +1378,9 @@ async function campaignNurture(payload, supabase) {
                     existingComments,
                     language: postLanguage,
                     userId: payload.owner_id,
+                    accountId: account_id,
+                    campaignId: campaign_id,
+                    groupFbId: group?.fb_group_id || group?.id,
                   })
                   if (oppResult?.text && oppResult.text.length > 5) {
                     commentResult = oppResult
@@ -1682,7 +1402,7 @@ async function campaignNurture(payload, supabase) {
                   postText, postAuthor,
                   group: { name: group.name, member_count: group.member_count },
                   campaign: campaignCtx,
-                  nick: { id: account.id, username: account.username, created_at: account.created_at, mission: config?.nick_mission, persona_config: account.persona_config },
+                  nick: { username: account.username, created_at: account.created_at, mission: config?.nick_mission },
                   topic, commentAngle,
                   ownerId: payload.owner_id,
                   threadComments: postThreadComments, // Fix 2
@@ -1699,26 +1419,16 @@ async function campaignNurture(payload, supabase) {
                   language: postLanguage,
                   userId: payload.owner_id,
                   templates: config?.comment_templates,
+                  accountId: account_id,
+                  campaignId: campaign_id,
+                  groupFbId: group?.fb_group_id || group?.id,
                 })
               }
 
               const commentText = typeof commentResult === 'object' ? commentResult.text : commentResult
               const isAI = typeof commentResult === 'object' ? (commentResult.ai || commentResult.smart) : false
-              const generatorProvider = typeof commentResult === 'object' ? (commentResult.provider || null) : null
-              // Normalize provider → display label. DeepSeek is Hermes's
-              // primary backend; orchestrator may return either name.
-              const providerLabelMap = {
-                hermes: 'Hermes',
-                deepseek: 'Hermes',
-                openai: 'OpenAI',
-                gemini: 'Gemini',
-                claude: 'Claude',
-                anthropic: 'Claude',
-                template: 'Template',
-              }
-              const generatorLabel = generatorProvider
-                ? (providerLabelMap[String(generatorProvider).toLowerCase()] || generatorProvider)
-                : (isAI ? 'AI' : 'Template')
+
+              if (!commentText || commentText.length <= 6) { commentDebug.gen_failed++; continue }
 
               // === QUALITY GATE: Check comment quality before posting ===
               // Phase 6 Fix 4: gate now considers thread comments — comment must address
@@ -1728,11 +1438,11 @@ async function campaignNurture(payload, supabase) {
                   comment: commentText, postText,
                   threadComments: postThreadComments,
                   group: { name: group.name },
-                  topic, nick: { id: account.id, username: account.username, persona_config: account.persona_config },
+                  topic, nick: { username: account.username },
                   ownerId: payload.owner_id,
-                  brandConfig, // enables ad-drift rejection when brand name appears in off-domain posts
                 })
                 if (!gate.approved) {
+                  commentDebug.quality_rejected++
                   console.log(`[NURTURE] ❌ Quality gate REJECTED: "${commentText.substring(0, 50)}..." (score: ${gate.score}, reason: ${gate.reason})`)
                   logger.log('comment_rejected', {
                     target_type: 'group', target_name: group.name,
@@ -1751,28 +1461,19 @@ async function campaignNurture(payload, supabase) {
                 if (m) fbPostId = m[1]
               }
 
-              // PRE-LOG: Create comment_logs entry BEFORE posting (status='pending')
-              // to serve as cross-session dedup source. Table has a CHECK
-              // constraint status IN ('pending','done','failed','dismissed')
-              // — previous code used 'posting' which silently violated and
-              // insert failed, leaving table empty → dedup returned nothing
-              // → same post got commented on every agent restart (observed:
-              // Việt commented "929984039659793" twice 15:28 & 16:13).
+              // PRE-LOG: Create comment_logs entry BEFORE posting (status='posting')
+              // This ensures we have a record even if typing/submit crashes
               let commentLogId = null
               try {
-                const { data: logEntry, error: logErr } = await supabase.from('comment_logs').insert({
+                const { data: logEntry } = await supabase.from('comment_logs').insert({
                   owner_id: payload.owner_id || payload.created_by, account_id,
                   fb_post_id: fbPostId,
                   comment_text: commentText, source_name: group.name,
-                  status: 'pending', campaign_id,
+                  status: 'posting', campaign_id,
                   ai_generated: isAI,
                   post_url: thisUrl,
                 }).select('id').single()
-                if (logErr) {
-                  console.warn(`[NURTURE] Pre-log insert error: ${logErr.message}`)
-                } else {
-                  commentLogId = logEntry?.id
-                }
+                commentLogId = logEntry?.id
               } catch (logErr) {
                 console.warn(`[NURTURE] Pre-log failed: ${logErr.message} — posting anyway`)
               }
@@ -1781,114 +1482,15 @@ async function campaignNurture(payload, supabase) {
               if (thisUrl) commentedUrls.add(thisUrl)
               if (fbPostId) commentedPostIds.add(fbPostId)
 
-              // TYPE + SUBMIT comment — log each failure mode explicitly
-              try {
-                await commentBox.click({ force: true, timeout: 5000 })
-              } catch (clickErr) {
-                logFail('textbox_click_failed', { err: clickErr.message })
-                continue
-              }
+              // TYPE + SUBMIT comment
+              await commentBox.click({ force: true, timeout: 5000 })
               await R.sleepRange(500, 1000)
-              // Human-like typing: char-by-char with variable delay, plus
-              // ~15% chance of typo+backspace to look less robotic. Real
-              // people hit the wrong key, notice, backspace, retype — bots
-              // never do. Also ~20% chance of a 'thinking pause' (400-
-              // 1200ms) somewhere mid-sentence.
-              try {
-                const adjacentKeys = {
-                  'a':'sw', 'b':'vn', 'c':'xv', 'd':'sf', 'e':'wr', 'f':'dg',
-                  'g':'fh', 'h':'gj', 'i':'uo', 'j':'hk', 'k':'jl', 'l':'k',
-                  'm':'n', 'n':'bm', 'o':'ip', 'p':'o', 'q':'w', 'r':'et',
-                  's':'ad', 't':'ry', 'u':'yi', 'v':'cb', 'w':'qe', 'x':'zc',
-                  'y':'tu', 'z':'x',
-                }
-                const thinkingPauseAt = Math.random() < 0.2 ? Math.floor(commentText.length * (0.3 + Math.random() * 0.4)) : -1
-                for (let i = 0; i < commentText.length; i++) {
-                  const char = commentText[i]
-                  // Thinking pause mid-sentence
-                  if (i === thinkingPauseAt) {
-                    await R.sleepRange(400, 1200)
-                  }
-                  // 15% chance typo (lowercase letters only, avoid punctuation/VN diacritics)
-                  const isLowerLetter = /^[a-z]$/.test(char)
-                  if (isLowerLetter && adjacentKeys[char] && Math.random() < 0.15) {
-                    const wrong = adjacentKeys[char][Math.floor(Math.random() * adjacentKeys[char].length)]
-                    await page.keyboard.type(wrong, { delay: Math.random() * 80 + 30 })
-                    await R.sleepRange(120, 320) // notice delay
-                    await page.keyboard.press('Backspace')
-                    await R.sleepRange(80, 220)
-                  }
-                  await page.keyboard.type(char, { delay: Math.random() * 80 + 30 })
-                }
-              } catch (typeErr) {
-                logFail('keyboard_type_failed', { err: typeErr.message, text_len: commentText.length })
-                continue
+              for (const char of commentText) {
+                await page.keyboard.type(char, { delay: Math.random() * 80 + 30 })
               }
               await R.sleepRange(800, 1500)
-              // Randomize submit method: 70% Enter key, 30% click send
-              // button. Always using same submit path is a subtle bot tell
-              // FB behavioral analytics could pick up over time.
-              const useSendButton = Math.random() < 0.3
-              let submitted = false
-              if (useSendButton) {
-                try {
-                  submitted = await page.evaluate(() => {
-                    const btns = document.querySelectorAll('div[role="button"][aria-label="Comment"], div[role="button"][aria-label="Bình luận"]')
-                    for (const b of btns) {
-                      if (!b.closest('[role="article"], [data-ad-rendering-role="story_message"]')) continue
-                      try { b.click(); return true } catch {}
-                    }
-                    return false
-                  })
-                } catch {}
-                if (!submitted) {
-                  // fallback to Enter
-                  try { await page.keyboard.press('Enter'); submitted = true } catch (e) {
-                    logFail('enter_press_failed', { err: e.message, tried_send_btn: true })
-                    continue
-                  }
-                }
-              } else {
-                try {
-                  await page.keyboard.press('Enter')
-                  submitted = true
-                } catch (enterErr) {
-                  logFail('enter_press_failed', { err: enterErr.message })
-                  continue
-                }
-              }
+              await page.keyboard.press('Enter')
               await R.sleepRange(2000, 4000)
-
-              // Verify submission actually happened — Lexical sometimes
-              // eats Enter silently. Look for the comment we just posted
-              // in the DOM; if not present, our "success" was a lie.
-              try {
-                const snippet = commentText.substring(0, 40)
-                const appeared = await page.evaluate((s) => {
-                  if (!s || s.length < 5) return true
-                  return (document.body?.innerText || '').includes(s)
-                }, snippet)
-                if (!appeared) {
-                  // Fallback: click the send button if Enter didn't fire
-                  const sent = await page.evaluate(() => {
-                    const btns = document.querySelectorAll('div[role="button"][aria-label="Comment"], div[role="button"][aria-label="Bình luận"]')
-                    for (const b of btns) {
-                      if (!b.closest('[role="article"]')) continue
-                      try { b.click(); return true } catch {}
-                    }
-                    return false
-                  })
-                  if (sent) {
-                    console.log(`[NURTURE] Enter didn't fire, clicked send button for post #${post.index}`)
-                    await R.sleepRange(1500, 2500)
-                  } else {
-                    logFail('submit_verification_failed', { snippet })
-                    continue
-                  }
-                }
-              } catch (verifyErr) {
-                console.warn(`[NURTURE] Submit verify threw (non-fatal): ${verifyErr.message}`)
-              }
 
               // POST-SUCCESS: Update log status + increment counters
               totalComments++
@@ -1911,7 +1513,7 @@ async function campaignNurture(payload, supabase) {
               }
 
               const isSoftAd = adTriggered || (hasAdOpportunity && brandConfig?.brand_name && commentText.toLowerCase().includes(brandConfig.brand_name.toLowerCase()))
-              console.log(`[NURTURE] ✅ Commented #${totalComments} (${generatorLabel}${adTriggered ? ' +AD-TRIGGERED' : isSoftAd ? ' +AD' : ''}): "${commentText.substring(0, 50)}..."`)
+              console.log(`[NURTURE] ✅ Commented #${totalComments} (${isAI ? 'AI' : 'template'}${adTriggered ? ' +AD-TRIGGERED' : isSoftAd ? ' +AD' : ''}): "${commentText.substring(0, 50)}..."`)
 
               // Flag lead_potential authors for friend request pipeline
               if (isLeadPotential && post.author && campaign_id) {
@@ -1937,7 +1539,7 @@ async function campaignNurture(payload, supabase) {
                 } catch {}
               }
               const logActionType = adTriggered ? 'opportunity_comment' : 'comment'
-              try { await logger.log(logActionType, { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { comment_text: commentText.substring(0, 200), post_text: postText.substring(0, 200), post_url: thisUrl, ai_generated: isAI, generator: generatorLabel, provider: generatorProvider, post_author: postAuthor, soft_ad: isSoftAd, ad_triggered: adTriggered, ad_opportunity: hasAdOpportunity, lead_potential: isLeadPotential, comment_angle: commentAngle } }) } catch {}
+              try { await logger.log(logActionType, { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { comment_text: commentText.substring(0, 200), post_text: postText.substring(0, 200), post_url: thisUrl, ai_generated: isAI, post_author: postAuthor, soft_ad: isSoftAd, ad_triggered: adTriggered, ad_opportunity: hasAdOpportunity, lead_potential: isLeadPotential, comment_angle: commentAngle } }) } catch {}
 
               await R.sleepRange(90000, 180000) // 90-180 seconds gap
             } catch (err) {
@@ -2146,7 +1748,7 @@ async function campaignNurture(payload, supabase) {
 
       const axios = require('axios')
       const API_URL = process.env.API_URL || 'http://localhost:3000'
-      const AUTH_TOKEN = process.env.AGENT_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.AGENT_USER_TOKEN || ''
+      const AUTH_TOKEN = process.env.AGENT_SECRET_KEY || process.env.AGENT_USER_TOKEN || ''
 
       let decision = null
       try {
