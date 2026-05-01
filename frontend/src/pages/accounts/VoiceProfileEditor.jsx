@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Save, Loader2, Mic, Plus, X } from 'lucide-react'
+import { Save, Loader2, Mic, Plus, X, Sparkles, Wand2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 
@@ -122,6 +122,41 @@ export default function VoiceProfileEditor({ accountId, accountName, onClose }) 
     onError: (err) => toast.error(`Lưu thất bại: ${err.response?.data?.error || err.message}`),
   })
 
+  // AI suggest — Hermes generates a voice profile based on nick metadata
+  const aiSuggestMutation = useMutation({
+    mutationFn: () => api.post(`/accounts/${accountId}/voice-profile/suggest`).then(r => r.data),
+    onSuccess: (res) => {
+      if (!res?.suggested) {
+        toast.error('AI không trả về JSON hợp lệ')
+        return
+      }
+      const s = res.suggested
+      setProfile({
+        persona_label: s.persona_label || '',
+        tone: s.tone || '',
+        slang_level: s.slang_level || 'medium',
+        emoji_freq: s.emoji_freq || 'low',
+        vocab_examples: s.vocab_examples || [],
+        banned_phrases: s.banned_phrases || [],
+        interests: s.interests || [],
+        writing_quirks: s.writing_quirks || '',
+      })
+      setPresetName('ai_suggested')
+      toast.success(`AI đề xuất: ${s.persona_label || 'voice profile'} — review rồi lưu`)
+    },
+    onError: (err) => toast.error(`AI gợi ý lỗi: ${err.response?.data?.error || err.message}`),
+  })
+
+  // Auto-pick preset from a deterministic hash of accountId (no AI call)
+  const autoPickPreset = () => {
+    let h = 0
+    for (let i = 0; i < accountId.length; i++) h = (h * 31 + accountId.charCodeAt(i)) | 0
+    const keys = Object.keys(PRESETS)
+    const idx = Math.abs(h) % keys.length
+    applyPreset(keys[idx])
+    toast.success(`Đã chọn preset: ${PRESETS[keys[idx]].persona_label}`)
+  }
+
   const applyPreset = (key) => {
     const preset = PRESETS[key]
     if (!preset) return
@@ -158,6 +193,30 @@ export default function VoiceProfileEditor({ accountId, accountName, onClose }) 
       <p className="text-xs text-app-muted">
         Hermes dùng thông tin này để comment/caption/reply cho nick này khác với các nick khác — chống FB cluster và trông tự nhiên hơn.
       </p>
+
+      {/* Auto-config buttons */}
+      <div className="flex flex-wrap gap-2 p-3 bg-app-elevated rounded border border-app-border">
+        <button
+          onClick={autoPickPreset}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-info text-info hover:bg-info/10"
+        >
+          <Wand2 size={14} />
+          Tự gán preset
+        </button>
+        <button
+          onClick={() => aiSuggestMutation.mutate()}
+          disabled={aiSuggestMutation.isPending}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {aiSuggestMutation.isPending
+            ? <Loader2 size={14} className="animate-spin" />
+            : <Sparkles size={14} />}
+          AI gợi ý từ username
+        </button>
+        <span className="text-[11px] text-app-muted self-center">
+          {presetName === 'ai_suggested' && '✨ Đã được AI gợi ý'}
+        </span>
+      </div>
 
       {/* Quick presets */}
       <div>

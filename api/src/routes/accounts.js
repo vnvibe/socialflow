@@ -293,6 +293,168 @@ module.exports = async (fastify) => {
     return data || { account_id: req.params.id, voice_profile: {}, preset_name: null }
   })
 
+  // 5 voice presets — kept in sync with frontend VoiceProfileEditor.PRESETS.
+  // Defined here too so backend can auto-assign without frontend round-trip.
+  const VOICE_PRESETS = {
+    tech_25_male: {
+      persona_label: 'Thanh niên IT 25 tuổi',
+      tone: 'casual, hơi sarcasm, thích tranh luận kỹ thuật',
+      slang_level: 'high', emoji_freq: 'low',
+      vocab_examples: ['mình', 'bro', 'k', 'ko', 'nma', 'chứ', 'ờm'],
+      banned_phrases: ['kính gửi', 'em xin', 'ạ', 'dạ vâng'],
+      interests: ['lập trình', 'gaming', 'crypto', 'gym', 'F1'],
+      writing_quirks: 'Hay viết tắt "k" thay "không", không dấu chấm cuối câu',
+    },
+    mom_35_female: {
+      persona_label: 'Mẹ bỉm 35 tuổi',
+      tone: 'thân thiện, ấm áp, hay quan tâm hỏi han',
+      slang_level: 'low', emoji_freq: 'medium',
+      vocab_examples: ['các mẹ', 'mom', 'baby nhà mình', 'ơi', 'nha', 'ạ'],
+      banned_phrases: ['vc', 'vl', 'đm', 'dmm'],
+      interests: ['nuôi con', 'bỉm sữa', 'nấu ăn', 'mua sắm online', 'gia đình'],
+      writing_quirks: 'Hay gọi "các mẹ ơi", kết câu "nha", "ạ"; emoji ❤️ 🥰',
+    },
+    student_20: {
+      persona_label: 'Sinh viên 20 tuổi',
+      tone: 'năng động, vô tư, hay đùa',
+      slang_level: 'high', emoji_freq: 'high',
+      vocab_examples: ['t', 'mày', 'tau', 'đm chứ', 'vcl', 'cay vl', 'sml', 'oke'],
+      banned_phrases: ['kính gửi', 'trân trọng'],
+      interests: ['học hành', 'meme', 'idol Kpop', 'phim', 'cafe'],
+      writing_quirks: 'Hay dùng "t" thay "tao/tôi", emoji 😂 🥲 nhiều',
+    },
+    office_30_neutral: {
+      persona_label: 'Nhân viên văn phòng 30 tuổi',
+      tone: 'lịch sự, trung tính, có phần dè dặt',
+      slang_level: 'low', emoji_freq: 'low',
+      vocab_examples: ['mình', 'bạn', 'theo mình', 'thực ra'],
+      banned_phrases: ['vc', 'vl', 'đm', 'tau', 'mày'],
+      interests: ['công việc', 'tài chính cá nhân', 'du lịch', 'ẩm thực'],
+      writing_quirks: 'Câu đầy đủ chủ ngữ vị ngữ, có dấu chấm câu',
+    },
+    business_40_male: {
+      persona_label: 'Anh kinh doanh 40 tuổi',
+      tone: 'chững chạc, thực dụng, đi thẳng vấn đề',
+      slang_level: 'low', emoji_freq: 'none',
+      vocab_examples: ['anh', 'em', 'theo kinh nghiệm', 'thực tế là', 'cái này'],
+      banned_phrases: ['vc', 'vl', 'mày', 'tau', 'idol', 'oke'],
+      interests: ['kinh doanh', 'đầu tư', 'bất động sản', 'xe hơi', 'thể thao'],
+      writing_quirks: 'Xưng "anh", gọi "em" hoặc "bạn"; câu ngắn súc tích',
+    },
+  }
+  const PRESET_KEYS = Object.keys(VOICE_PRESETS)
+
+  // Deterministic preset pick from account_id → same nick always maps to same preset
+  // (so re-running auto-assign doesn't reshuffle existing voices).
+  function pickPresetForId(accountId) {
+    let h = 0
+    for (let i = 0; i < accountId.length; i++) h = (h * 31 + accountId.charCodeAt(i)) | 0
+    const idx = Math.abs(h) % PRESET_KEYS.length
+    return PRESET_KEYS[idx]
+  }
+
+  // POST /accounts/voice-profiles/auto-assign — bulk-assign presets to all
+  // nicks that don't have a voice_profile yet. Deterministic per account_id.
+  // Body: { force?: boolean } — if true, overwrite existing profiles too.
+  fastify.post('/voice-profiles/auto-assign', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { force = false } = req.body || {}
+
+    // Get all nicks belonging to this user (or all if admin)
+    let q = supabase.from('accounts').select('id, username').eq('is_active', true)
+    if (req.user.role !== 'admin') q = q.eq('owner_id', req.user.id)
+    const { data: nicks, error: nickErr } = await q
+    if (nickErr) return reply.code(500).send({ error: nickErr.message })
+    if (!nicks?.length) return { assigned: 0, total: 0, details: [] }
+
+    // Find which already have a non-empty voice_profile
+    let existing = new Set()
+    if (!force) {
+      const { data: rows } = await supabase
+        .from('nick_personality')
+        .select('account_id, voice_profile')
+        .in('account_id', nicks.map(n => n.id))
+      for (const r of rows || []) {
+        if (r.voice_profile && Object.keys(r.voice_profile).length > 0) {
+          existing.add(r.account_id)
+        }
+      }
+    }
+
+    const targets = nicks.filter(n => !existing.has(n.id))
+    if (!targets.length) return { assigned: 0, total: nicks.length, details: [], skipped: existing.size }
+
+    // Build upsert rows
+    const now = new Date().toISOString()
+    const rows = targets.map(n => {
+      const presetKey = pickPresetForId(n.id)
+      return {
+        account_id: n.id,
+        voice_profile: VOICE_PRESETS[presetKey],
+        preset_name: presetKey,
+        updated_at: now,
+      }
+    })
+
+    const { error: upErr } = await supabase
+      .from('nick_personality')
+      .upsert(rows, { onConflict: 'account_id' })
+    if (upErr) return reply.code(500).send({ error: upErr.message })
+
+    return {
+      assigned: targets.length,
+      total: nicks.length,
+      skipped: existing.size,
+      details: targets.map((n, i) => ({
+        username: n.username,
+        preset: rows[i].preset_name,
+        persona: VOICE_PRESETS[rows[i].preset_name].persona_label,
+      })),
+    }
+  })
+
+  // POST /accounts/:id/voice-profile/suggest — call Hermes to suggest a voice
+  // profile based on nick metadata (username, recent activity, age).
+  // Returns the suggested JSON; user reviews + saves via PUT.
+  fastify.post('/:id/voice-profile/suggest', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: acc } = await supabase
+      .from('accounts')
+      .select('id, username, owner_id, fb_user_id, created_at, notes')
+      .eq('id', req.params.id).maybeSingle()
+    if (!acc) return reply.code(404).send({ error: 'Account not found' })
+    if (req.user.role !== 'admin' && acc.owner_id !== req.user.id) {
+      return reply.code(403).send({ error: 'Forbidden' })
+    }
+
+    const { getOrchestratorForUser } = require('../services/ai/orchestrator')
+    const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
+
+    const userPrompt = `Tạo voice_profile cho nick Facebook này. Trả về JSON với các field:
+persona_label (string), tone (string), slang_level (none|low|medium|high), emoji_freq (none|low|medium|high), vocab_examples (string[]), banned_phrases (string[]), interests (string[]), writing_quirks (string).
+
+Username: "${acc.username || acc.fb_user_id || 'unknown'}"
+Notes: ${acc.notes || '(không có)'}
+Đoán dựa trên username + ngữ cảnh người Việt dùng FB. Mỗi nick phải có giọng KHÁC NHAU.
+
+Trả về CHỈ JSON, không markdown wrapper.`
+
+    try {
+      const result = await orchestrator.call('caption_gen', [
+        { role: 'user', content: userPrompt }
+      ], { max_tokens: 600 })
+      const text = (result?.text || result || '').trim()
+      // Extract JSON
+      const m = text.match(/\{[\s\S]*\}/)
+      if (!m) return reply.code(502).send({ error: 'Hermes did not return JSON', raw: text.slice(0, 300) })
+      let suggested
+      try { suggested = JSON.parse(m[0]) } catch (e) {
+        return reply.code(502).send({ error: 'Invalid JSON from Hermes', raw: m[0].slice(0, 300) })
+      }
+      return { suggested, raw: text.slice(0, 500) }
+    } catch (err) {
+      return reply.code(502).send({ error: `AI suggest failed: ${err.message}` })
+    }
+  })
+
   // PUT /accounts/:id/voice-profile — Update voice profile.
   // Body: { voice_profile: {...} } — JSONB blob (see Hermes format_voice_profile_block).
   fastify.put('/:id/voice-profile', { preHandler: fastify.authenticate }, async (req, reply) => {
