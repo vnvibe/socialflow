@@ -1486,6 +1486,7 @@ const OUTCOME_LABEL = {
   failed:         { label: '✗ Lỗi',    color: 'text-danger' },
   pending:        { label: '⏳ Chờ',   color: 'text-warn' },
   user_rejected:  { label: '× Bỏ qua', color: 'text-app-muted' },
+  skipped:        { label: '⤳ Bỏ qua (cap)', color: 'text-app-muted' },
 }
 
 function HermesTab({ campaignId }) {
