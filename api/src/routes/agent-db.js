@@ -192,7 +192,7 @@ module.exports = async (fastify) => {
         const valueRows = rows.map(r => {
           const placeholders = keys.map((k) => {
             const v = r[k]
-            args.push(v === undefined ? null : (typeof v === 'object' && v !== null ? JSON.stringify(v) : v))
+            args.push(v === undefined ? null : Array.isArray(v) ? v : (typeof v === 'object' && v !== null ? JSON.stringify(v) : v))
             return `$${args.length}`
           })
           return `(${placeholders.join(',')})`
@@ -217,7 +217,7 @@ module.exports = async (fastify) => {
         const args = []
         const setSql = keys.map((k) => {
           const v = updates[k]
-          args.push(v === undefined ? null : (typeof v === 'object' && v !== null ? JSON.stringify(v) : v))
+          args.push(v === undefined ? null : Array.isArray(v) ? v : (typeof v === 'object' && v !== null ? JSON.stringify(v) : v))
           return `"${k}"=$${args.length}`
         }).join(',')
         const { sql: whereSql, args: whereArgs } = buildWhere(filters, args.length + 1)
@@ -253,7 +253,7 @@ module.exports = async (fastify) => {
         const valueRows = rows.map(r => {
           const ps = keys.map((k) => {
             const v = r[k]
-            args.push(v === undefined ? null : (typeof v === 'object' && v !== null ? JSON.stringify(v) : v))
+            args.push(v === undefined ? null : Array.isArray(v) ? v : (typeof v === 'object' && v !== null ? JSON.stringify(v) : v))
             return `$${args.length}`
           })
           return `(${ps.join(',')})`
