@@ -40,6 +40,7 @@ export default function CampaignForm() {
     topic: '',
     mission: '',
     language: 'vi',
+    min_member_count: 100,
     schedule_type: 'recurring',
     cron_expression: `${randMin()} 6,10,14,18,22 * * *`,
   })
@@ -87,6 +88,7 @@ export default function CampaignForm() {
         topic: existing.topic || '',
         mission: existing.mission || existing.requirement || '',
         language: existing.language || 'vi',
+        min_member_count: existing.min_member_count ?? 100,
         schedule_type: existing.schedule_type || 'recurring',
         cron_expression: existing.cron_expression || '0 9 * * *',
       })
@@ -266,6 +268,21 @@ export default function CampaignForm() {
               <option value="en">Tiếng Anh</option>
               <option value="mixed">Đa ngôn ngữ</option>
             </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-app-muted mb-1 block">
+              Tối thiểu thành viên
+              <span className="ml-1 text-app-muted/70">(scout chỉ join nhóm ≥ ngưỡng này)</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              step={50}
+              value={form.min_member_count}
+              onChange={e => setForm({ ...form, min_member_count: parseInt(e.target.value) || 0 })}
+              placeholder="100"
+              className="w-full border border-app-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
           </div>
         </div>
 
