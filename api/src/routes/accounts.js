@@ -2,6 +2,7 @@ const { extractCUserId, generateFingerprint, normalizeCookieInput } = require('.
 const { fetchPersonalInbox, replyPersonalMessage } = require('../services/facebook/fb-inbox')
 const { getAccessibleIds, canAccess } = require('../lib/access-check')
 const { buildInitialBudget } = require('../services/warmup-budget')
+const { redistributeActiveHours } = require('../services/active-hours-redistributor')
 
 module.exports = async (fastify) => {
   const { supabase } = fastify
@@ -244,13 +245,22 @@ module.exports = async (fastify) => {
     }).select().single()
 
     if (error) return reply.code(500).send({ error: error.message })
+
+    // Recompute active_hours across this owner's living nicks (event-driven).
+    try {
+      const r = await redistributeActiveHours(supabase, req.user.id, { reason: 'account_added' })
+      fastify.log.info({ r }, '[ACTIVE-HOURS] redistributed after account_added')
+    } catch (e) {
+      fastify.log.warn({ err: e.message }, '[ACTIVE-HOURS] redistribute failed after account_added')
+    }
+
     return reply.code(201).send(data)
   })
 
   // PUT /accounts/:id - Update account
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const allowed = ['username', 'browser_type', 'proxy_id', 'notes', 'is_active',
-      'active_hours_start', 'active_hours_end', 'active_days',
+      'active_hours_start', 'active_hours_end', 'active_hours_locked', 'active_days',
       'min_interval_minutes', 'max_daily_posts', 'random_delay_minutes', 'fb_created_at']
     const updates = {}
     for (const key of allowed) {
@@ -738,6 +748,15 @@ module.exports = async (fastify) => {
       created_by: req.user.id,
     }).select().single()
 
+    // Cookie refresh re-enabled the nick — recompute active_hours so the
+    // revived nick gets a slot in the living-nick rotation.
+    try {
+      const r = await redistributeActiveHours(supabase, req.user.id, { reason: 'cookie_refreshed' })
+      fastify.log.info({ r }, '[ACTIVE-HOURS] redistributed after cookie_refreshed')
+    } catch (e) {
+      fastify.log.warn({ err: e.message }, '[ACTIVE-HOURS] redistribute failed after cookie_refreshed')
+    }
+
     return { ...data, health_check_job_id: job?.id, message: 'Cookie updated — health check queued' }
   })
 
@@ -805,6 +824,15 @@ module.exports = async (fastify) => {
           data: { account_id: req.params.id, status, reason, detected_at },
         })
       } catch {}
+    }
+
+    // Status change crosses the alive/dead boundary in either direction —
+    // recompute active_hours for the owner's living set.
+    try {
+      const r = await redistributeActiveHours(supabase, account.owner_id, { reason: `status_${status}` })
+      fastify.log.info({ r }, '[ACTIVE-HOURS] redistributed after status change')
+    } catch (e) {
+      fastify.log.warn({ err: e.message }, '[ACTIVE-HOURS] redistribute failed after status change')
     }
 
     return {
