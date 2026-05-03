@@ -285,6 +285,21 @@ CHỈ trả về JSON, không giải thích.`
 async function qualityGateComment({ comment, postText, group, topic, nick, ownerId, threadComments }) {
   if (!comment || comment.length < 3) return { approved: false, reason: 'too_short' }
 
+  // 2026-05-04: a 19-char follow-up like "Mình sẽ theo dõi thêm" was slipping
+  // through because it was below the AI-check threshold AND not in the regex
+  // bank. Real-human comments worth posting carry substance — numbers, brand
+  // names, a personal anecdote, or a pointed question. If the comment is
+  // shorter than ~30 chars / 6 words AND has no specific token, kill it.
+  const trimmed = comment.trim()
+  const wordCount = trimmed.split(/\s+/).length
+  const hasSpecific = /\d+[%kKgGmM]?|[A-Z]{2,}[a-z]*\d*|vps|api|cpu|ram|ssd|node|nginx|docker|aws|gcp|azure|cloudflare|vpn|cdn|kbps|mbps|gbps|ms|tb|gb/i.test(trimmed)
+  if (trimmed.length < 30 && !hasSpecific) {
+    return { approved: false, reason: 'too_short_no_substance', score: 2 }
+  }
+  if (wordCount < 6 && !hasSpecific) {
+    return { approved: false, reason: 'too_few_words', score: 2 }
+  }
+
   // Fix 4: collapse the post + thread into a single corpus so the gate can check
   // whether the comment actually addresses one specific token from the discussion.
   const threadArr = Array.isArray(threadComments) ? threadComments.slice(0, 5) : []
@@ -307,6 +322,17 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
     /thấy (nó |nó )?xử lý (rất )?(mượt|tốt|nhanh)/i,  // bot review
     /rất (hay|bổ ích|hữu ích|tuyệt vời)/i,  // generic praise
     /mình (cũng )?hay dùng .+ (cho |để )/i,  // bán hàng gián tiếp
+    /^mình sẽ (theo dõi|tìm hiểu|thử|note|lưu lại|xem)/i,  // 2026-05-04 ban: "Mình sẽ theo dõi thêm" pattern
+    /theo dõi (thêm|tiếp)/i,
+    /^(hóng|hong|theo dõi)\b/i,  // hóng/theo dõi cụt
+    /^(đánh dấu|dấu)/i,  // đánh dấu để xem sau
+    /^lưu (lại|về)/i,
+    /^để dành/i,
+    /^cảm ơn (bạn )?(nhé|nha|nhiều|ạ|đã)/i,  // cảm ơn cụt
+    /hay (đấy|ghê|nhỉ|thật)\.?$/i,
+    /^bài (hay|chất|chuẩn)/i,
+    /chuẩn (rồi|luôn)/i,
+    /^(đỉnh|tuyệt|xịn|vip|pro)\b/i,
   ]
   if (genericPatterns.some(p => p.test(comment.trim()))) {
     return { approved: false, reason: 'generic_template', score: 2 }
@@ -321,8 +347,11 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
     }
   }
 
-  // AI quality check for longer comments
-  if (comment.length > 20) {
+  // AI quality check on every comment that survives heuristics. Previously
+  // gated at length>20 but that let 19-char fluff slip through; we already
+  // bailed on too-short / too-few-words above, so the surviving payload is
+  // long enough to deserve an AI verdict.
+  if (true) {
     try {
       const qgPrompt = `Đánh giá bình luận Facebook sau:
 
@@ -340,6 +369,8 @@ REJECT (approved=false) nếu:
 - Comment lặp lại ý đã có trong thread
 - Comment hỏi câu đã được trả lời trong thread
 - Comment chung chung kiểu "rất hay", "thông tin bổ ích", "mình cũng vậy"
+- Comment kiểu "hóng", "theo dõi thêm", "đánh dấu", "lưu lại" — không có giá trị
+- Comment không có ít nhất 1 trong: số liệu cụ thể, tên brand/tool, trải nghiệm cá nhân chi tiết, câu hỏi đào sâu, workaround có thể test
 
 Trả về JSON: {"naturalness": N, "relevance": N, "value": N, "approved": true/false, "reason": "..."}`
 
@@ -359,7 +390,7 @@ Trả về JSON: {"naturalness": N, "relevance": N, "value": N, "approved": true
         const result = JSON.parse(jsonMatch[0])
         const avg = ((result.naturalness || 0) + (result.relevance || 0) + (result.value || 0)) / 3
         return {
-          approved: avg >= 4.5 && result.naturalness >= 3 && result.relevance >= 3,
+          approved: avg >= 6.0 && result.naturalness >= 5 && result.relevance >= 5 && result.value >= 4,
           score: Math.round(avg * 10) / 10,
           naturalness: result.naturalness,
           relevance: result.relevance,

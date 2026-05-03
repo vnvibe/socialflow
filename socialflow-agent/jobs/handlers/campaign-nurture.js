@@ -949,20 +949,47 @@ async function campaignNurture(payload, supabase) {
                   if (t && t.length > 0 && t.length < 80) { author = t; break }
                 }
 
-                // Extract post URL — expanded patterns incl. pfbid format (current FB)
+                // Extract post URL — expanded patterns + modern FB fallbacks.
+                // Activity log was logging post_url=null because current FB
+                // group feeds wrap the timestamp permalink in a __cft__ token
+                // URL and use /multi_permalinks/ for re-shared posts.
                 let postUrl = null
+                const tryUrl = (href) => {
+                  if (!href) return null
+                  if (href.match(/\/(posts|permalink|multi_permalinks)\/(pfbid[\w]+|\d+)/) ||
+                      href.includes('story_fbid=') ||
+                      href.match(/\/(videos|photos|reel)\/\d+/) ||
+                      href.match(/\/groups\/[^/]+\/(posts|permalink)\/(pfbid[\w]+|\d+)/)) {
+                    return href.split('?')[0]
+                  }
+                  return null
+                }
+
+                // Pass 1: classic anchors with explicit /posts/ etc.
                 const urlCandidates = article.querySelectorAll(
-                  'a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="/videos/"], a[href*="/photos/"]'
+                  'a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="/videos/"], a[href*="/photos/"], a[href*="/reel/"], a[href*="/multi_permalinks/"]'
                 )
                 for (const link of urlCandidates) {
-                  const href = link.href || ''
-                  // Accept pfbid format + numeric + photo/video URLs with story_fbid
-                  if (href.match(/\/(posts|permalink)\/(pfbid[\w]+|\d+)/) ||
-                      href.includes('story_fbid=') ||
-                      href.match(/\/(videos|photos)\/\d+/)) {
-                    postUrl = href.split('?')[0]
-                    break
+                  postUrl = tryUrl(link.href || '')
+                  if (postUrl) break
+                }
+
+                // Pass 2: modern FB wraps the post timestamp in a token URL
+                // like https://www.facebook.com/groups/foo/posts/123?__cft__[0]=...
+                // The href contains /posts/<id> after the ?, so the regex still
+                // matches — but the anchor doesn't have /posts/ in its raw
+                // selector. Search every anchor whose href has a fbid pattern.
+                if (!postUrl) {
+                  for (const link of article.querySelectorAll('a[href]')) {
+                    postUrl = tryUrl(link.href || link.getAttribute('href') || '')
+                    if (postUrl) break
                   }
+                }
+
+                // Pass 3: <a><time> permalink — FB's own canonical post link
+                if (!postUrl) {
+                  const timeAnchor = article.querySelector('a[role="link"] time, a[role="link"] abbr')?.closest('a')
+                  if (timeAnchor) postUrl = tryUrl(timeAnchor.href || '')
                 }
 
                 // Skip only if NO content at all (no body, no url, no author)

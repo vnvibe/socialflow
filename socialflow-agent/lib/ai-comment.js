@@ -173,75 +173,14 @@ async function generateComment(context = {}) {
  * Generate a short contextual comment by analyzing post content
  * Extracts key nouns/topics and builds a relevant response
  */
-function generateContextualFallback(postText, topic) {
-  const lower = postText.toLowerCase()
-
-  // Detect post type and respond accordingly
-  // Questions
-  if (/\?|ai biết|có ai|mọi người|cho mình hỏi|giúp mình|tư vấn/.test(lower)) {
-    const questions = [
-      'Mình cũng đang tìm hiểu vấn đề này',
-      'Vấn đề hay, mình cũng muốn biết',
-      'Câu hỏi đúng lúc mình cũng cần',
-    ]
-    return pick(questions)
-  }
-
-  // Technical/tutorial
-  if (/hướng dẫn|cách|setup|cài đặt|config|tutorial|step|bước/.test(lower)) {
-    const tech = [
-      'Cảm ơn bài hướng dẫn chi tiết',
-      'Mình vừa làm theo, rất hữu ích',
-      'Bài viết cụ thể và dễ hiểu',
-    ]
-    return pick(tech)
-  }
-
-  // Sharing experience
-  if (/kinh nghiệm|trải nghiệm|review|đánh giá|dùng thử|sử dụng/.test(lower)) {
-    const exp = [
-      'Chia sẻ rất thiết thực',
-      'Kinh nghiệm hữu ích cho mình',
-      'Mình sẽ thử áp dụng',
-    ]
-    return pick(exp)
-  }
-
-  // Announcement/news
-  if (/ra mắt|update|cập nhật|mới|version|release|phiên bản/.test(lower)) {
-    const news = [
-      'Tin tốt, mình sẽ xem thêm',
-      'Cập nhật đáng chú ý',
-      'Mình sẽ theo dõi thêm',
-    ]
-    return pick(news)
-  }
-
-  // Problem/error
-  if (/lỗi|bug|error|fail|không được|bị|sự cố|crash/.test(lower)) {
-    const problem = [
-      'Mình cũng gặp tình huống tương tự',
-      'Vấn đề này khá phổ biến',
-      'Hy vọng sẽ có cách khắc phục sớm',
-    ]
-    return pick(problem)
-  }
-
-  // If topic matches post, reference it
-  if (topic) {
-    const topicWords = topic.toLowerCase().split(/[\s,]+/).filter(w => w.length > 2)
-    const postMatchesTopic = topicWords.some(w => lower.includes(w))
-    if (postMatchesTopic) {
-      const topicComments = [
-        `Chủ đề ${topicWords[0]} này mình cũng quan tâm`,
-        `Đang tìm hiểu về ${topicWords[0]}, bài viết đúng lúc`,
-        `Mình cũng đang dùng ${topicWords[0]}, chia sẻ hay`,
-      ]
-      return pick(topicComments)
-    }
-  }
-
-  // No pattern matched — return empty (don't force a generic comment)
+function generateContextualFallback(_postText, _topic) {
+  // 2026-05-04: previously this function picked from hardcoded template
+  // pools per post-type. The user complained that "Mình sẽ theo dõi thêm"
+  // (one of the news templates) was being posted as a real comment — the
+  // FB activity log proved it. None of these templates carry substance,
+  // so the user-stated rule "tập trung vào bài có giá trị, đừng cmt chung
+  // chung" requires us to skip rather than fall back. Returning empty
+  // tells the caller to skip the post entirely.
   return ''
 }
 
@@ -422,30 +361,12 @@ Chỉ trả về comment, không giải thích.`
 /**
  * Generate brand-aware contextual fallback when AI fails
  */
-function generateBrandContextualFallback(postContent, brandKeywords = [], brandName = '') {
-  const lower = postContent.toLowerCase()
-
-  // Check if post is a question
-  if (/\?|ai biết|có ai|mọi người|cho mình hỏi|giúp mình|tư vấn|ở đâu|chỗ nào/.test(lower)) {
-    if (brandName) {
-      const templates = [
-        `Mình thấy ${brandName} cũng được nhiều người recommend đó bạn`,
-        `Bạn thử tìm hiểu ${brandName} xem, mình dùng thấy ổn`,
-        `${brandName} cũng là một option hay, bạn tham khảo thử`,
-      ]
-      return templates[Math.floor(Math.random() * templates.length)]
-    }
-    return null // no brand name = can't do meaningful fallback
-  }
-
-  // Experience sharing
-  if (/kinh nghiệm|chia sẻ|review|đánh giá|so sánh/.test(lower)) {
-    if (brandName) {
-      return `Cảm ơn bạn chia sẻ, mình cũng có trải nghiệm tương tự với ${brandName}`
-    }
-  }
-
-  return null // don't force a generic comment
+function generateBrandContextualFallback(_postContent, _brandKeywords = [], _brandName = '') {
+  // 2026-05-04: same reasoning as generateContextualFallback above. Hardcoded
+  // brand templates ("Mình thấy X cũng được nhiều người recommend đó bạn")
+  // read like sales bots. Skip the post if Hermes/AI cannot produce a real
+  // brand-aware comment.
+  return null
 }
 
 module.exports = { generateComment, generateOpportunityComment }
