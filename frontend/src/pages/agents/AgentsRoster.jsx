@@ -457,7 +457,7 @@ function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, tod
 }
 
 // ─── Unassigned nicks section ──────────────────────────────
-function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect, onRepair, onTogglePause, onCheckHealth }) {
+function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect, onRepair, onTogglePause, onCheckHealth, onGenSchedule }) {
   // 2026-05-05: default expanded so newly-added nicks are visible immediately
   // (user just added them — no point hiding behind a click).
   const [expanded, setExpanded] = useState(true)
@@ -498,15 +498,26 @@ function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc
               onTogglePause={onTogglePause}
             />
           </div>
-          {onCheckHealth && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onCheckHealth(nick) }}
-              className="self-center mr-3 px-2.5 py-1 text-[10px] font-mono-ui uppercase rounded border border-app-border text-app-primary hover:bg-app-elevated whitespace-nowrap"
-              title="Queue check_health job để verify cookie còn sống"
-            >
-              Check live
-            </button>
-          )}
+          <div className="self-center mr-3 flex flex-col gap-1">
+            {onCheckHealth && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onCheckHealth(nick) }}
+                className="px-2.5 py-1 text-[10px] font-mono-ui uppercase rounded border border-app-border text-app-primary hover:bg-app-elevated whitespace-nowrap"
+                title="Queue check_health job — verify cookie còn sống"
+              >
+                Check live
+              </button>
+            )}
+            {onGenSchedule && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onGenSchedule(nick) }}
+                className="px-2.5 py-1 text-[10px] font-mono-ui uppercase rounded border border-info/40 text-info hover:bg-info/10 whitespace-nowrap"
+                title={nick.schedule_profile ? `AI lại lịch trình (hiện: ${nick.schedule_profile.personality} · ${nick.schedule_profile.peak_offset_minutes}min)` : 'AI tạo lịch trình personality cho nick này'}
+              >
+                {nick.schedule_profile ? '✓ AI lịch' : 'AI tạo lịch'}
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>
@@ -1154,6 +1165,21 @@ export default function AgentsRoster() {
     onError: (err) => toast.error(err.response?.data?.error || err.message),
   })
 
+  // 2026-05-05: AI-driven per-nick schedule planner. Calls Hermes
+  // nick_schedule_planner skill — returns a personality profile (morning_dev,
+  // night_owl, etc.) with peak_offset_minutes the campaign scheduler reads.
+  const genScheduleMut = useMutation({
+    mutationFn: async (nick) => {
+      const { data } = await api.post(`/accounts/${nick.id}/generate-schedule`)
+      return { nick, profile: data?.profile }
+    },
+    onSuccess: ({ nick, profile }) => {
+      toast.success(`${nick.username || nick.id.slice(0, 8)} → ${profile?.personality} · peak ${profile?.peak_offset_minutes}min ±${profile?.jitter_minutes}`)
+      qc.invalidateQueries({ queryKey: ['accounts'] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
   // Top stats
   const activeNicks = accounts.filter(a => a.is_active).length
   const busyNow = runningJobs.length
@@ -1203,6 +1229,7 @@ export default function AgentsRoster() {
             onRepair={setRepairNick}
             onTogglePause={(nick, pause) => togglePauseNick.mutate({ nick, pause })}
             onCheckHealth={(nick) => checkHealthMut.mutate(nick)}
+            onGenSchedule={(nick) => genScheduleMut.mutate(nick)}
           />
 
           {campaigns.map((c) => (
