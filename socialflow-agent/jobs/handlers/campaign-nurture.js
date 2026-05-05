@@ -314,6 +314,24 @@ async function campaignNurture(payload, supabase) {
       console.log(`[NURTURE] ${groups.length}/${allLabeled.length} groups gán nhãn match topic "${topic}"`)
     }
 
+    // 2026-05-05: language hard filter — campaign.language=vi → ONLY visit
+    // groups marked vi (or unknown — give benefit of doubt). EN groups joined
+    // by the nick are skipped entirely, not counted toward any KPI for this
+    // campaign. User rule: "EN nhóm bỏ qua không cho vào kpi vì camp chỉ
+    // dành cho tiếng việt". Mixed campaigns visit everything.
+    if (campaignLanguage && campaignLanguage !== 'mixed') {
+      const before = groups.length
+      groups = groups.filter(g => {
+        const gl = (g.language || '').toLowerCase()
+        if (!gl || gl === 'unknown') return true
+        return gl === campaignLanguage
+      })
+      const filtered = before - groups.length
+      if (filtered > 0) {
+        console.log(`[NURTURE] Lang filter: dropped ${filtered} non-${campaignLanguage} groups (campaign=${campaignLanguage}-only)`)
+      }
+    }
+
     // ── SMART ROTATION: ưu tiên group có score cao + recent yield ──
     // Score-based sort: tier1 (>=8) → tier2 (5-7) → tier3 (<5)
     // Penalty: groups with consecutive_skips >= 2 đẩy xuống cuối
@@ -1490,8 +1508,13 @@ async function campaignNurture(payload, supabase) {
           }
 
           // === DETECT GROUP LANGUAGE from sample of eligible posts ===
-          // Use cached group.language if known, else detect now and persist
-          let groupLanguage = group.language || null
+          // 2026-05-05: also fall back to live groupAnalysis.lang (DOM heuristic
+          // computed at the top of the handler) so the language gate below can
+          // fire even when eligible=0 (i.e. all posts were translated/dedup'd).
+          // Without this, EN groups with translated posts kept slipping through
+          // because the post-eligibility detector needed >=3 eligible posts.
+          let groupLanguage = group.language || groupAnalysis?.lang || null
+          if (groupLanguage === 'unknown') groupLanguage = null
           if (!groupLanguage && eligible.length >= 3) {
             try {
               groupLanguage = detectGroupLanguage(eligible)
