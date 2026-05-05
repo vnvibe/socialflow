@@ -144,6 +144,45 @@ export default function CampaignForm() {
   const resetPlan = () => { setAiPlan(null); setPlanRows([]); setPlanConfirmed(false); setPerNickPlan({}) }
   const runsPerDay = (DEFAULT_PRESETS.find(p => p.key === scheduleMode)?.runs || 2)
 
+  // 2026-05-05: Incremental fetch — when user adds nicks AFTER AI plan exists,
+  // fetch budget JUST for the new nicks (don't wipe existing plan). Keeps the
+  // mini-editors stable while letting the user grow/shrink the roster.
+  const fetchPlansForNewNicks = async (newAccountIds) => {
+    if (!newAccountIds.length || !aiPlan) return
+    try {
+      const r = await api.post('/campaigns/preview-plan-per-nick', {
+        mission: form.mission,
+        topic: form.topic,
+        account_ids: newAccountIds,
+        runs_per_day: runsPerDay,
+        brand_config: brandPayload,
+      })
+      const incoming = r.data?.per_nick || {}
+      setPerNickPlan(prev => ({ ...prev, ...incoming }))
+      setPlanConfirmed(false)
+    } catch (err) {
+      // silent — UI keeps "đang chờ AI..." stub
+    }
+  }
+  // When selectedAccountIds change WHILE aiPlan exists, only fire for new nicks
+  // (don't reset entire plan like resetPlan does on form-input changes)
+  const onToggleNick = (a, sel) => {
+    const next = sel ? selectedAccountIds.filter(x => x !== a.id) : [...selectedAccountIds, a.id]
+    setSelectedAccountIds(next)
+    if (!aiPlan) return  // no plan yet → nothing to incrementally fetch
+    if (!sel) {
+      // Adding: fetch only for this new nick if not already in perNickPlan
+      if (!perNickPlan[a.id]) {
+        fetchPlansForNewNicks([a.id])
+      } else {
+        setPlanConfirmed(false)  // re-confirm even if cached
+      }
+    } else {
+      // Removing: just mark unconfirmed; Section 6 totals auto-recompute via filter
+      setPlanConfirmed(false)
+    }
+  }
+
   // 2026-05-05: When per-nick plans exist, Section 6 must reflect TOTAL across
   // selected nicks (not the old shared-plan numbers) so users see consistent
   // data with Section 4. Section 6 becomes read-only summary; per-nick mini
@@ -474,10 +513,7 @@ export default function CampaignForm() {
                 {accounts.map(a => {
                   const sel = selectedAccountIds.includes(a.id)
                   return (
-                    <button key={a.id} onClick={() => {
-                      const next = sel ? selectedAccountIds.filter(x => x !== a.id) : [...selectedAccountIds, a.id]
-                      setSelectedAccountIds(next); resetPlan()
-                    }}
+                    <button key={a.id} onClick={() => onToggleNick(a, sel)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                       sel ? 'bg-info text-white ' : 'bg-app-base text-app-muted hover:bg-app-elevated border border-app-border'
                     }`}>
@@ -488,9 +524,16 @@ export default function CampaignForm() {
                 })}
               </div>
               <div className="flex gap-2">
-                <button onClick={() => { setSelectedAccountIds(accounts.map(a => a.id)); resetPlan() }}
-                  className="text-[10px] text-blue-600 hover:underline">Chọn tất cả</button>
-                <button onClick={() => { setSelectedAccountIds([]); resetPlan() }}
+                <button onClick={() => {
+                  const allIds = accounts.map(a => a.id)
+                  const newOnes = allIds.filter(id => !selectedAccountIds.includes(id))
+                  setSelectedAccountIds(allIds)
+                  if (aiPlan) {
+                    const need = newOnes.filter(id => !perNickPlan[id])
+                    if (need.length) fetchPlansForNewNicks(need); else setPlanConfirmed(false)
+                  }
+                }} className="text-[10px] text-blue-600 hover:underline">Chọn tất cả</button>
+                <button onClick={() => { setSelectedAccountIds([]); if (aiPlan) setPlanConfirmed(false) }}
                   className="text-[10px] text-app-muted hover:underline">Bỏ chọn</button>
               </div>
 
