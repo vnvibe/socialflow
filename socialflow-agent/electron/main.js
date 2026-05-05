@@ -2,35 +2,133 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electr
 const path = require('path')
 const { fork, execSync, spawn } = require('child_process')
 const fs = require('fs')
-
-// Global safety net — never let a child-process ENOENT crash the whole
-// Electron main process. We log and swallow; individual handlers already
-// surface the error to the UI. Prevents the "A JavaScript error occurred
-// in the main process" dialog.
-process.on('uncaughtException', (err) => {
-  try { addLog(`[UNCAUGHT] ${err && err.message ? err.message : err}`, 'error') } catch {}
-  console.error('[UNCAUGHT]', err)
-})
-process.on('unhandledRejection', (reason) => {
-  try { addLog(`[UNHANDLED REJECTION] ${reason && reason.message ? reason.message : reason}`, 'error') } catch {}
-  console.error('[UNHANDLED REJECTION]', reason)
-})
+const { checkForUpdate, pullUpdate, getLocalVersion } = require(path.join(__dirname, '..', 'lib', 'updater'))
 
 let mainWindow = null
 let tray = null
 let agentProcess = null
 let isQuitting = false
 let logs = []
+let userSession = null  // { id, email, access_token }
 const MAX_LOGS = 500
 
-// Paths — using __dirname consistently resolves through asar. The old
-// path.join(process.resourcesPath, 'app') variant didn't, because the
-// packaged app lives at resources/app.asar (a file), not resources/app
-// (a folder). __dirname inside the asar evaluates to
-// resources/app.asar/electron and going up one gives us the asar root
-// that Electron's fs layer correctly reads inside.
+// Paths
 const isPackaged = !process.defaultApp
-const appRoot = path.join(__dirname, '..')
+// electron-builder puts asarUnpack files in app.asar.unpacked (real filesystem path)
+// fork() needs a real path — app.asar is virtual and cannot be used as cwd/script path
+const appRoot = isPackaged
+  ? (() => {
+      const unpacked = path.join(process.resourcesPath, 'app.asar.unpacked')
+      return fs.existsSync(unpacked) ? unpacked : path.join(process.resourcesPath, 'app')
+    })()
+  : path.join(__dirname, '..')
+
+let agentConfig = {}
+try { agentConfig = require(path.join(appRoot, 'lib', 'config')) } catch {}
+const API_URL = process.env.API_URL || agentConfig.API_URL || 'https://103-142-24-60.sslip.io'
+
+// ── Persistent session (so user doesn't re-login every restart) ──
+// Use auth.json for backward-compat with older builds that wrote there.
+// Lazy-compute path inside functions — app.getPath('userData') can return
+// different value before vs after app.whenReady() in some Electron builds.
+function getSessionFile() {
+  const dir = app.getPath('userData')
+  try { fs.mkdirSync(dir, { recursive: true }) } catch {}
+  return path.join(dir, 'auth.json')
+}
+
+function loadSession() {
+  const file = getSessionFile()
+  try {
+    if (!fs.existsSync(file)) {
+      console.log('[SESSION] no file at', file)
+      return null
+    }
+    const raw = fs.readFileSync(file, 'utf8')
+    const parsed = JSON.parse(raw)
+    // Support both old shape ({token, user:{id,email,...}})
+    // and new shape ({id, email, access_token})
+    const id = parsed.id || parsed.user?.id
+    const email = parsed.email || parsed.user?.email
+    const access_token = parsed.access_token || parsed.token
+    if (!id || !email || !access_token) {
+      console.log('[SESSION] file present but missing fields')
+      return null
+    }
+    console.log('[SESSION] loaded for', email, 'from', file)
+    return { id, email, access_token }
+  } catch (err) {
+    console.error('[SESSION] load failed:', err.message)
+    return null
+  }
+}
+
+function saveSession(session) {
+  const file = getSessionFile()
+  // Write in legacy shape too so any older code that reads `token` / `user.email` still works.
+  const payload = {
+    id: session.id,
+    email: session.email,
+    access_token: session.access_token,
+    token: session.access_token,
+    user: { id: session.id, email: session.email },
+  }
+  try {
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2))
+    console.log('[SESSION] saved', session.email, '→', file)
+  } catch (err) {
+    console.error('[SESSION] save failed:', err.message, 'path:', file)
+    addLog(`Không lưu được session: ${err.message}`, 'warn')
+  }
+}
+
+function clearSession() {
+  const file = getSessionFile()
+  try {
+    if (fs.existsSync(file)) {
+      fs.unlinkSync(file)
+      console.log('[SESSION] cleared')
+    }
+  } catch {}
+}
+
+// Synchronously hydrate userSession from disk — UI shows logged-in state immediately
+function hydrateSessionSync() {
+  const saved = loadSession()
+  if (saved?.access_token && saved.email) {
+    userSession = saved
+    return true
+  }
+  return false
+}
+
+// Validate token in background. Only clear session on 401/403 (token actually
+// invalid). Network errors / 5xx → keep cached session, user can keep working.
+async function validateSessionAsync() {
+  if (!userSession?.access_token) return
+  try {
+    const res = await fetch(`${API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${userSession.access_token}` },
+    })
+    if (res.ok) {
+      console.log('[SESSION] token valid for', userSession.email)
+      return
+    }
+    if (res.status === 401 || res.status === 403) {
+      addLog('Phiên hết hạn, vui lòng đăng nhập lại', 'warn')
+      userSession = null
+      clearSession()
+      updateTray()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('user', null)
+      }
+    } else {
+      console.warn('[SESSION] /auth/me returned', res.status, '— keeping cached session')
+    }
+  } catch (err) {
+    console.warn('[SESSION] validate failed (network), keeping cached session:', err.message)
+  }
+}
 
 function addLog(line, type = 'info') {
   const entry = { time: new Date().toISOString(), text: line, type }
@@ -41,14 +139,11 @@ function addLog(line, type = 'info') {
   }
 }
 
-// Check if Playwright Chromium is installed
+// Check if Playwright Chromium is installed (lazy — only called on Start)
 async function ensurePlaywright() {
   addLog('Checking Playwright Chromium...', 'info')
   try {
-    // Try to get browser path
-    const pw = require(path.join(appRoot, 'node_modules', 'playwright'))
-    const chromium = pw.chromium
-    const browserPath = chromium.executablePath()
+    const browserPath = require(path.join(appRoot, 'node_modules', 'playwright')).chromium.executablePath()
     if (fs.existsSync(browserPath)) {
       addLog('Playwright Chromium ready', 'success')
       return true
@@ -62,48 +157,11 @@ async function ensurePlaywright() {
   }
 
   return new Promise((resolve) => {
-    // Windows Electron packaged apps sometimes launch with a minimal env
-    // missing SystemRoot / ComSpec / PATH — `shell: true` then tries to
-    // locate cmd.exe via those vars and throws `spawn cmd.exe ENOENT`.
-    // Reconstruct a safe env before spawning.
-    const safeEnv = { ...process.env }
-    if (process.platform === 'win32') {
-      safeEnv.SystemRoot = safeEnv.SystemRoot || 'C:\\Windows'
-      safeEnv.ComSpec = safeEnv.ComSpec || 'C:\\Windows\\System32\\cmd.exe'
-      safeEnv.PATH = safeEnv.PATH || `${safeEnv.SystemRoot}\\System32;${safeEnv.SystemRoot}`
-      if (!safeEnv.PATH.toLowerCase().includes('system32')) {
-        safeEnv.PATH = `${safeEnv.SystemRoot}\\System32;${safeEnv.PATH}`
-      }
-    }
-    safeEnv.PLAYWRIGHT_BROWSERS_PATH = path.join(appRoot, '.browsers')
-
-    // Use fork() instead of spawn('npx.cmd') — .cmd files on Windows
-    // REQUIRE cmd.exe as interpreter even with shell:false, and packaged
-    // Electron apps often launch with a stripped env where cmd.exe can't
-    // be located. fork() runs a Node script directly in the current
-    // Electron's Node runtime → no shell, no .cmd wrapper needed.
-    const playwrightCli = path.join(appRoot, 'node_modules', 'playwright', 'cli.js')
-    if (!fs.existsSync(playwrightCli)) {
-      addLog(`Playwright CLI not found at ${playwrightCli}`, 'error')
-      return resolve(false)
-    }
-
-    const child = fork(playwrightCli, ['install', 'chromium'], {
+    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+    const child = spawn(npx, ['playwright', 'install', 'chromium'], {
       cwd: appRoot,
-      env: safeEnv,
-      silent: true,  // pipe stdout/stderr so we can stream install progress
-    })
-
-    // MUST attach 'error' listener — if fork itself fails (missing binary,
-    // permissions), Node emits 'error' async. Without this handler,
-    // Electron catches it as Uncaught Exception and shows the scary JS
-    // error dialog.
-    child.on('error', (err) => {
-      addLog(`Chromium install fork failed: ${err.message}`, 'error')
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('setup-progress', null)
-      }
-      resolve(false)
+      env: { ...process.env },
+      shell: true,
     })
 
     child.stdout.on('data', (d) => addLog(d.toString().trim(), 'info'))
@@ -148,36 +206,17 @@ function startAgent() {
     }
   }
 
-  // Same safe-env treatment as ensurePlaywright — the forked agent spawns
-  // powershell + taskkill on boot (killZombieChromium), needs SystemRoot.
-  const forkEnv = { ...process.env, ...envVars }
-  if (process.platform === 'win32') {
-    forkEnv.SystemRoot = forkEnv.SystemRoot || 'C:\\Windows'
-    forkEnv.ComSpec = forkEnv.ComSpec || 'C:\\Windows\\System32\\cmd.exe'
-    const sys32 = `${forkEnv.SystemRoot}\\System32`
-    if (!forkEnv.PATH || !forkEnv.PATH.toLowerCase().includes('system32')) {
-      forkEnv.PATH = `${sys32};${forkEnv.PATH || ''}`
-    }
-  }
-
-  // Scope this agent to the logged-in user — poller filters jobs by
-  // AGENT_USER_ID, so multiple users running the same binary each
-  // process only their own campaigns.
-  if (authSession) {
-    forkEnv.AGENT_USER_ID = authSession.user.id
-    forkEnv.AGENT_USER_EMAIL = authSession.user.email
-    forkEnv.AGENT_USER_TOKEN = authSession.token
-  }
-
   agentProcess = fork(agentPath, [], {
     cwd: appRoot,
-    env: forkEnv,
+    env: {
+      ...process.env,
+      ...envVars,
+      ...(userSession && {
+        AGENT_USER_ID: userSession.id,
+        AGENT_USER_EMAIL: userSession.email,
+      }),
+    },
     silent: true,
-  })
-
-  agentProcess.on('error', (err) => {
-    addLog(`Agent fork failed: ${err.message}`, 'error')
-    agentProcess = null
   })
 
   agentProcess.stdout.on('data', (data) => {
@@ -236,6 +275,8 @@ function createWindow() {
     minHeight: 400,
     title: 'SocialFlow Agent',
     icon: path.join(__dirname, 'icon.png'),
+    show: true,
+    backgroundColor: '#0f172a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -293,90 +334,12 @@ function createTray() {
   updateTray()
 }
 
-// ── Auth (SaaS login) ──────────────────────────────────────────────────
-// Each user's agent runs against THEIR campaigns; the poller filters
-// jobs by user_id. So we need email+password login that calls the VPS
-// API /auth/login (not Supabase cloud — that DB is dead) and persists
-// { token, user } to disk so the session survives restart.
-
-const AUTH_STORE_PATH = path.join(app.getPath('userData'), 'auth.json')
-let authSession = null // { token, user: { id, email, username } }
-
-function loadAuth() {
-  try {
-    if (fs.existsSync(AUTH_STORE_PATH)) {
-      authSession = JSON.parse(fs.readFileSync(AUTH_STORE_PATH, 'utf8'))
-    }
-  } catch (err) {
-    authSession = null
-    try { fs.unlinkSync(AUTH_STORE_PATH) } catch {}
-  }
-  return authSession
-}
-
-function saveAuth(session) {
-  authSession = session
-  try {
-    if (session) fs.writeFileSync(AUTH_STORE_PATH, JSON.stringify(session, null, 2))
-    else if (fs.existsSync(AUTH_STORE_PATH)) fs.unlinkSync(AUTH_STORE_PATH)
-  } catch (err) {
-    addLog(`[AUTH] failed to persist session: ${err.message}`, 'warn')
-  }
-}
-
-async function apiLogin(email, password) {
-  // Resolve API URL from config.js (build-embedded) or env.
-  let apiUrl = process.env.API_URL || process.env.API_BASE_URL
-  if (!apiUrl) {
-    try {
-      const cfg = require(path.join(appRoot, 'lib', 'config'))
-      apiUrl = cfg.API_URL || 'https://103-142-24-60.sslip.io'
-    } catch {
-      apiUrl = 'https://103-142-24-60.sslip.io'
-    }
-  }
-  const url = `${apiUrl.replace(/\/$/, '')}/auth/login`
-  const body = JSON.stringify({ email, password })
-
-  const https = require('https')
-  const http = require('http')
-  const lib = url.startsWith('https:') ? https : http
-  return new Promise((resolve) => {
-    const req = lib.request(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-      timeout: 15000,
-    }, (res) => {
-      let data = ''
-      res.on('data', (c) => data += c)
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data)
-          if (res.statusCode === 200 && json.token) {
-            resolve({ ok: true, token: json.token, user: json.user })
-          } else {
-            resolve({ ok: false, error: json.error || `HTTP ${res.statusCode}` })
-          }
-        } catch (err) {
-          resolve({ ok: false, error: 'invalid response' })
-        }
-      })
-    })
-    req.on('error', (err) => resolve({ ok: false, error: err.message }))
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }) })
-    req.write(body)
-    req.end()
-  })
-}
-
 // IPC handlers
-ipcMain.handle('get-status', () => ({ running: !!agentProcess, loggedIn: !!authSession }))
+ipcMain.handle('get-status', () => ({ running: !!agentProcess }))
 ipcMain.handle('get-logs', () => logs)
+ipcMain.handle('get-user', () => userSession)
 ipcMain.handle('start-agent', async () => {
-  if (!authSession) {
-    addLog('[AGENT] Login required before starting', 'warn')
-    return false
-  }
+  if (!userSession) return { error: 'Chưa đăng nhập' }
   await ensurePlaywright()
   startAgent()
   return true
@@ -384,36 +347,142 @@ ipcMain.handle('start-agent', async () => {
 ipcMain.handle('stop-agent', () => { stopAgent(); return true })
 ipcMain.handle('clear-logs', () => { logs = []; return true })
 
-ipcMain.handle('auth:login', async (_, { email, password }) => {
-  const result = await apiLogin(email, password)
-  if (result.ok) {
-    saveAuth({ token: result.token, user: result.user })
-    addLog(`[AUTH] Logged in as ${result.user.email}`, 'success')
-  } else {
-    addLog(`[AUTH] Login failed: ${result.error}`, 'error')
+ipcMain.handle('login', async (_, { email, password }) => {
+  try {
+    const res = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || `HTTP ${res.status}` }
+    userSession = { id: data.user.id, email: data.user.email, access_token: data.token }
+    saveSession(userSession)
+    addLog(`Đã đăng nhập: ${userSession.email}`, 'success')
+    updateTray()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('user', userSession)
+    }
+    return { user: { id: userSession.id, email: userSession.email } }
+  } catch (err) {
+    return { error: err.message }
   }
-  return result
 })
-ipcMain.handle('auth:logout', async () => {
-  stopAgent()
-  saveAuth(null)
-  addLog('[AUTH] Logged out', 'info')
-  return { ok: true }
+
+// Auto-update handlers
+ipcMain.handle('check-update', async () => {
+  try {
+    const result = await checkForUpdate()
+    return result
+  } catch (err) {
+    return { hasUpdate: false, error: err.message }
+  }
 })
-ipcMain.handle('auth:me', () => authSession?.user || null)
+
+ipcMain.handle('apply-update', async () => {
+  try {
+    const { isGitRepo } = require(path.join(appRoot, 'lib', 'updater'))
+
+    // Exe mode: open download page
+    if (!isGitRepo()) {
+      const { shell } = require('electron')
+      shell.openExternal(`https://github.com/nguyentanviet92-pixel/socialflow/releases`)
+      addLog('Mo trang tai ban moi...', 'info')
+      return { success: true, message: 'Mo trang tai xuong', method: 'http' }
+    }
+
+    // Git mode: pull update
+    if (agentProcess) {
+      addLog('Dang tat agent de cap nhat...', 'info')
+      stopAgent()
+      await new Promise(r => setTimeout(r, 2000))
+    }
+
+    addLog('Dang tai ban cap nhat...', 'info')
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('setup-progress', 'Dang cap nhat...')
+    }
+
+    const result = await pullUpdate()
+    if (result.success) {
+      addLog(`Cap nhat thanh cong: ${result.message}`, 'success')
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('setup-progress', null)
+        mainWindow.webContents.send('update-result', { success: true, message: result.message })
+      }
+      setTimeout(() => { app.relaunch(); app.exit(0) }, 1500)
+      return result
+    } else {
+      addLog(`Cap nhat that bai: ${result.message}`, 'error')
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('setup-progress', null)
+        mainWindow.webContents.send('update-result', { success: false, message: result.message })
+      }
+      return result
+    }
+  } catch (err) {
+    addLog(`Loi cap nhat: ${err.message}`, 'error')
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('setup-progress', null)
+    }
+    return { success: false, message: err.message }
+  }
+})
+
+ipcMain.handle('get-version', () => {
+  return getLocalVersion() || require(path.join(appRoot, 'package.json')).version
+})
+
+ipcMain.handle('logout', () => {
+  if (agentProcess) stopAgent()
+  userSession = null
+  clearSession()
+  addLog('Đã đăng xuất', 'info')
+  updateTray()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('user', null)
+  }
+  return true
+})
+
+// Single instance lock — prevent multiple agent windows
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    // Someone tried to open a second instance — focus existing window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
 
 // App lifecycle
-app.whenReady().then(async () => {
-  loadAuth()
-  createTray()
-  createWindow()
-
-  // Auto-start ONLY if previously logged in — otherwise UI shows
-  // login form and waits for the user.
-  if (authSession) {
-    await ensurePlaywright()
-    startAgent()
+app.whenReady().then(() => {
+  // Hydrate session from disk SYNCHRONOUSLY before creating window
+  // → renderer's initial getUser() returns the saved user immediately
+  if (hydrateSessionSync()) {
+    addLog(`Phiên trước: ${userSession.email}`, 'info')
   }
+
+  createWindow()
+  createTray()
+
+  // Validate token in background — if expired, UI gets a 'user: null' event
+  validateSessionAsync()
+
+  // Check for updates after 5s delay (non-blocking, low priority)
+  setTimeout(() => {
+    checkForUpdate().then(result => {
+      if (result.hasUpdate && mainWindow && !mainWindow.isDestroyed()) {
+        addLog(`Co ban cap nhat moi (${result.behind} commits)`, 'warn')
+        mainWindow.webContents.send('update-available', result)
+      }
+    }).catch(() => {})
+  }, 5000)
 })
 
 app.on('window-all-closed', () => {

@@ -20,6 +20,7 @@ import HermesScoreBadge from '../../components/hermes/HermesScoreBadge'
 import SlidePanel from '../../components/hermes/SlidePanel'
 import JobRow from '../../components/hermes/JobRow'
 import CookieRepairModal from '../../components/hermes/CookieRepairModal'
+import { AddAccountModal } from '../accounts/AccountList'
 
 const asArray = (d) => Array.isArray(d) ? d
   : Array.isArray(d?.items) ? d.items
@@ -901,6 +902,10 @@ export default function AgentsRoster() {
   const [selected, setSelected] = useState(null)
   const [repairNick, setRepairNick] = useState(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  // 2026-05-05: add-nick modal — user reported /agents had no way to add a
+  // new agent and had to go to /accounts. Reuse the same AddAccountModal so
+  // there's only one source of truth for the add flow.
+  const [showAddModal, setShowAddModal] = useState(false)
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -1144,6 +1149,14 @@ export default function AgentsRoster() {
           <DenseStat value={busyNow} label="Busy now" color="hermes" />
           <DenseStat value={todayTotal} label="Jobs today" />
           <DenseStat value={todayFailed} label="Failed today" color={todayFailed > 0 ? 'danger' : 'primary'} />
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="ml-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-info text-white hover:opacity-90 transition-colors"
+            title="Thêm nick mới"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Thêm nick
+          </button>
         </div>
 
         {/* Accordion body */}
@@ -1192,6 +1205,16 @@ export default function AgentsRoster() {
           onSuccess={() => {
             qc.invalidateQueries({ queryKey: ['accounts'] })
             qc.invalidateQueries({ queryKey: ['jobs', 'live'] })
+          }}
+        />
+      )}
+      {showAddModal && (
+        <AddAccountModal
+          onClose={() => setShowAddModal(false)}
+          onSuccess={() => {
+            setShowAddModal(false)
+            qc.invalidateQueries({ queryKey: ['accounts'] })
+            toast.success('Nick mới đã được thêm')
           }}
         />
       )}

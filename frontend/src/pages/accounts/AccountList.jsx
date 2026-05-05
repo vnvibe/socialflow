@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   XCircle,
   ScanSearch,
+  Mic,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
@@ -70,6 +71,14 @@ export default function AccountList() {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
     },
     onError: () => toast.error('Delete failed'),
+  })
+
+  const autoVoiceMutation = useMutation({
+    mutationFn: (force) => api.post('/accounts/voice-profiles/auto-assign', { force: !!force }).then(r => r.data),
+    onSuccess: (res) => {
+      toast.success(`Đã gán ${res.assigned}/${res.total} nick — ${res.skipped} đã có sẵn`)
+    },
+    onError: (err) => toast.error(`Auto-assign lỗi: ${err.response?.data?.error || err.message}`),
   })
 
   const handleDelete = (account) => {
@@ -166,6 +175,19 @@ export default function AccountList() {
           >
             {fetchingAll ? <Loader className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
             {fetchingAll ? 'Fetching...' : 'Fetch All'}
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm('Tự gán phong cách viết cho các nick chưa có voice profile? (mỗi nick 1 preset cố định, không trùng nhau)')) {
+                autoVoiceMutation.mutate(false)
+              }
+            }}
+            disabled={autoVoiceMutation.isPending || accounts.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-purple-300 text-purple-700 hover:bg-purple-50 disabled:opacity-50 transition-colors"
+            title="Auto-assign voice profile (preset) cho mọi nick chưa cấu hình"
+          >
+            {autoVoiceMutation.isPending ? <Loader className="w-4 h-4 animate-spin" /> : <Mic className="w-4 h-4" />}
+            Auto Voice
           </button>
           <button
             onClick={() => setShowBulkModal(true)}
@@ -867,3 +889,6 @@ function BulkImportModal({ onClose, onSuccess }) {
     </div>
   )
 }
+
+// 2026-05-05: export so /agents page can reuse the Add UI.
+export { AddAccountModal }

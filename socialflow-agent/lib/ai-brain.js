@@ -15,142 +15,28 @@
  */
 
 const axios = require('axios')
-const https = require('https')
-const http = require('http')
-
-// Per-nick persona — deterministic from account.id so the same nick
-// always talks the same way. 8 archetypes covering common VN FB user
-// voices. With >3 archetypes + per-nick signature salt, a group with
-// 5+ nicks won't show obvious bot-cluster patterns. account.persona_config
-// JSONB in DB overrides the auto-pick.
-const PERSONAS = [
-  {
-    key: 'tech_casual',
-    addressing: 'xưng "mình", gọi người khác là "bro / bác / b"',
-    tone: 'thẳng thắn, ngắn gọn, hơi tech geek',
-    style_notes: 'slang công nghệ OK (fix, run, check, config); viết tắt nhẹ: k/đc/m/v/bro; đôi khi dùng 1 emoji như 👍 hoặc 😅',
-    sample: ['thử fix lại port config xem bro', 'chỗ này cứ restart là đc m ạ', 'mình check rồi k sao đâu'],
-  },
-  {
-    key: 'friendly_helper',
-    addressing: 'xưng "mình", gọi người khác là "bạn / các bạn / mn"',
-    tone: 'thân thiện, nhiệt tình, giọng giúp đỡ',
-    style_notes: 'ít viết tắt hơn (chỉ k, đc, mn); câu trọn vẹn; thỉnh thoảng 1 emoji 🙌 hoặc 😊',
-    sample: ['bạn thử cài lại phiên bản mới xem sao, mình làm vậy ok r', 'mn cho hỏi chỗ này mình setup đúng chưa', 'cảm ơn bạn, mình áp dụng thấy chạy mượt hơn hẳn'],
-  },
-  {
-    key: 'gen_z_chill',
-    addressing: 'xưng "m", gọi người khác là "b / mn / ae"',
-    tone: 'thoải mái, hơi sarcastic, nhanh gọn',
-    style_notes: 'viết tắt nhiều hơn chút (k, đc, m, b, mn, vl, vcl nhẹ); ít emoji (nếu có thì 1 cái thôi); câu ngắn',
-    sample: ['m cũng dính lỗi này, chạy lại là ok', 'b thử đổi port khác coi', 'setup 2 tiếng r mới ra vl 😅'],
-  },
-  {
-    key: 'senior_professional',
-    addressing: 'xưng "tôi", gọi "bạn / anh / chị"',
-    tone: 'chững chạc, rõ ràng, giọng người đi làm 30+',
-    style_notes: 'gần như không viết tắt; câu đầy đủ ngữ pháp; không emoji; thỉnh thoảng trích số liệu hoặc dẫn link tham khảo (mà không paste link)',
-    sample: ['Tôi đã thử cấu hình này trên môi trường production, chạy ổn định khoảng 3 tháng nay', 'Theo kinh nghiệm của tôi, vấn đề thường đến từ timeout setting', 'Bạn kiểm tra lại dependency version, có thể đang conflict'],
-  },
-  {
-    key: 'curious_newbie',
-    addressing: 'xưng "em / mk", gọi "anh / chị / bác"',
-    tone: 'tò mò, hay hỏi ngược, chưa rành nhiều',
-    style_notes: 'hay đặt câu hỏi nhỏ cuối cmt; viết tắt nhẹ (mk, k, đc); đôi khi 😅 khi không hiểu',
-    sample: ['em mới học nên hỏi ngu tí, cái này có cần mở port gì ko ạ', 'mk làm theo hướng dẫn mà vẫn báo lỗi, anh chỉ em với', 'hay quá bác, để em thử xem sao'],
-  },
-  {
-    key: 'blunt_direct',
-    addressing: 'xưng "mình / m", gọi "b / bro"',
-    tone: 'thẳng mặt, đi thẳng vấn đề, không vòng vo',
-    style_notes: 'câu cực ngắn (5-15 từ); gần như không emoji; viết tắt vừa (k, đc, m); đôi khi chỉ 1 câu',
-    sample: ['lỗi config thôi, check lại env file', 'chạy docker-compose up thì hết', 'đổi version v2.3 đi, v2.1 có bug đó'],
-  },
-  {
-    key: 'southern_warm',
-    addressing: 'xưng "mình / mk", gọi "anh / chị / mn"',
-    tone: 'giọng miền Nam dễ thương, hay dùng từ địa phương',
-    style_notes: 'thi thoảng dùng "nha", "nè", "á", "dạ"; viết tắt vừa; thỉnh thoảng 🥰 hoặc 😄',
-    sample: ['mk cũng từng bị vậy nè, restart lại service là okie ha', 'anh thử xem lại log nha, mình thấy thường là do port á', 'dạ em đã test ok rồi ạ, cảm ơn mn nhiều'],
-  },
-  {
-    key: 'veteran_mentor',
-    addressing: 'xưng "mình / anh", gọi "em / bạn"',
-    tone: 'đi trước dẫn đường, hay giảng giải ngắn, có kinh nghiệm thực chiến',
-    style_notes: 'câu trung bình (20-40 từ); gần không viết tắt; hay nhắc "đã từng gặp" / "hồi trước mình cũng"; không emoji',
-    sample: ['hồi trước mình cũng stuck ở chỗ này, sau mới biết là do version mismatch', 'em check 2 thứ: log và config file; 90% là một trong hai', 'vấn đề này gặp nhiều rồi, thường chỉ cần bump memory lên 2g là được'],
-  },
-]
-
-// Signature flairs — small per-nick verbal tick (opener, closer, or
-// recurring phrase). Layered on TOP of persona so 2 nicks sharing a
-// persona still sound different. 10 variants → with 8 personas
-// effectively 80 unique voice combos.
-const SIGNATURES = [
-  { opener: 'ok', closer: '' },
-  { opener: '', closer: ' nhé' },
-  { opener: 'À', closer: '' },
-  { opener: '', closer: ' nha' },
-  { opener: 'Nói thật', closer: '' },
-  { opener: 'Thật ra', closer: '' },
-  { opener: '', closer: ' đó' },
-  { opener: 'Mình thấy', closer: '' },
-  { opener: '', closer: ' á' },
-  { opener: 'Thử xem', closer: '' },
-]
-
-function pickPersona(nick) {
-  // Accept explicit persona_config from DB if provided
-  if (nick?.persona_config && typeof nick.persona_config === 'object') {
-    const cfg = nick.persona_config
-    if (cfg.addressing || cfg.tone) {
-      return { key: cfg.key || 'custom', ...cfg, sample: cfg.sample || [], signature: cfg.signature || { opener: '', closer: '' } }
-    }
-  }
-  // Deterministic pick from UUID — different hex segments drive persona
-  // vs signature so same-persona nicks get different signatures.
-  const seed = String(nick?.id || nick?.account_id || nick?.username || '')
-  const hexPersona = seed.match(/^([0-9a-f]{8})/i)
-  const hexSig = seed.match(/^[0-9a-f]+-([0-9a-f]+)/i)
-  let personaIdx, sigIdx
-  if (hexPersona) {
-    personaIdx = parseInt(hexPersona[1], 16) % PERSONAS.length
-  } else {
-    let h = 0
-    for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0
-    personaIdx = Math.abs(h) % PERSONAS.length
-  }
-  if (hexSig && hexSig[1]) {
-    sigIdx = parseInt(hexSig[1].slice(0, 4), 16) % SIGNATURES.length
-  } else {
-    let h = 7919 // prime salt to diverge from persona hash
-    for (let i = 0; i < seed.length; i++) h = ((h << 3) + h + seed.charCodeAt(i)) | 0
-    sigIdx = Math.abs(h) % SIGNATURES.length
-  }
-  return { ...PERSONAS[personaIdx], signature: SIGNATURES[sigIdx] }
-}
+const hermes = require('./hermes-client')
 
 const API_URL = process.env.API_URL || 'http://localhost:3000'
 // Auth priority: AGENT_SECRET_KEY (stable, no expiry) > SERVICE_ROLE > user JWT (expires)
-const AUTH_TOKEN = process.env.AGENT_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.AGENT_USER_TOKEN || ''
-
-// Shared keep-alive agents — each /ai/generate call would otherwise
-// cost a fresh TLS handshake (~200-300ms). A campaign-nurture run fires
-// 5-10 AI calls so reusing the socket shaves seconds off per job.
-const httpsKeepAlive = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSockets: 10 })
-const httpKeepAlive  = new http.Agent({  keepAlive: true, keepAliveMsecs: 30000, maxSockets: 10 })
-const aiClient = axios.create({
-  timeout: 60000,
-  httpsAgent: httpsKeepAlive,
-  httpAgent: httpKeepAlive,
-})
+const AUTH_TOKEN = process.env.AGENT_SECRET_KEY || process.env.AGENT_USER_TOKEN || ''
 
 const headers = (ownerId) => ({
   'Content-Type': 'application/json',
-  'Connection': 'keep-alive',
   ...(AUTH_TOKEN && { Authorization: `Bearer ${AUTH_TOKEN}` }),
   ...(ownerId && { 'x-user-id': ownerId }),
 })
+
+/**
+ * Shared helper to call AI via Hermes (primary) with fallback to /ai/generate.
+ * Produces [HERMES] log pattern + ensures task_type is set.
+ */
+async function callAI({ taskType, prompt, maxTokens, temperature, ownerId, accountId, campaignId, groupFbId }) {
+  const result = await hermes.callHermes(taskType, prompt, {
+    maxTokens, temperature, ownerId, accountId, campaignId, groupFbId,
+  })
+  return result.text || ''
+}
 
 /**
  * Build structured context for AI calls
@@ -179,27 +65,11 @@ KHÔNG phải đối tượng: Người bán cùng ngành (đối thủ), spam, 
       : ageInDays < 90 ? 'đang phát triển (tương tác vừa phải)'
       : 'trưởng thành (tương tác bình thường)'
 
-    const persona = pickPersona(nick)
-    const sig = persona.signature || { opener: '', closer: '' }
-    const sigLine = (sig.opener || sig.closer)
-      ? `- Dấu ấn riêng (verbal tick): ${sig.opener ? `thỉnh thoảng mở đầu bằng "${sig.opener}"` : ''}${sig.opener && sig.closer ? ' · ' : ''}${sig.closer ? `thỉnh thoảng kết câu bằng "${sig.closer}"` : ''} — KHÔNG dùng trong MỌI cmt, chỉ 1/3 cmt`
-      : ''
     sections.push(`=== NHÂN VẬT (NICK) ===
 Tên: ${nick.username || 'N/A'}
 Tuổi tài khoản: ${ageInDays} ngày — Giai đoạn: ${phase}
 Vai trò: ${nick.role_description || nick.mission || 'Thành viên nhóm, tương tác tự nhiên'}
-
-Phong cách riêng của nick này (PHẢI GIỮ NHẤT QUÁN):
-- Cách xưng hô: ${persona.addressing}
-- Tone: ${persona.tone}
-- Sở thích ngôn ngữ: ${persona.style_notes}
-${sigLine}
-- Ví dụ câu mẫu của nick này: ${persona.sample.map(s => `"${s}"`).join(' / ')}
-
-=== VIẾT TẮT VN (dùng VỪA PHẢI, tối đa 1-2 từ/cmt) ===
-OK dùng: k/ko (không), đc (được), m/mk (mình), b (bạn), v (vậy), mn (mọi người), bro, r (rồi), dc (được), nx (nữa)
-KHÔNG dùng quá đà: đừng viết toàn chữ tắt như "mk k bt lm sao dc" — nhìn spam. Cmt 20-30 chữ dùng 1-2 từ tắt là tự nhiên.
-Người thật viết hỗn hợp: vài từ đầy đủ + vài từ tắt + có khi 1 emoji (không quá 1-2).`)
+Phong cách: Nói chuyện tự nhiên, không quảng cáo lộ liễu, giúp đỡ mọi người`)
   }
 
   // Group context — WHERE are we?
@@ -288,43 +158,22 @@ async function evaluatePosts({ posts, campaign, nick, group, topic, maxPicks, ow
   const brandDescription = brand?.brand_description || brand?.product_description || ''
   let adSection = ''
   if (brandName) {
-    const brandDomain = brand?.brand_domain || brand?.domain || brandDescription || brandName
     adSection = `
 === THƯƠNG HIỆU CỦA CHÚNG TA ===
 Tên: ${brandName}
 ${brandDescription ? `Mô tả: ${brandDescription}` : ''}
-${brand?.brand_domain ? `Lĩnh vực: ${brand.brand_domain}` : ''}
 
 Với MỖI bài, đánh giá THÊM:
-- "ad_opportunity": true CHỈ KHI cả 2 điều kiện:
-    (a) Bài đang HỎI/TÌM/THAN PHIỀN về VẤN ĐỀ THỰC SỰ THUỘC LĨNH VỰC "${brandDomain}"
-    (b) Sản phẩm ${brandName} GIẢI QUYẾT TRỰC TIẾP vấn đề đó
-- "ad_reason": 1 câu — nêu chính xác câu/cụm trong bài cho thấy đúng lĩnh vực
-- "comment_angle": nếu ad_opportunity=true → góc comment BÁM vấn đề của bài
+- "ad_opportunity": true nếu bài viết đang HỎI / TÌM KIẾM / THAN PHIỀN về vấn đề mà ${brandName} giải quyết được
+- "ad_reason": 1 câu giải thích tại sao đây là cơ hội (hoặc tại sao không)
+- "comment_angle": nếu ad_opportunity=true → gợi ý GÓC comment tự nhiên nhất
+  Ví dụ: "suggest brand như người đã dùng thật", "chia sẻ kinh nghiệm dùng brand cho vấn đề tương tự"
 - "lead_potential": true nếu TÁC GIẢ có vẻ là KHÁCH TIỀM NĂNG
 
-=== QUY TẮC CHỐNG QUẢNG CÁO LẠC CHỦ ĐỀ (RẤT QUAN TRỌNG) ===
-Nếu tên thương hiệu "${brandName}" TÌNH CỜ trùng/xuất hiện trong:
-- Tên nhóm "${group?.name || ''}"
-- Topic chung của nhóm
-- Một sản phẩm/tool KHÁC có tên tương tự
-→ ĐÓ KHÔNG PHẢI ad_opportunity. KHÔNG bị đánh lừa bởi keyword match.
-
-Bài viết phải có TÍN HIỆU VẤN ĐỀ trong lĩnh vực "${brandDomain}" thì mới ad_opportunity=true.
-
-✅ TRUE (đúng lĩnh vực ${brandDomain}):
-  - "ai rcm vps giá oke", "vps lag quá", "host website chỗ nào ngon"
-  - "server die hoài", "cần deploy app mà không biết chọn hosting"
-
-❌ FALSE (sai lĩnh vực — tuyệt đối không mention brand):
-  - "hỏi cách làm video AI bằng Veo3/Gemini" → lĩnh vực video, không phải hosting
-  - "xin chỗ học ${brandName}" khi ${brandName} trong ngữ cảnh đang được hiểu là tool khác
-  - "giới thiệu bản thân", "tuyển thành viên", "khoe thành tựu"
-  - "bài quảng cáo của người khác"
-  - "thông báo sự kiện/meetup"
-  - Bài hỏi TUTORIAL/HƯỚNG DẪN/CHỖ HỌC → ad_opportunity=false (ta không bán khóa học)
-
-Nếu không chắc chắn 100% bài đúng lĩnh vực "${brandDomain}" → ad_opportunity=false.
+QUAN TRỌNG về ad_opportunity:
+- ✅ TRUE: "ai rcm vps giá oke", "vps lag quá", "đang tìm host cho website", "dùng cái nào tốt"
+- ❌ FALSE: "share kinh nghiệm cá nhân", "hỏi về code", "bài quảng cáo của người khác", "thông báo sự kiện"
+- KHÔNG dùng keyword matching — đánh giá theo NGỮ CẢNH thực sự
 `
   }
 
@@ -357,15 +206,11 @@ Mỗi bài viết phía trên có thể đi kèm các comment hiện có (dòng 
 
 ${langBlock}${adSection}
 === CÁCH CHẤM ĐIỂM ===
-QUAN TRỌNG: Nick ĐÃ là thành viên nhóm "${group?.name || '?'}" và đang NUÔI acc — phải tương tác tự nhiên trong nhóm thực tế, KHÔNG phải chỉ tìm bài khớp "${topic}". Bài nào là NGỮ CẢNH NHÓM (hỏi/chia sẻ/câu chuyện bình thường) thì MẶC ĐỊNH engageable (score ≥ 4), chỉ loại bài spam/QC của người khác.
-
-- 8-10: Bài HỎI / TÌM solution liên quan "${topic}" hoặc đang so sánh sp/dịch vụ → trả lời cụ thể có giá trị
-- 6-7: Bài thảo luận / chia sẻ kinh nghiệm, có thể gắn "${topic}" vào một cách tự nhiên → comment đồng tình + bổ sung
-- 4-5: Bài bình thường trong nhóm (tâm sự / kể chuyện / hỏi chung chung / share meme) KHÔNG khớp "${topic}" → comment ngắn đồng cảm / hay quá / emoji là OK — bài nào là ngữ cảnh nhóm bình thường PHẢI rơi vào mức này, KHÔNG được đẩy xuống 1-2
-- 3: Bài mờ nhạt, thread đã đầy đủ câu trả lời, chen vào sẽ gượng — vẫn giữ 3 chứ không về 1-2
-- 1-2: CHỈ dành cho bài spam / QC của người khác / link không nội dung / đối đầu đối thủ → BỎ QUA
-
-LƯU Ý TỐI QUAN TRỌNG: Hầu hết nhóm có 5-10 bài/ngày — ít nhất 60% trong số đó là ngữ cảnh nhóm bình thường (score 4-5). Nếu bạn chấm TẤT CẢ bài = 1-2 thì bạn đang sai — có nghĩa là bạn đang đòi hỏi bài phải nói về "${topic}" mới engage được, điều đó KHÔNG đúng với chiến lược warmup/nurture.
+- 8-10: Người viết ĐANG HỎI / TÌM KIẾM giải pháp liên quan "${topic}" → comment trả lời cụ thể
+- 6-7: Bài thảo luận / chia sẻ kinh nghiệm về "${topic}" → comment đồng tình hoặc bổ sung
+- 5: Bài trong nhóm, liên quan gián tiếp → comment ngắn chia sẻ trải nghiệm cá nhân OK
+- 3-4: Bài không rõ liên quan, chỉ có thể comment quá chung chung → BỎ QUA
+- 1-2: Off-topic, spam, quảng cáo → BỎ QUA
 
 === QUY TẮC ===
 1. Ưu tiên bài có câu hỏi cụ thể hoặc đang so sánh sản phẩm/dịch vụ.
@@ -389,70 +234,46 @@ Trả về JSON array:
 CHỈ trả về JSON, không giải thích.`
 
   try {
-    const res = await aiClient.post(`${API_URL}/ai/generate`, {
-      function_name: 'relevance_review',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 400,
-      temperature: 0.3, // was 0.1 — too conservative, AI scored everything 2-3
-    }, {
-      timeout: 30000, // was 15s — timeout killed evaluations before AI could respond
-      headers: headers(ownerId),
+    const accId = nick?.account_id || nick?.id
+    const text = await callAI({
+      taskType: 'post_eval',
+      prompt,
+      maxTokens: 1500,
+      temperature: 0.1,
+      ownerId,
+      accountId: accId,
+      campaignId: campaign?.id,
+      groupFbId: group?.fb_group_id || group?.id,
     })
 
-    const text = res.data?.text || res.data?.result || ''
-    const provider = res.data?.provider || 'unknown'
-    if (provider !== 'hermes') {
-      console.warn(`[AI-BRAIN] evaluatePosts ran on ${provider} (expected hermes) — learning loop bypassed`)
-    }
+    console.log(`[AI-BRAIN] Raw response (${text.length} chars): ${text.substring(0, 300)}`)
     const match = text.match(/\[[\s\S]*\]/)
+    if (!match) {
+      throw new Error(`No JSON array in AI response (${text.length} chars) — likely truncated or empty`)
+    }
     if (match) {
       const results = JSON.parse(match[0])
-      // Debug: log AI's score distribution so we can see WHY filters drop
-      // everything (was invisible before — just got 'no_relevant_posts').
-      const scoreDist = results.map(r => `${r.index}:${r.score}/${r.action}`).join(' ')
-      console.log(`[AI-BRAIN] Raw scores (${results.length} posts): ${scoreDist.substring(0, 200)}`)
-
-      // 2-tier picker. Tier 1 = topic-relevant. Tier 2 = warmup fallback
-      // when nick is in off-topic groups and AI (DeepSeek) insists on
-      // scoring every non-VPS post as 1 with action='skip'. Tier 2 MUST
-      // ignore action='skip' — otherwise AI's strict-by-default behavior
-      // collapses the whole fallback.
-      const inRange = results
-        .filter(r => r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
-        .sort((a, b) => (b.score || 0) - (a.score || 0))
-
-      // Tier 1: real topic match — honor action='skip' here (don't force a
-      // comment on a post AI confidently flagged as spam/ad when we have
-      // other good options).
-      const tier1 = inRange
-        .filter(r => (r.score || 0) >= 5 && r.action !== 'skip')
+      console.log(`[AI-BRAIN] Parsed ${results.length} evaluations: ${results.map(r => `#${r.index}:${r.score}`).join(', ')}`)
+      // Phase 18: threshold lowered from 6→5. Score 5 = "related to topic,
+      // can share a personal take" which is natural group behavior. The prompt
+      // still bans generic/vague comments via the QUY TẮC section, so quality
+      // is guarded by AI judgment, not a hard numeric cutoff.
+      const filtered = results
+        .filter(r => r.score >= 3 && r.index >= 1 && r.index <= posts.length && !adIdxSet.has(r.index))
+        .filter(r => r.action !== 'skip')
+        .sort((a, b) => b.score - a.score)
         .slice(0, maxPicks || 2)
-      if (tier1.length > 0) return tier1
 
-      // Tier 2: warmup mode — pick top post regardless of action flag,
-      // BUT only if body is substantive (exclude posts AI clearly scored
-      // 0 for empty/broken content). Flag warmup_only so handler skips
-      // brand mention.
-      const tier2Candidates = inRange.filter(r => (r.score || 0) >= 1)
-      if (tier2Candidates.length > 0) {
-        const pick = { ...tier2Candidates[0], warmup_only: true, ad_opportunity: false }
-        console.log(`[AI-BRAIN] No topic-relevant posts; picking warmup post index=${pick.index} score=${pick.score} action=${pick.action} for generic engagement`)
-        return [pick]
-      }
+      if (filtered.length > 0) return filtered
 
-      console.log(`[AI-BRAIN] All posts scored 0 or flagged as ads — nothing to engage with`)
+      console.log(`[AI-BRAIN] No posts scored >= 3 — all scores: ${results.map(r => r.score).join(',')}`)
       return []
     }
   } catch (err) {
     console.warn(`[AI-BRAIN] evaluatePosts failed: ${err.message}`)
+    // Re-throw so caller (campaign-nurture) can handle fallback
+    throw err
   }
-
-  // Phase 8 Fix 2: AI unavailable = skip the group rather than posting filler.
-  // The old fallback picked first N posts with score=5 and no comment_angle,
-  // which produced exactly the vague "bác nói rõ hơn đi" style comments the
-  // user complained about.
-  console.log(`[AI-BRAIN] evaluatePosts: AI unavailable or returned nothing → skip group (no fallback picks)`)
-  return []
 }
 
 /**
@@ -461,8 +282,23 @@ CHỈ trả về JSON, không giải thích.`
  * Scores: naturalness, relevance, value-add
  * Only approve if average >= 7
  */
-async function qualityGateComment({ comment, postText, group, topic, nick, ownerId, threadComments, brandConfig }) {
+async function qualityGateComment({ comment, postText, group, topic, nick, ownerId, threadComments }) {
   if (!comment || comment.length < 3) return { approved: false, reason: 'too_short' }
+
+  // 2026-05-04: a 19-char follow-up like "Mình sẽ theo dõi thêm" was slipping
+  // through because it was below the AI-check threshold AND not in the regex
+  // bank. Real-human comments worth posting carry substance — numbers, brand
+  // names, a personal anecdote, or a pointed question. If the comment is
+  // shorter than ~30 chars / 6 words AND has no specific token, kill it.
+  const trimmed = comment.trim()
+  const wordCount = trimmed.split(/\s+/).length
+  const hasSpecific = /\d+[%kKgGmM]?|[A-Z]{2,}[a-z]*\d*|vps|api|cpu|ram|ssd|node|nginx|docker|aws|gcp|azure|cloudflare|vpn|cdn|kbps|mbps|gbps|ms|tb|gb/i.test(trimmed)
+  if (trimmed.length < 30 && !hasSpecific) {
+    return { approved: false, reason: 'too_short_no_substance', score: 2 }
+  }
+  if (wordCount < 6 && !hasSpecific) {
+    return { approved: false, reason: 'too_few_words', score: 2 }
+  }
 
   // Fix 4: collapse the post + thread into a single corpus so the gate can check
   // whether the comment actually addresses one specific token from the discussion.
@@ -471,48 +307,33 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
 
   // Quick heuristic checks (no AI needed)
   const lower = comment.toLowerCase()
-  const postLower = (postText || '').toLowerCase()
-  const threadLower = threadStr.toLowerCase()
-  const haystack = `${postLower} ${threadLower}`
 
   // Reject obvious template/generic/bot-like comments
   const genericPatterns = [
     /^hay (quá|lắm)?!?$/i,
-    /^cảm ơn (bạn|bác|anh|chị|các bạn|mọi người|ad|admin)? ?(đã )?(chia sẻ|share)/i,
+    /^cảm ơn (bạn )?(chia sẻ|share)/i,
     /^thông tin (hữu ích|bổ ích)/i,
     /^(nice|good|ok|tuyệt|hay|noted)[!.]*$/i,
     /^👍|^💯|^🔥|^❤️|^👏|^🙏$/,
     /^đúng (vậy|rồi)/i,
     /^đồng ý/i,
     /mình cũng đang (tìm hiểu|trải nghiệm|quan tâm)/i,  // sáo rỗng
-    /^mình cũng (gặp|bị) (tình trạng|trường hợp|vấn đề|hiện tượng) tương tự/i,
     /bạn đã thử .+ chưa\??/i,  // mẫu câu bán hàng
     /thấy (nó |nó )?xử lý (rất )?(mượt|tốt|nhanh)/i,  // bot review
     /rất (hay|bổ ích|hữu ích|tuyệt vời)/i,  // generic praise
     /mình (cũng )?hay dùng .+ (cho |để )/i,  // bán hàng gián tiếp
-    /mò mãi không ra/i,                             // mẫu spam "chuyển sang mua"
-    /chuyển sang (mua|dùng) .+ (cho đỡ|luôn)/i,     // ad shoe-in
-    /mua .+ có sẵn .+ chạy luôn/i,                  // VPS spam pattern
+    /^mình sẽ (theo dõi|tìm hiểu|thử|note|lưu lại|xem)/i,  // 2026-05-04 ban: "Mình sẽ theo dõi thêm" pattern
+    /theo dõi (thêm|tiếp)/i,
+    /^(hóng|hong|theo dõi)\b/i,  // hóng/theo dõi cụt
+    /^(đánh dấu|dấu)/i,  // đánh dấu để xem sau
+    /^lưu (lại|về)/i,
+    /^để dành/i,
+    /^cảm ơn (bạn )?(nhé|nha|nhiều|ạ|đã)/i,  // cảm ơn cụt
+    /hay (đấy|ghê|nhỉ|thật)\.?$/i,
+    /^bài (hay|chất|chuẩn)/i,
+    /chuẩn (rồi|luôn)/i,
+    /^(đỉnh|tuyệt|xịn|vip|pro)\b/i,
   ]
-
-  // COUNTER-QUESTION DEFLECTION — when post asks for advice ("xin gợi
-  // ý", "cho hỏi", "tư vấn giúp", "chia sẻ kinh nghiệm"), bot must
-  // OFFER a concrete suggestion, not ask back. Observed 2026-04-21
-  // 18:56: user asked "cho e xin gợi ý tham khảo" about building a
-  // chatbot → Diệu replied "Bạn muốn làm về lĩnh vực gì để mình gợi
-  // ý" = bot punted question back = useless.
-  const postAsksForAdvice = /(xin\s*gợi\s*ý|cho\s*(em|mình|mk|m)?\s*hỏi|tư\s*vấn|giúp\s*(em|mình|với)|chia\s*sẻ\s*(chút\s*)?kinh\s*nghiệm|các\s*bác\s*cho)/i.test(postText || '')
-  if (postAsksForAdvice) {
-    const counterQuestionPatterns = [
-      /bạn\s*muốn\s*(làm\s*)?(về\s*)?(lĩnh\s*vực|mục\s*đích|ngành|domain|cái)\s*(gì|nào)/i,
-      /(em|bạn)\s*(đang|cần|muốn)\s*(làm|dùng|build|tạo|xây)\s*(cho|để|với)?\s*(cái\s*)?(gì|ai)\s*(nhỉ|nào|vậy)?\s*\?*/i,
-      /(mục\s*tiêu|yêu\s*cầu|use\s*case)\s*(của\s*bạn|cụ\s*thể)\s*(là\s*)?(gì|như\s*thế\s*nào)/i,
-      /bạn\s*đã\s*(có|thử|xem|tìm\s*hiểu)\s*.+\s*chưa/i,
-    ]
-    if (counterQuestionPatterns.some(p => p.test(comment))) {
-      return { approved: false, reason: 'counter_question_when_asked_for_advice', score: 2 }
-    }
-  }
   if (genericPatterns.some(p => p.test(comment.trim()))) {
     return { approved: false, reason: 'generic_template', score: 2 }
   }
@@ -521,119 +342,18 @@ async function qualityGateComment({ comment, postText, group, topic, nick, owner
   if (topic) {
     const topicWords = topic.toLowerCase().split(/[\s,]+/).filter(w => w.length > 3)
     const topicMentions = topicWords.filter(w => lower.includes(w)).length
-    if (topicMentions >= 3) {
+    if (topicMentions >= 5) {
       return { approved: false, reason: 'too_promotional', score: 3 }
     }
   }
 
-  // COMPETITOR PLUG GUARD: never recommend a competitor when we're in
-  // the brand's own group (group name contains brand_name). Observed:
-  // Việt in "OpenClaw AI Kiếm Cơm" group commented "Ollama sẽ hợp với
-  // mình hơn" — recommending Ollama IN A GROUP NAMED AFTER OPENCLAW.
-  // Double harm: helps competitor + signals bot behavior to real users.
-  if (brandConfig?.brand_name) {
-    const brandNameLower = String(brandConfig.brand_name).toLowerCase()
-    const groupNameLower = (group?.name || '').toLowerCase()
-    const inBrandGroup = brandNameLower && groupNameLower.includes(brandNameLower)
-    if (inBrandGroup) {
-      // Known alt-tool keywords in AI/coding/hosting space. Extend via
-      // brand_config.competitors if user provides custom list.
-      const builtInCompetitors = [
-        'ollama', 'cursor', 'copilot', 'claude code', 'aider', 'cline',
-        'continue.dev', 'windsurf', 'codeium', 'tabnine',
-        'chatgpt', 'gemini', 'grok', 'deepseek', 'mistral',
-        'digitalocean', 'aws', 'vultr', 'linode', 'hetzner', 'contabo',
-      ]
-      const customComps = Array.isArray(brandConfig.competitors)
-        ? brandConfig.competitors.map(c => String(c).toLowerCase()).filter(Boolean)
-        : []
-      const competitors = [...new Set([...builtInCompetitors, ...customComps])]
-        .filter(c => c !== brandNameLower) // don't self-reject
-      const mentioned = competitors.find(c => {
-        if (c.length < 3) return false
-        // word boundary-ish check — avoid matching substrings like "aws" in "always"
-        return new RegExp(`(^|\\W)${c.replace(/[.\\+*?()[\\]{}|^$]/g, '\\$&')}(\\W|$)`, 'i').test(comment)
-      })
-      if (mentioned) {
-        return { approved: false, reason: `competitor_plug_in_brand_group:${mentioned}`, score: 1 }
-      }
-    }
-  }
-
-  // AD-DRIFT GUARD: if comment mentions brand but the post has ZERO signal
-  // in brand's domain, it's a shoehorned pitch — reject. The nurture flow
-  // already gates ad_opportunity in the scorer, but LLMs occasionally inject
-  // the brand name anyway ("mua VPS có sẵn OpenClaw" posted into a
-  // video-AI tutorial thread is the canonical failure mode).
-  if (brandConfig?.brand_name) {
-    const brandName = String(brandConfig.brand_name).toLowerCase()
-    const productName = String(brandConfig.product_name || '').toLowerCase()
-    const domain = String(brandConfig.brand_domain || brandConfig.product_description || '').toLowerCase()
-
-    const mentionsBrand =
-      (brandName && lower.includes(brandName)) ||
-      (productName && productName.length > 2 && lower.includes(productName))
-
-    if (mentionsBrand) {
-      // Build a small set of domain signal terms from the brand's domain/description
-      const domainWords = domain
-        .split(/[\s,.;:()\-/]+/)
-        .filter(w => w.length > 3 && !['the', 'and', 'vps', 'dịch', 'chúng', 'của'].includes(w))
-        .slice(0, 12)
-      // Generic hosting domain signals (backup if brand_domain is blank)
-      const defaultSignals = ['vps', 'server', 'host', 'hosting', 'deploy', 'domain', 'ssh', 'cloud', 'dedicated', 'bandwidth', 'website', 'cpanel', 'docker']
-      const signals = domainWords.length > 0 ? [...domainWords, ...defaultSignals] : defaultSignals
-      const postHasDomainSignal = signals.some(w => haystack.includes(w))
-
-      if (!postHasDomainSignal) {
-        return { approved: false, reason: 'ad_drift_off_domain', score: 2 }
-      }
-    }
-  }
-
-  // Heuristic shortcut — skip LLM if the comment passes N independent
-  // signals of quality. Reduces quality_gate calls ~60-70% for comments
-  // that are clearly fine (long enough, references post detail, no
-  // generic patterns, no brand drift, specific noun/number mentioned).
-  if (comment.length >= 20 && comment.length <= 200) {
-    const specificSignals = {
-      // References a distinctive word from the post (>=4 chars, not a stopword)
-      referencesPost: (() => {
-        const postWords = (postText || '').toLowerCase()
-          .split(/[\s,.;:!?()\[\]"'\/]+/)
-          .filter(w => w.length >= 4 && !/^(được|không|những|trong|ngày|vậy|nhưng|cũng|việc|cho|với|như|tại|khi|thì|là|các|mà|nó|nay|theo|đang|cần|phải|thấy|mình|nữa|lại|biết|sẽ|đã|sau|trước|để|qua)$/.test(w))
-        if (postWords.length === 0) return false
-        return postWords.some(w => lower.includes(w))
-      })(),
-      hasNumber: /\d/.test(comment),
-      hasQuestionOrSpecific: /[?]|vì|nên|mình|bạn|em/i.test(comment),
-      notStartsGeneric: !/^(hay|vâng|ok|đúng|cảm ơn|tuyệt)\b/i.test(comment.trim()),
-    }
-    const score = Object.values(specificSignals).filter(Boolean).length
-    // Heuristic used to pass at score>=3 but that let through wrong-domain
-    // answers: e.g. bot commented "token page vs token app" on a Zalo bot
-    // post — "token" appears in post so referencesPost=true, plus 2 other
-    // trivial signals = 3 → passed without LLM check. Raised to >=4 so
-    // LLM gate runs for borderline-looking comments and catches domain
-    // drift (FB terminology on Zalo post, iOS answer on Android post, …).
-    if (score >= 4) {
-      return { approved: true, reason: 'heuristic_pass_strong', score: 8 }
-    }
-    if (score === 0) {
-      return { approved: false, reason: 'heuristic_fail_no_signals', score: 3 }
-    }
-    // score 1-3 → borderline, fall through to LLM
-  }
-
-  // AI quality check for borderline or long comments
-  if (comment.length > 20) {
+  // AI quality check on every comment that survives heuristics. Previously
+  // gated at length>20 but that let 19-char fluff slip through; we already
+  // bailed on too-short / too-few-words above, so the surviving payload is
+  // long enough to deserve an AI verdict.
+  if (true) {
     try {
-      const res = await aiClient.post(`${API_URL}/ai/generate`, {
-        function_name: 'caption_gen',
-        provider: 'deepseek',
-        messages: [{
-          role: 'user',
-          content: `Đánh giá bình luận Facebook sau:
+      const qgPrompt = `Đánh giá bình luận Facebook sau:
 
 BÀI GỐC (nhóm "${group?.name || '?'}"): "${(postText || '').substring(0, 200)}"
 ${threadStr ? `THREAD COMMENTS hiện có: ${threadStr.substring(0, 400)}\n` : ''}BÌNH LUẬN ĐANG ĐÁNH GIÁ: "${comment}"
@@ -649,29 +369,33 @@ REJECT (approved=false) nếu:
 - Comment lặp lại ý đã có trong thread
 - Comment hỏi câu đã được trả lời trong thread
 - Comment chung chung kiểu "rất hay", "thông tin bổ ích", "mình cũng vậy"
-- **DOMAIN DRIFT**: Comment dùng thuật ngữ của nền tảng/công nghệ KHÁC với nền tảng post đang hỏi. Ví dụ: post hỏi về Zalo bot mà comment nói "token page vs token app" (thuật ngữ Facebook). Post hỏi iOS mà comment trả lời Android API. KHÔNG đoán cross-platform.
+- Comment kiểu "hóng", "theo dõi thêm", "đánh dấu", "lưu lại" — không có giá trị
+- Comment không có ít nhất 1 trong: số liệu cụ thể, tên brand/tool, trải nghiệm cá nhân chi tiết, câu hỏi đào sâu, workaround có thể test
 
 Trả về JSON: {"naturalness": N, "relevance": N, "value": N, "approved": true/false, "reason": "..."}`
-        }],
-        max_tokens: 120,
-        temperature: 0,
-      }, {
-        timeout: 8000,
-        headers: headers(ownerId),
-      })
 
-      const text = res.data?.text || res.data?.result || ''
+      const accId = nick?.account_id || nick?.id
+      const text = await callAI({
+        taskType: 'quality_gate',
+        prompt: qgPrompt,
+        maxTokens: 200,
+        temperature: 0.1,
+        ownerId,
+        accountId: accId,
+        campaignId: nick?.campaign_id,
+        groupFbId: group?.fb_group_id || group?.id,
+      })
       const jsonMatch = text.match(/\{[\s\S]*?\}/)
       if (jsonMatch) {
         const result = JSON.parse(jsonMatch[0])
         const avg = ((result.naturalness || 0) + (result.relevance || 0) + (result.value || 0)) / 3
         return {
-          approved: avg >= 6.5 && result.naturalness >= 5 && result.relevance >= 5,
+          approved: avg >= 6.0 && result.naturalness >= 5 && result.relevance >= 5 && result.value >= 4,
           score: Math.round(avg * 10) / 10,
           naturalness: result.naturalness,
           relevance: result.relevance,
           value: result.value,
-          reason: result.reason || (avg >= 6.5 ? 'passed' : 'below_threshold'),
+          reason: result.reason || (avg >= 4.5 ? 'passed' : 'below_threshold'),
         }
       }
     } catch (err) {
@@ -755,17 +479,15 @@ priority: high nếu score >= 8, medium nếu 6-7, low nếu < 6
 Chỉ trả JSON, không giải thích.`
 
   try {
-    const res = await aiClient.post(`${API_URL}/ai/generate`, {
-      function_name: 'profile_eval',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 150,
-      temperature: 0.1,
-    }, {
-      timeout: 10000,
-      headers: headers(ownerId),
+    const text = await callAI({
+      taskType: 'lead_score',
+      prompt,
+      maxTokens: 200,
+      temperature: 0.2,
+      ownerId,
+      accountId: person?.account_id || null,  // prefer DB uuid; fb_user_id is not a uuid
+      campaignId: campaign?.id,
     })
-
-    const text = res.data?.text || res.data?.result || ''
     const match = text.match(/\{[\s\S]*?\}/)
     if (match) {
       const result = JSON.parse(match[0])
@@ -793,20 +515,7 @@ const evaluateLeadQuality = evaluateProfileForConnect
  * - Gets comment_angle from evaluatePosts (knows WHY we're commenting)
  * - Generates contextual, value-adding response
  */
-async function generateSmartComment({ postText, postAuthor, group, campaign, nick, topic, commentAngle, ownerId, adConfig, hasAdOpportunity, language, threadComments, targetLength }) {
-  // Comment length variety — real FB users write from 5 chars ("đúng r")
-  // to 200+ chars (detailed help). Bots that always produce 30-60 chars
-  // have a statistical signature. Caller may pass targetLength; if not,
-  // pick from a realistic distribution:
-  //   15% very short (5-20 chars), 45% short (20-60), 30% medium (60-120),
-  //   10% longer (120-200).
-  if (!targetLength) {
-    const r = Math.random()
-    if (r < 0.15) targetLength = 5 + Math.floor(Math.random() * 15)
-    else if (r < 0.60) targetLength = 20 + Math.floor(Math.random() * 40)
-    else if (r < 0.90) targetLength = 60 + Math.floor(Math.random() * 60)
-    else targetLength = 120 + Math.floor(Math.random() * 80)
-  }
+async function generateSmartComment({ postText, postAuthor, group, campaign, nick, topic, commentAngle, ownerId, adConfig, hasAdOpportunity, language, threadComments }) {
   const context = buildContext({ campaign, nick, group, topic })
   const lang = language === 'en' ? 'en' : 'vi'
 
@@ -819,15 +528,10 @@ async function generateSmartComment({ postText, postAuthor, group, campaign, nic
     : ''
 
   // Determine if this comment should include soft advertising
-  // Lowered default ad_frequency 30→15: previous default shoehorned product
-  // into too many comments, including off-topic ones (e.g. VPS brand name
-  // appeared in group about AI-video tools → bot inserted VPS pitch into
-  // a post asking how to learn video generation — pure spam).
-  const shouldSoftAd = adConfig?.enabled && hasAdOpportunity && Math.random() * 100 < (adConfig.ad_frequency || 15)
+  const shouldSoftAd = adConfig?.enabled && hasAdOpportunity && Math.random() * 100 < (adConfig.ad_frequency || 30)
 
   let adDirective = ''
   if (shouldSoftAd) {
-    const brandDomain = adConfig.brand_domain || adConfig.domain || adConfig.product_description || ''
     const ctaExamples = {
       question: `"Bạn đã thử ${adConfig.product_name} chưa? Mình dùng thấy khá ổn"`,
       suggestion: `"Nếu cần mình gợi ý ${adConfig.product_name}, mình dùng thấy OK"`,
@@ -835,29 +539,19 @@ async function generateSmartComment({ postText, postAuthor, group, campaign, nic
     }
     adDirective = `
 === QUẢNG CÁO NHẸ (SOFT MENTION) ===
-Bài viết này ĐÃ ĐƯỢC ĐÁNH GIÁ là CƠ HỘI hợp lệ (ad_opportunity=true).
+Bài viết này là CƠ HỘI quảng cáo nhẹ sản phẩm.
 Thương hiệu: ${adConfig.brand_name || ''}
 Sản phẩm: ${adConfig.product_name}
 Mô tả: ${adConfig.product_description || ''}
-${brandDomain ? `Lĩnh vực sản phẩm: ${brandDomain}` : ''}
 
 CÁCH CHÈN — chọn 1 trong các kiểu:
 ${ctaExamples[adConfig.cta_style] || ctaExamples.experience}
-
-=== KIỂM TRA LẦN CUỐI TRƯỚC KHI MENTION ===
-Trước khi nhắc ${adConfig.product_name}, tự hỏi:
-1. Vấn đề trong bài có THỰC SỰ thuộc lĩnh vực "${brandDomain}" không?
-2. Bài có đang hỏi về TUTORIAL/CÁCH LÀM/HỌC cái gì khác không? (nếu có → KHÔNG mention)
-3. Tên brand có bị trùng với 1 tool/sản phẩm khác đang được nhắc trong bài không? (nếu có → KHÔNG mention, comment bình thường)
-
-NẾU KHÔNG CHẮC 100% ĐÚNG LĨNH VỰC → comment bình thường, KHÔNG nhắc sản phẩm.
 
 QUY TẮC QUẢNG CÁO NHẸ:
 - PHẢI trả lời đúng nội dung bài viết TRƯỚC, rồi mới mention sản phẩm
 - Mention tự nhiên như chia sẻ kinh nghiệm cá nhân, KHÔNG quảng cáo lộ liễu
 - TUYỆT ĐỐI KHÔNG dùng link, URL, hashtag, số điện thoại
 - KHÔNG nói "mua ngay", "liên hệ", "inbox" — chỉ gợi ý nhẹ nhàng
-- KHÔNG dùng cụm "mò mãi không ra", "chuyển sang mua X cho đỡ lằng nhằng", "mua X chạy luôn" — là mẫu spam đã bị FB flag
 - Nếu bài viết KHÔNG phù hợp để mention → BỎ QUA, comment bình thường
 `
   }
@@ -888,13 +582,9 @@ ${langInstr}
 2. NEVER write generic comments that could paste into any post
 3. If post asks technical question → answer with technical detail (config, command, numbers)
 4. If post shares experience → respond to THAT specific experience
-5. Target length this time: ~${targetLength} chars. Vary length — short (5-20 chars: "same", "fixed it", "nice") for simple posts, medium (20-60) for normal replies, longer (60-200) ONLY when you have a concrete detail to add. Never always hit 1-2 sentences — that's a bot pattern.
+5. Write 1-2 sentences, short, casual abbreviations OK
 6. AVOID: "I'm also looking into...", "Have you tried X?", "Very useful", "Thanks for sharing"
 7. Read the post carefully and respond SPECIFICALLY, don't drift to other topics
-8. **NEVER guess cross-platform**: If post mentions a specific platform (Zalo, Telegram, Discord, iOS, Android, Shopee, etc.), use ONLY that platform's terminology. Don't say "page token vs app token" (Facebook term) on a Zalo post. Don't guess Android API on iOS post. If unsure → skip.
-9. **When in doubt → return empty string** rather than guessing. Post lacks context (screenshot-only, unclear question) → return empty.
-10. **NEVER recommend competitor tools while inside our brand's own group**: If the group name "${group?.name || ''}" contains our brand name, you MUST NOT name any competing tool (Ollama, Cursor, Copilot, ChatGPT, Gemini, Claude Code, DigitalOcean, AWS, etc.) as a suggestion. If post asks about alternatives → share generic experience without naming a specific competing product, or return empty.
-11. **WHEN POST ASKS FOR ADVICE → GIVE ACTUAL ADVICE, NEVER BOUNCE THE QUESTION BACK**: If the post contains phrases like "please suggest", "can anyone recommend", "looking for advice", "newbie here, need help", "share your experience" — you MUST provide at least 1 concrete suggestion (tool name, setup step, config, specific experience) in your reply. DO NOT write "What domain are you building for?" / "What's your use case?" — that bounces the question back, which is useless because they already asked for suggestions. If you genuinely have no relevant suggestion aligned with our brand → return empty string (skip the post).
 
 GOOD examples:
 - Post about Oracle VPS → "Oracle's 24G free tier is solid, been running docker on it smoothly"
@@ -920,13 +610,9 @@ ${langInstr}
 2. KHÔNG ĐƯỢC viết comment chung chung có thể paste vào bất kỳ bài nào
 3. Nếu bài hỏi kỹ thuật → trả lời kỹ thuật (config, command, số liệu)
 4. Nếu bài chia sẻ kinh nghiệm → phản hồi ĐÚNG kinh nghiệm đó
-5. Độ dài cmt lần này: khoảng ${targetLength} ký tự. Đa dạng độ dài — ngắn (5-20 ký tự: "đúng r đó", "mình cũng z", "ok bác") cho bài đơn giản, trung bình (20-60) cho phản hồi thường, dài hơn (60-200) CHỈ khi bạn thực sự có chi tiết cụ thể đóng góp. Đừng lúc nào cũng viết đúng 1-2 câu đều đặn — đó là pattern bot.
-6. KHÔNG dùng các opener chung chung: "Mình cũng đang...", "Mình cũng gặp tình trạng/trường hợp/vấn đề tương tự...", "Bạn đã thử X chưa?", "Rất hay/bổ ích", "Cảm ơn chia sẻ". Mở đầu phải là CHI TIẾT cụ thể từ bài.
+5. Viết 1-2 câu, ngắn gọn, có thể dùng slang/viết tắt
+6. KHÔNG dùng: "Mình cũng đang...", "Bạn đã thử X chưa?", "Rất hay/bổ ích", "Cảm ơn chia sẻ"
 7. PHẢI đọc kỹ bài viết và phản hồi CỤ THỂ, KHÔNG lái sang chủ đề khác
-8. **TUYỆT ĐỐI KHÔNG ĐOÁN CROSS-PLATFORM**: Nếu bài nhắc nền tảng cụ thể (Zalo, Telegram, Discord, iOS, Android, Shopee, Lazada, TikTok Shop, v.v.), comment CHỈ được dùng thuật ngữ của ĐÚNG nền tảng đó. Không nói về "token page" khi bài hỏi Zalo (đó là thuật ngữ Facebook). Không đoán API Android khi bài hỏi iOS. Nếu bạn không biết chính xác → BỎ QUA, không viết bừa.
-9. **KHI KHÔNG CHẮC → TRẢ VỀ CHUỖI RỖNG** hơn là đoán mò. Bài viết thiếu ngữ cảnh (chỉ có ảnh screenshot mà không có nội dung text đủ), không rõ muốn hỏi gì → return empty string.
-10. **KHÔNG BAO GIỜ đề xuất TOOL CẠNH TRANH khi đang ở trong nhóm của brand mình**: Nếu tên nhóm "${group?.name || ''}" chứa tên brand đang nuôi, TUYỆT ĐỐI KHÔNG nhắc tên tool/sản phẩm khác (Ollama, Cursor, Copilot, ChatGPT, Gemini, Claude Code, DigitalOcean, AWS, v.v.) như là giải pháp thay thế. Nếu bài hỏi về alternative mà bạn không có câu trả lời phù hợp với brand → CHỈ chia sẻ kinh nghiệm chung không nêu tên tool cụ thể, hoặc trả về chuỗi rỗng.
-11. **KHI POST XIN GỢI Ý → PHẢI GỢI Ý THẬT, KHÔNG HỎI NGƯỢC LẠI**: Nếu post có các cụm "xin gợi ý", "cho hỏi", "tư vấn giúp", "giúp em với", "chia sẻ kinh nghiệm", "các bác cho e xin..." — bạn PHẢI đưa ra ít nhất 1 gợi ý CỤ THỂ (tên tool, bước setup, config, kinh nghiệm cụ thể) trong câu trả lời. TUYỆT ĐỐI KHÔNG viết kiểu "Bạn muốn làm về lĩnh vực gì để mình gợi ý" / "Bạn dùng cho mục đích gì" — đó là HỎI NGƯỢC, vô ích, người hỏi đã xin gợi ý rồi. Nếu thật sự không có gợi ý phù hợp với brand → return empty string (bỏ qua bài).
 
 VÍ DỤ ĐÚNG (trả lời đúng nội dung):
 - Bài hỏi về Oracle VPS → "Oracle 24G free thì ngon, mình chạy docker trên đó mượt lắm"
@@ -941,28 +627,27 @@ VÍ DỤ SAI (chung chung, copy-paste được):
 Chỉ trả về COMMENT, không giải thích.`
 
   try {
-    const res = await aiClient.post(`${API_URL}/ai/generate`, {
-      function_name: 'caption_gen',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 120,
+    const accId = nick?.account_id || nick?.id
+    let comment = (await callAI({
+      taskType: 'comment_gen',
+      prompt,
+      maxTokens: 120,
       temperature: 0.85,
-    }, {
-      timeout: 15000,
-      headers: headers(ownerId),
-    })
-
-    let comment = (res.data?.text || res.data?.result || '').trim()
-    const provider = res.data?.provider || 'unknown'
+      ownerId,
+      accountId: accId,
+      campaignId: campaign?.id,
+      groupFbId: group?.fb_group_id || group?.id,
+    })).trim()
     if (comment) {
+      // Clean up: remove quotes, URLs, excessive length
       comment = comment.replace(/^["']|["']$/g, '').trim()
       comment = comment.replace(/https?:\/\/\S+/gi, '').trim()
-      // Cap at targetLength + 30 char overrun buffer, hard max 220
-      const maxLen = Math.min(220, Math.max(targetLength + 30, 150))
-      if (comment.length > maxLen) comment = comment.substring(0, maxLen).replace(/\s\S*$/, '')
+      if (comment.length > 150) comment = comment.substring(0, 150).replace(/\s\S*$/, '')
 
+      // REJECT generic comments that don't reference post content
       const genericPatterns = [
+        // Vietnamese
         /^mình cũng đang (tìm hiểu|trải nghiệm|sử dụng)/i,
-        /^mình cũng (gặp|bị) (tình trạng|trường hợp|vấn đề|hiện tượng) tương tự/i,
         /^bạn đã thử.*chưa/i,
         /^cảm ơn (bạn )?chia sẻ/i,
         /^thông tin (hữu ích|bổ ích|hay)/i,
@@ -970,11 +655,11 @@ Chỉ trả về COMMENT, không giải thích.`
         /^bài viết (hay|rất hay|bổ ích)/i,
         /^mình cũng (nghĩ|thấy) vậy/i,
         /^hay quá/i,
+        // English
         /^thanks for sharing/i,
         /^great (post|article|info)/i,
         /^very (useful|helpful|interesting)/i,
         /^i'?m? also (looking|exploring|trying)/i,
-        /^i'?m? (also|having) (the )?same (issue|problem|experience)/i,
         /^have you tried/i,
         /^useful info/i,
         /^nice (post|share)/i,
@@ -982,10 +667,10 @@ Chỉ trả về COMMENT, không giải thích.`
       const isGeneric = genericPatterns.some(p => p.test(comment))
       if (isGeneric) {
         console.warn(`[AI-BRAIN] ❌ Rejected generic comment: "${comment.substring(0, 50)}..."`)
-        return null
+        return null // reject → caller skips this post
       }
 
-      if (comment.length >= 5) return { text: comment, ai: true, smart: true, provider }
+      if (comment.length >= 5) return { text: comment, ai: true, smart: true }
     }
   } catch (err) {
     console.warn(`[AI-BRAIN] generateSmartComment failed: ${err.message}`)
@@ -1112,17 +797,13 @@ Chỉ include bài có score >= ${threshold}. Nếu không có bài nào, trả 
 Chỉ trả JSON, không giải thích thêm.`
 
   try {
-    const res = await aiClient.post(`${API_URL}/ai/generate`, {
-      function_name: 'relevance_review',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1500,
+    const text = await callAI({
+      taskType: 'relevance_score',
+      prompt,
+      maxTokens: 1500,
       temperature: 0.2,
-    }, {
-      timeout: 30000,
-      headers: headers(ownerId),
+      ownerId,
     })
-
-    const text = res.data?.content || res.data?.text || res.data?.choices?.[0]?.message?.content || ''
     const jsonMatch = text.match(/\[[\s\S]*\]/)
     if (!jsonMatch) {
       console.warn('[AI-BRAIN] evaluateOpportunities: No JSON array in AI response')
@@ -1218,17 +899,13 @@ Trả về JSON array (không markdown):
 [{"question":"...","answer":"..."}]`
 
   try {
-    const res = await aiClient.post(`${API_URL}/ai/generate`, {
-      function_name: 'caption_gen',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 400,
+    const text = await callAI({
+      taskType: 'caption_gen',
+      prompt,
+      maxTokens: 400,
       temperature: 0.3,
-    }, {
-      timeout: 12000,
-      headers: headers(ownerId),
+      ownerId,
     })
-
-    const text = res.data?.text || res.data?.result || ''
     const match = text.match(/\[[\s\S]*\]/)
     if (match) {
       const parsed = JSON.parse(match[0])

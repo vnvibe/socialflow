@@ -10,6 +10,7 @@ import {
   UsersRound,
   History,
   Monitor,
+  Mic,
   Clock,
   Plus,
   Download,
@@ -28,9 +29,11 @@ import useAgentGuard from '../../hooks/useAgentGuard'
 import HealthBadge from '../../components/accounts/HealthBadge'
 import ProxyBadge from '../../components/shared/ProxyBadge'
 import QuickPost from '../../components/accounts/QuickPost'
+import VoiceProfileEditor from './VoiceProfileEditor'
 
 const TABS = [
   { key: 'config', label: 'Config', icon: Settings },
+  { key: 'voice', label: 'Phong cách', icon: Mic },
   { key: 'fanpages', label: 'Fanpages', icon: FileText },
   { key: 'groups', label: 'Groups', icon: UsersRound },
   { key: 'history', label: 'History', icon: History },
@@ -360,6 +363,11 @@ export default function AccountDetail() {
       <div>
         {activeTab === 'config' && (
           <ConfigTab account={account} queryClient={queryClient} />
+        )}
+        {activeTab === 'voice' && (
+          <div className="bg-app-surface rounded shadow p-6">
+            <VoiceProfileEditor accountId={id} accountName={account?.username || 'nick'} />
+          </div>
         )}
         {activeTab === 'fanpages' && <FanpagesTab accountId={id} onQuickPost={setQuickPostTarget} />}
         {activeTab === 'groups' && <GroupsTab accountId={id} onQuickPost={setQuickPostTarget} />}

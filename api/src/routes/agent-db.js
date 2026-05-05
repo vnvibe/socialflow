@@ -13,16 +13,17 @@ const ALLOWED_TABLES = new Set([
   'campaign_activity_log', 'comment_logs', 'contents',
   'discovered_groups', 'discovered_posts', 'engagement_snapshots',
   'fanpages', 'fb_groups', 'friend_request_log', 'group_opportunities',
-  'group_post_scores', 'jobs', 'job_failures', 'media',
-  'monitored_sources', 'monitored_posts', 'nick_kpi_daily',
+  'group_post_scores', 'jobs', 'job_failures', 'leads', 'media',
+  'monitored_groups', 'monitored_sources', 'monitored_posts', 'nick_kpi_daily',
   'notifications', 'nurture_profiles', 'publish_history',
   'shared_posts', 'target_queue', 'agent_heartbeats',
   'account_health_signals', 'ai_pilot_memory', 'hermes_calls',
-  'nick_daily_job_quota',
+  'nick_daily_job_quota', 'nick_slots',
 ])
 const ALLOWED_RPCS = new Set([
   'append_campaign_to_group', 'increment_budget',
   'increment_kpi', 'increment_nurture_counter',
+  'claim_targets', 'increment_field',
 ])
 
 // Map supabase-js filter operators to pg SQL.

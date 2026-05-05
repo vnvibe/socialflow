@@ -89,7 +89,7 @@ class AIOrchestrator {
     const PROVIDER_URLS = {
       deepseek: 'https://api.deepseek.com/v1',
       groq: 'https://api.groq.com/openai/v1',
-      kimi: 'https://api.moonshot.cn/v1'
+      kimi: 'https://api.moonshot.ai/v1'
     }
 
     if (providerName === 'hermes') {

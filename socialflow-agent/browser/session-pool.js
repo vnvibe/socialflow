@@ -38,6 +38,12 @@ async function getSession(account, opts = {}) {
     }
   }
 
+  // Strict 1-browser-at-a-time: trước khi mở nick mới, đóng mọi session
+  // của nick KHÁC (giữ lại session cùng id nếu có — đã handle ở block trên).
+  // Cookies + IndexedDB persist trong userDataDir + storageFile nên reopen
+  // không gián đoạn login. FB cluster detection ghét nhiều session cùng máy.
+  await closeOtherSessions(id)
+
   // Tạo session mới
   const headlessLabel = opts.headless ? ' (headless)' : ''
   console.log(`[SESSION-POOL] Creating new session for ${account.username || id}${headlessLabel}`)
@@ -57,6 +63,13 @@ async function getSession(account, opts = {}) {
     lastUsed: Date.now(),
     closing: false,
   }
+
+  entry._saveInterval = setInterval(async () => {
+    try {
+      await entry.context.storageState({ path: entry.storageFile })
+      console.log(`[SESSION-POOL] 💾 Periodic save for ${account.username || id}`)
+    } catch {}
+  }, 5 * 60 * 1000)
 
   sessions.set(id, entry)
   startCleanup()
@@ -92,7 +105,6 @@ async function injectDbCookies(context, account) {
       domain: '.facebook.com',
       path: '/',
       secure: true,
-      sameSite: 'None'
     } : null
   }).filter(Boolean)
   if (!cookies.length) return false
@@ -186,6 +198,20 @@ async function releaseSession(accountId) {
 }
 
 /**
+ * Đóng tất cả session KHÁC accountId hiện tại (giữ lại session cùng id).
+ * Gọi trước khi mở nick mới để enforce 1-browser-at-a-time.
+ */
+async function closeOtherSessions(keepAccountId) {
+  const others = []
+  for (const [id, entry] of sessions) {
+    if (id !== keepAccountId && !entry.closing) others.push(id)
+  }
+  if (others.length === 0) return
+  console.log(`[SESSION-POOL] Closing ${others.length} other session(s) before opening new nick: ${others.map(s => s.slice(0, 8)).join(', ')}`)
+  await Promise.allSettled(others.map(id => closeSession(id)))
+}
+
+/**
  * Đóng session thật + save cookies
  */
 async function closeSession(accountId) {
@@ -193,6 +219,10 @@ async function closeSession(accountId) {
   if (!session || session.closing) return
 
   session.closing = true
+  if (session._saveInterval) {
+    clearInterval(session._saveInterval)
+    session._saveInterval = null
+  }
   console.log(`[SESSION-POOL] Closing session for ${accountId}`)
 
   try {
@@ -260,11 +290,17 @@ function getActiveSessions() {
   return sessions.size
 }
 
+function getSessionCount() {
+  return sessions.size
+}
+
 module.exports = {
   getSession,
   getPage,
   releaseSession,
   closeSession,
+  closeOtherSessions,
   closeAll,
   getActiveSessions,
+  getSessionCount,
 }

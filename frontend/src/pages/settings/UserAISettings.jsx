@@ -15,8 +15,21 @@ const providerList = [
   {
     key: 'deepseek', name: 'DeepSeek', color: 'bg-info',
     models: [
-      { value: 'deepseek-chat', label: 'DeepSeek V3' },
-      { value: 'deepseek-reasoner', label: 'DeepSeek R1' },
+      { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (1.6T)' },
+      { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (284B)' },
+      { value: 'deepseek-chat', label: 'DeepSeek V3 (legacy, retire 2026-07-24)' },
+      { value: 'deepseek-reasoner', label: 'DeepSeek R1 (legacy, retire 2026-07-24)' },
+    ]
+  },
+  {
+    key: 'kimi', name: 'Kimi (Moonshot)', color: 'bg-cyan-500',
+    models: [
+      { value: 'kimi-k2.6', label: 'Kimi K2.6 (latest, multimodal)' },
+      { value: 'kimi-k2.5', label: 'Kimi K2.5' },
+      { value: 'kimi-k2-thinking-turbo', label: 'Kimi K2 Thinking Turbo' },
+      { value: 'kimi-k2-thinking', label: 'Kimi K2 Thinking' },
+      { value: 'kimi-k2-0905-preview', label: 'Kimi K2 0905 Preview' },
+      { value: 'kimi-k2-turbo-preview', label: 'Kimi K2 Turbo Preview' },
     ]
   },
   {

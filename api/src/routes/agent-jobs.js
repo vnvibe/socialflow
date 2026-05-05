@@ -1,5 +1,7 @@
 // Agent job lifecycle routes — machine-to-machine API for the desktop agent
 // Auth: X-Agent-Key header matching AGENT_SECRET env var
+const { getActiveSlotForAccount, getNextSlotForAccount, recordSlotAction } = require('../services/slot-scheduler')
+
 module.exports = async (fastify) => {
   const { supabase } = fastify
   const AGENT_SECRET = process.env.AGENT_SECRET
@@ -384,5 +386,43 @@ module.exports = async (fastify) => {
       return reply.code(500).send({ error: error.message })
     }
     return { ok: true }
+  })
+
+  // ─── GET /agent-jobs/active-slot ──────────────────────
+  // Returns the slot currently active for an account (now ∈ [start_at,end_at])
+  // and the next upcoming slot. Poller calls this per nick before claiming a
+  // job: if active=null → nick is in IP cool-down or outside its window, skip.
+  fastify.get('/active-slot', { preHandler: agentAuth }, async (req, reply) => {
+    const { account_id } = req.query
+    if (!account_id) return reply.code(400).send({ error: 'account_id required' })
+    try {
+      const now = new Date()
+      const [active, next] = await Promise.all([
+        getActiveSlotForAccount(account_id, now),
+        getNextSlotForAccount(account_id, now),
+      ])
+      return { active, next, now: now.toISOString() }
+    } catch (err) {
+      fastify.log.error({ err }, '[AGENT-JOBS] active-slot failed')
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // ─── POST /agent-jobs/slot-action ─────────────────────
+  // Increments done_actions for a slot. Called by agent after each successful
+  // user-facing action (react/comment/etc). When all targets met, slot flips
+  // to status=done so poller closes the browser and waits for the next slot.
+  fastify.post('/slot-action', { preHandler: agentAuth }, async (req, reply) => {
+    const { slot_id, action_type, delta } = req.body || {}
+    if (!slot_id || !action_type) {
+      return reply.code(400).send({ error: 'slot_id and action_type required' })
+    }
+    try {
+      const updated = await recordSlotAction(slot_id, action_type, delta || 1)
+      return { ok: true, slot: updated }
+    } catch (err) {
+      fastify.log.error({ err }, '[AGENT-JOBS] slot-action failed')
+      return reply.code(500).send({ error: err.message })
+    }
   })
 }

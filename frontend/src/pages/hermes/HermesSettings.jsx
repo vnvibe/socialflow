@@ -69,6 +69,19 @@ function ModelSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.provider, providers])
 
+  // Reject obvious garbage as api_key — prevents the past bug where the test
+  // error toast string got pasted in and corrupted hermes_config.
+  const looksLikeApiKey = (k) => {
+    if (!k || typeof k !== 'string') return false
+    const trimmed = k.trim()
+    if (trimmed.length < 10 || trimmed.length > 200) return false
+    if (/\s/.test(trimmed)) return false                          // no whitespace
+    if (/[^\x20-\x7e]/.test(trimmed)) return false                // ASCII printable only
+    if (/error|failed|invalid|thất bại/i.test(trimmed)) return false  // looks like an error msg
+    if (/[{}[\]:,]/.test(trimmed)) return false                   // looks like JSON / object
+    return true
+  }
+
   const save = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -78,11 +91,17 @@ function ModelSection() {
         max_tokens: parseInt(form.max_tokens),
         temperature: parseFloat(form.temperature),
       }
-      if (form.api_key && form.api_key.length > 10) payload.api_key = form.api_key
+      if (form.api_key && form.api_key.trim().length > 0) {
+        if (!looksLikeApiKey(form.api_key)) {
+          throw new Error('API key không hợp lệ — chứa ký tự lạ hoặc trông giống error message. Test trước rồi mới Lưu.')
+        }
+        payload.api_key = form.api_key.trim()
+      }
       await api.put('/ai-hermes/config', payload)
     },
     onSuccess: () => {
       toast.success('Đã lưu cài đặt model')
+      setForm(f => ({ ...f, api_key: '' }))   // clear field after save (key now stored on server)
       qc.invalidateQueries({ queryKey: ['hermes', 'config'] })
     },
     onError: (err) => toast.error(`Lỗi: ${err.response?.data?.error || err.message}`),
@@ -113,12 +132,54 @@ function ModelSection() {
     }
   }
 
+  // Quick-switch presets — 1 click to swap provider+model without typing
+  const quickSwitch = (provider, model) => {
+    const baseUrl = providers[provider]?.base_url || ''
+    setForm(f => ({ ...f, provider, model, base_url: baseUrl, api_key: '' }))
+    toast.success(`Đã đổi sang ${provider} / ${model} — nhập API key rồi Test + Lưu`)
+  }
+
+  const QUICK_PRESETS = [
+    { p: 'deepseek', m: 'deepseek-chat',           label: 'DeepSeek V3',         color: 'text-info' },
+    { p: 'deepseek', m: 'deepseek-v4-pro',         label: 'DeepSeek V4 Pro',     color: 'text-info' },
+    { p: 'kimi',     m: 'kimi-k2.6',               label: 'Kimi K2.6',           color: 'text-cyan-500' },
+    { p: 'openai',   m: 'gpt-4o-mini',             label: 'GPT-4o-mini',         color: 'text-emerald-600' },
+    { p: 'gemini',   m: 'gemini-2.0-flash',        label: 'Gemini 2.0 Flash',    color: 'text-purple-500' },
+    { p: 'groq',     m: 'llama-3.3-70b-versatile', label: 'Groq Llama 3.3',      color: 'text-red-500' },
+  ]
+
   if (isLoading) return <div className="p-6 text-app-muted font-mono-ui">Đang tải cấu hình...</div>
 
   return (
     <div className="p-6 font-mono-ui max-w-2xl">
       <h2 className="text-app-primary text-base mb-1">1. Model & Provider</h2>
-      <p className="text-app-muted text-xs mb-6">Chọn nhà cung cấp LLM và thông số cho Hermes.</p>
+      <p className="text-app-muted text-xs mb-4">Chọn nhà cung cấp LLM và thông số cho Hermes.</p>
+
+      {/* Quick-switch */}
+      <div className="mb-6 p-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+        <div className="text-[10px] uppercase text-app-muted mb-2">Đổi nhanh provider/model</div>
+        <div className="flex flex-wrap gap-2">
+          {QUICK_PRESETS.map(({ p, m, label, color }) => {
+            const active = form.provider === p && form.model === m
+            return (
+              <button
+                key={`${p}/${m}`}
+                onClick={() => quickSwitch(p, m)}
+                className={`text-xs px-3 py-1.5 ${active ? 'text-hermes' : color + ' hover:opacity-80'}`}
+                style={{
+                  background: active ? 'var(--hermes-dim)' : 'var(--bg-base)',
+                  border: '1px solid ' + (active ? 'var(--hermes-fade)' : 'var(--border)'),
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+        <div className="text-[10px] text-app-dim mt-2">
+          Click 1 preset → fill provider+model+base_url → nhập API key của provider đó → Test → Lưu
+        </div>
+      </div>
 
       <div className="space-y-4">
         {/* Provider */}
