@@ -177,8 +177,11 @@ class AIOrchestrator {
       profile_eval:   { provider: 'hermes', model: 'deepseek-chat', max_tokens: 150 },
       group_eval:     { provider: 'hermes', model: 'deepseek-chat', max_tokens: 300 },
       post_strategy:  { provider: 'hermes', model: 'deepseek-chat', max_tokens: 300 },
-      // Campaign planning stays on DeepSeek (long structured output)
-      ai_pilot:       { provider: 'deepseek', model: 'deepseek-chat', max_tokens: 1000 },
+      // Campaign planning + post-session decisioner — pinned to Hermes since
+      // user's deepseek key is 402 Insufficient Balance and Hermes routes to
+      // free NVIDIA llama-3.3-70b. Without this, ai_pilot threw → agent's
+      // post-nurture decisioner fell to 45-min default rest, killing throughput.
+      ai_pilot:       { provider: 'hermes', model: 'deepseek-chat', max_tokens: 1000 },
       // Research via Gemini (web context)
       trend_analysis: { provider: 'gemini',   model: 'gemini-1.5-flash', max_tokens: 1000 },
       content_ideas:  { provider: 'gemini',   model: 'gemini-1.5-flash', max_tokens: 1500 },

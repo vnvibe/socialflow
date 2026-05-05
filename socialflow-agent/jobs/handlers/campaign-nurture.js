@@ -1508,8 +1508,13 @@ async function campaignNurture(payload, supabase) {
           }
 
           // === DETECT GROUP LANGUAGE from sample of eligible posts ===
-          // Use cached group.language if known, else detect now and persist
-          let groupLanguage = group.language || null
+          // 2026-05-05: also fall back to live groupAnalysis.lang (DOM heuristic
+          // computed at the top of the handler) so the language gate below can
+          // fire even when eligible=0 (i.e. all posts were translated/dedup'd).
+          // Without this, EN groups with translated posts kept slipping through
+          // because the post-eligibility detector needed >=3 eligible posts.
+          let groupLanguage = group.language || groupAnalysis?.lang || null
+          if (groupLanguage === 'unknown') groupLanguage = null
           if (!groupLanguage && eligible.length >= 3) {
             try {
               groupLanguage = detectGroupLanguage(eligible)
