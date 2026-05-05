@@ -6,6 +6,13 @@ const { rebalanceKPI } = require('../services/kpi-calculator')
 // personality), or hand-tuned by the user in the campaign UI. The agent's
 // hard-limits.js reads accounts.daily_budget[key].max → so this is the wire
 // between "campaign plan" and "agent enforcement".
+//
+// Key naming: planner skill outputs `scout` (semantic "thám dò"), agent's
+// hard-limits.js uses `join_group`. Normalize at the wire.
+const PLAN_KEY_TO_AGENT_KEY = {
+  scout: 'join_group',
+  // others passthrough
+}
 async function applyPerNickBudgets(supabase, aiPlan) {
   if (!aiPlan?.per_nick || typeof aiPlan.per_nick !== 'object') return
   const todayUtc = new Date(); todayUtc.setUTCHours(0, 0, 0, 0)
@@ -17,10 +24,11 @@ async function applyPerNickBudgets(supabase, aiPlan) {
       const { data: existing } = await supabase.from('accounts')
         .select('daily_budget').eq('id', accountId).maybeSingle()
       const merged = { ...(existing?.daily_budget || {}) }
-      for (const [key, max] of Object.entries(db)) {
+      for (const [planKey, max] of Object.entries(db)) {
         if (!Number.isFinite(max)) continue
-        const cur = merged[key] || { used: 0, max: 0, reset_at: resetAt }
-        merged[key] = { used: cur.used || 0, max: Math.floor(max), reset_at: cur.reset_at || resetAt }
+        const agentKey = PLAN_KEY_TO_AGENT_KEY[planKey] || planKey
+        const cur = merged[agentKey] || { used: 0, max: 0, reset_at: resetAt }
+        merged[agentKey] = { used: cur.used || 0, max: Math.floor(max), reset_at: cur.reset_at || resetAt }
       }
       await supabase.from('accounts').update({ daily_budget: merged }).eq('id', accountId)
     } catch (e) {

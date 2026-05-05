@@ -144,6 +144,31 @@ export default function CampaignForm() {
   const resetPlan = () => { setAiPlan(null); setPlanRows([]); setPlanConfirmed(false); setPerNickPlan({}) }
   const runsPerDay = (DEFAULT_PRESETS.find(p => p.key === scheduleMode)?.runs || 2)
 
+  // 2026-05-05: When per-nick plans exist, Section 6 must reflect TOTAL across
+  // selected nicks (not the old shared-plan numbers) so users see consistent
+  // data with Section 4. Section 6 becomes read-only summary; per-nick mini
+  // editors in Section 4 are the source of truth.
+  const PLAN_KEYS_FOR_SUMMARY = [
+    { key: 'browse',              icon: '👀', label: 'Lướt feed',         unit: 'lần/ngày toàn campaign' },
+    { key: 'like',                icon: '👍', label: 'Like bài',          unit: 'bài/ngày toàn campaign' },
+    { key: 'comment',             icon: '💬', label: 'Comment',           unit: 'bài/ngày toàn campaign' },
+    { key: 'opportunity_comment', icon: '📢', label: 'Quảng cáo tự nhiên', unit: 'lần/ngày toàn campaign' },
+    { key: 'scout',               icon: '🔍', label: 'Thám dò nhóm',      unit: 'nhóm/ngày toàn campaign' },
+    { key: 'friend_request',      icon: '🤝', label: 'Kết bạn',           unit: 'người/ngày toàn campaign' },
+    { key: 'post',                icon: '📝', label: 'Đăng bài',          unit: 'bài/ngày toàn campaign' },
+  ]
+  const hasPerNick = Object.keys(perNickPlan).length > 0
+  const summaryRows = hasPerNick
+    ? PLAN_KEYS_FOR_SUMMARY.map(({ key, icon, label, unit }) => {
+        let total = 0
+        for (const aid of selectedAccountIds) {
+          const v = perNickPlan[aid]?.daily_budget?.[key]
+          if (Number.isFinite(v)) total += v
+        }
+        return { key, icon, label, unit, count: total }
+      }).filter(r => r.count > 0)
+    : null
+
   const updateCron = (mode, h1, h2, cH, cM, cDays) => {
     const preset = DEFAULT_PRESETS.find(p => p.key === mode)
     let cron
@@ -641,7 +666,26 @@ export default function CampaignForm() {
               )}
             </div>
 
-            <EditablePlanList rows={planRows} onChange={handleRowsChange} />
+            {hasPerNick ? (
+              // Per-nick plans active → Section 6 is a read-only campaign-wide
+              // summary derived from Section 4's per-nick edits. Source of truth
+              // is per-nick. User edits there to change these totals.
+              <div className="px-5 py-4 space-y-2">
+                <p className="text-[11px] text-app-muted italic mb-1">
+                  Tổng theo {selectedAccountIds.length} nick — sửa từng nick ở mục 4.
+                </p>
+                {summaryRows.map(row => (
+                  <div key={row.key} className="flex items-center gap-3 px-3 py-2 rounded bg-app-base">
+                    <span className="text-lg shrink-0">{row.icon}</span>
+                    <span className="text-sm font-medium text-app-primary flex-1">{row.label}</span>
+                    <span className="text-sm font-bold text-blue-700 w-16 text-right">{row.count}</span>
+                    <span className="text-[11px] text-app-muted w-44 shrink-0">{row.unit}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EditablePlanList rows={planRows} onChange={handleRowsChange} />
+            )}
 
             {aiPlan.safety_warnings?.length > 0 && (
               <div className="px-5 py-2 bg-orange-50 border-t border-orange-100">
