@@ -457,8 +457,10 @@ function CampaignSection({ campaign, accounts, runningJobs, todayStatsByAcc, tod
 }
 
 // ─── Unassigned nicks section ──────────────────────────────
-function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect, onRepair, onTogglePause }) {
-  const [expanded, setExpanded] = useState(false)
+function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc, onSelect, onRepair, onTogglePause, onCheckHealth }) {
+  // 2026-05-05: default expanded so newly-added nicks are visible immediately
+  // (user just added them — no point hiding behind a click).
+  const [expanded, setExpanded] = useState(true)
 
   if (nicks.length === 0) return null
 
@@ -479,21 +481,33 @@ function UnassignedSection({ nicks, runningJobs, todayStatsByAcc, todayJobsByAcc
       </div>
 
       {expanded && nicks.map((nick) => (
-        <NickRow
-          key={`unassigned-${nick.id}`}
-          nick={nick}
-          role={null}
-          campaignId={null}
-          campaigns={[]}
-          runningJob={runningJobs.find(j => j.payload?.account_id === nick.id)}
-          todayStats={todayStatsByAcc[nick.id]}
-          todayJobs={todayJobsByAcc[nick.id]}
-          onSelect={onSelect}
-          onRemove={() => {}}
-          onRoleChange={() => {}}
-          onRepair={onRepair}
-          onTogglePause={onTogglePause}
-        />
+        <div key={`unassigned-${nick.id}`} className="flex items-stretch" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="flex-1">
+            <NickRow
+              nick={nick}
+              role={null}
+              campaignId={null}
+              campaigns={[]}
+              runningJob={runningJobs.find(j => j.payload?.account_id === nick.id)}
+              todayStats={todayStatsByAcc[nick.id]}
+              todayJobs={todayJobsByAcc[nick.id]}
+              onSelect={onSelect}
+              onRemove={() => {}}
+              onRoleChange={() => {}}
+              onRepair={onRepair}
+              onTogglePause={onTogglePause}
+            />
+          </div>
+          {onCheckHealth && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onCheckHealth(nick) }}
+              className="self-center mr-3 px-2.5 py-1 text-[10px] font-mono-ui uppercase rounded border border-app-border text-app-primary hover:bg-app-elevated whitespace-nowrap"
+              title="Queue check_health job để verify cookie còn sống"
+            >
+              Check live
+            </button>
+          )}
+        </div>
       ))}
     </div>
   )
@@ -1125,6 +1139,21 @@ export default function AgentsRoster() {
     },
   })
 
+  // 2026-05-05: explicit "Check live" button for newly-added nicks. Posts a
+  // check_health job — agent picks it up, opens the profile, verifies cookie,
+  // updates accounts.status (healthy/checkpoint/expired). User can immediately
+  // see if a freshly pasted cookie is still alive.
+  const checkHealthMut = useMutation({
+    mutationFn: async (nick) => {
+      await api.post(`/accounts/${nick.id}/check-health`)
+    },
+    onSuccess: (_d, nick) => {
+      toast.success(`Đã queue health check cho ${nick.username || nick.id.slice(0, 8)} — kết quả ~30s`)
+      qc.invalidateQueries({ queryKey: ['jobs', 'live'] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
   // Top stats
   const activeNicks = accounts.filter(a => a.is_active).length
   const busyNow = runningJobs.length
@@ -1161,6 +1190,21 @@ export default function AgentsRoster() {
 
         {/* Accordion body */}
         <div className="flex-1 overflow-auto p-6">
+          {/* 2026-05-05: Unassigned nicks moved to TOP per user request — these
+              are the nicks the user just added or moved out of campaigns and
+              needs to triage first. Keep visible above campaign sections so the
+              triage flow lives at eye-level, not buried at the bottom. */}
+          <UnassignedSection
+            nicks={unassignedNicks}
+            runningJobs={runningJobs}
+            todayStatsByAcc={todayStatsByAcc}
+            todayJobsByAcc={todayJobsByAcc}
+            onSelect={setSelected}
+            onRepair={setRepairNick}
+            onTogglePause={(nick, pause) => togglePauseNick.mutate({ nick, pause })}
+            onCheckHealth={(nick) => checkHealthMut.mutate(nick)}
+          />
+
           {campaigns.map((c) => (
             <CampaignSection
               key={c.id}
@@ -1177,16 +1221,6 @@ export default function AgentsRoster() {
               onTogglePause={(nick, pause) => togglePauseNick.mutate({ nick, pause })}
             />
           ))}
-
-          <UnassignedSection
-            nicks={unassignedNicks}
-            runningJobs={runningJobs}
-            todayStatsByAcc={todayStatsByAcc}
-            todayJobsByAcc={todayJobsByAcc}
-            onSelect={setSelected}
-            onRepair={setRepairNick}
-            onTogglePause={(nick, pause) => togglePauseNick.mutate({ nick, pause })}
-          />
 
           {campaigns.length === 0 && accounts.length > 0 && (
             <div className="text-center p-8 text-app-muted font-mono-ui">
