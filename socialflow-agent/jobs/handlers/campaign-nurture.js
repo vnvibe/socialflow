@@ -2218,7 +2218,7 @@ Hướng dẫn: KPI gần đạt→tăng interval. Nhiều skip→ưu tiên scou
 Chỉ trả JSON.` }],
           max_tokens: 200, temperature: 0.1,
         }, {
-          timeout: 10000,
+          timeout: 30000,
           headers: { 'Content-Type': 'application/json',
             ...(AUTH_TOKEN && { Authorization: `Bearer ${AUTH_TOKEN}` }),
             ...(payload.owner_id && { 'x-user-id': payload.owner_id }),

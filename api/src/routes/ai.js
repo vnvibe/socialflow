@@ -83,11 +83,18 @@ module.exports = async (fastify) => {
     const { function_name, messages, provider, model, account_id, campaign_id } = req.body
     if (!messages?.length) return reply.code(400).send({ error: 'messages required' })
 
-    // Allow service-role key, agent secret key, OR authenticated user
+    // Allow service-role key, agent secret (either env name), OR authenticated user.
+    // 2026-05-05: agent's lib/config.js stores its key under `AGENT_SECRET_KEY`
+    // but the value matches API's `AGENT_SECRET` env (the names are reversed in
+    // history). Without checking BOTH the agent gets 401 and falls back to
+    // "AI unavailable — defaults" → 45-min rest gate kills throughput.
     const authHeader = req.headers.authorization || ''
     const isServiceKey = authHeader.includes(process.env.SUPABASE_SERVICE_ROLE_KEY || '___none___')
-    const agentSecret = process.env.AGENT_SECRET_KEY || ''
-    const isAgentSecret = agentSecret && authHeader.includes(agentSecret)
+    const agentSecretA = process.env.AGENT_SECRET_KEY || ''
+    const agentSecretB = process.env.AGENT_SECRET || ''
+    const isAgentSecret =
+      (agentSecretA && authHeader.includes(agentSecretA)) ||
+      (agentSecretB && authHeader.includes(agentSecretB))
     if (!isServiceKey && !isAgentSecret) {
       try { await fastify.authenticate(req, reply) } catch { return }
     }
@@ -596,11 +603,18 @@ A colossal glass server tower floating in the sky above clouds, bathed in warm g
   fastify.post('/comment', async (req, reply) => {
     const { post_snippet, group_name, topic, style, language, user_id } = req.body
 
-    // Allow service-role key, agent secret key, OR authenticated user
+    // Allow service-role key, agent secret (either env name), OR authenticated user.
+    // 2026-05-05: agent's lib/config.js stores its key under `AGENT_SECRET_KEY`
+    // but the value matches API's `AGENT_SECRET` env (the names are reversed in
+    // history). Without checking BOTH the agent gets 401 and falls back to
+    // "AI unavailable — defaults" → 45-min rest gate kills throughput.
     const authHeader = req.headers.authorization || ''
     const isServiceKey = authHeader.includes(process.env.SUPABASE_SERVICE_ROLE_KEY || '___none___')
-    const agentSecret = process.env.AGENT_SECRET_KEY || ''
-    const isAgentSecret = agentSecret && authHeader.includes(agentSecret)
+    const agentSecretA = process.env.AGENT_SECRET_KEY || ''
+    const agentSecretB = process.env.AGENT_SECRET || ''
+    const isAgentSecret =
+      (agentSecretA && authHeader.includes(agentSecretA)) ||
+      (agentSecretB && authHeader.includes(agentSecretB))
     if (!isServiceKey && !isAgentSecret) {
       try { await fastify.authenticate(req, reply) } catch { return }
     }
