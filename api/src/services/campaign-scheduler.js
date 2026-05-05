@@ -1025,8 +1025,30 @@ async function executeRoleCampaign(campaign) {
         }
       } catch {}
 
-      const nickDelay = i * (campaign.nick_stagger_seconds || 60)
-      const totalDelaySec = roleDelay + nickDelay
+      // 2026-05-05: per-nick personality schedule.
+      // Old behavior: linear stagger `i * 60s` → all nicks fire within a 3-min
+      // cluster after every cron trigger, which is a textbook bot signature.
+      //
+      // New behavior:
+      //   - Deterministic per-nick base offset derived from accountId UUID
+      //     (same nick fires at the same minute-of-cycle every time, like a
+      //     real person's daily routine).
+      //   - Random ±15 min jitter on every fire so the exact second drifts.
+      //   - Spread across a 0-120 min window from cron trigger so different
+      //     nicks act at very different times — no more cluster.
+      //
+      // Scout role keeps light stagger only; it's a utility job that can run
+      // close to the cron tick without raising flags.
+      let totalDelaySec
+      if (role.role_type === 'scout') {
+        totalDelaySec = roleDelay + i * (campaign.nick_stagger_seconds || 60)
+      } else {
+        const seedHex = String(accountId || '').replace(/-/g, '').slice(-6) || '000000'
+        const seedNum = parseInt(seedHex, 16) || 0
+        const baseOffsetMin = (seedNum % 120) // 0-119 min, deterministic per nick
+        const jitterMin = Math.floor(Math.random() * 31) - 15 // ±15 min random
+        totalDelaySec = roleDelay + Math.max(0, baseOffsetMin * 60 + jitterMin * 60)
+      }
       const scheduledAt = new Date(Date.now() + totalDelaySec * 1000)
 
       // Fix 3 (Phase 6): scout searches both topic AND brand keywords so it finds
