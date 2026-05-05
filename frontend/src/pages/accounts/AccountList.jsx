@@ -889,3 +889,6 @@ function BulkImportModal({ onClose, onSuccess }) {
     </div>
   )
 }
+
+// 2026-05-05: export so /agents page can reuse the Add UI.
+export { AddAccountModal }
