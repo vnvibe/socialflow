@@ -21,6 +21,52 @@ const groupVisitCache = new Map() // groupFbId → [{accountId, timestamp}]
 const GROUP_VISIT_WINDOW = 30 * 60 * 1000 // 30 min
 
 // === Group performance tracking helpers ===
+// 2026-05-05: parse FB-relative timestamps to days. Returns null if can't
+// determine (no timestamp visible). Used to filter out old posts so the
+// agent doesn't comment on stale content (looks like a bot scraping
+// archives). Examples seen on FB:
+//   "Vừa xong" / "Just now"            → 0
+//   "30 phút" / "30 mins"              → 0
+//   "3 giờ" / "3h" / "3 hours ago"     → 0
+//   "2 ngày" / "2d" / "2 days ago"     → 2
+//   "5 tuần" / "5 weeks ago"           → 35
+//   "3 tháng" / "3 months ago"         → 90
+//   "1 năm"                            → 365
+function parsePostAgeDays(text) {
+  if (!text) return null
+  const t = String(text).toLowerCase()
+  // Vietnamese + English
+  const m = t.match(/(\d+)\s*(năm|year|tháng|month|tuần|week|ngày|day|giờ|hour|h\b|d\b|w\b|mo\b|y\b|phút|min)/i)
+  if (!m) {
+    if (/vừa xong|just now|moments? ago/i.test(t)) return 0
+    return null
+  }
+  const n = parseInt(m[1])
+  const unit = m[2].toLowerCase()
+  // Order: longest/specific first; English single-letter aliases last with
+  // `^…$` anchors so they don't accidentally match Vietnamese substrings
+  // (e.g. `y\b` would match end of "ngày").
+  if (/năm|tháng|tuần|ngày|giờ|phút/.test(unit)) {
+    if (/năm/.test(unit)) return n * 365
+    if (/tháng/.test(unit)) return n * 30
+    if (/tuần/.test(unit)) return n * 7
+    if (/ngày/.test(unit)) return n
+    return 0 // giờ / phút
+  }
+  if (/year/.test(unit)) return n * 365
+  if (/month/.test(unit)) return n * 30
+  if (/week/.test(unit)) return n * 7
+  if (/day/.test(unit)) return n
+  if (/hour|min/.test(unit)) return 0
+  // Single-letter aliases — anchored
+  if (/^y$/.test(unit)) return n * 365
+  if (/^mo$/.test(unit)) return n * 30
+  if (/^w$/.test(unit)) return n * 7
+  if (/^d$/.test(unit)) return n
+  if (/^h$/.test(unit)) return 0
+  return null
+}
+
 async function recordGroupSkip(supabase, accountId, fbGroupId) {
   if (!supabase || !fbGroupId) return
   try {
@@ -68,8 +114,19 @@ function recordGroupVisit(groupFbId, accountId) {
 }
 
 async function campaignNurture(payload, supabase) {
-  const { account_id, campaign_id, role_id, topic: rawTopic, config, read_from, parsed_plan } = payload
+  const { account_id, campaign_id, role_id, config, read_from, parsed_plan } = payload
+  let { topic: rawTopic } = payload
   const startTime = Date.now()
+
+  // 2026-05-04: scheduler-emitted jobs often have empty payload.topic, which
+  // crashed downstream at `topic.toLowerCase()` (line ~553). Backfill from
+  // campaigns row when missing — same fix as scout handler.
+  if (!rawTopic && campaign_id) {
+    try {
+      const { data: c } = await supabase.from('campaigns').select('topic').eq('id', campaign_id).single()
+      if (c?.topic) rawTopic = c.topic
+    } catch {}
+  }
 
   // Build full topic from: plan keywords + topic field + requirement
   // This ensures AI filter + keyword fallback use ALL relevant terms
@@ -77,7 +134,7 @@ async function campaignNurture(payload, supabase) {
     .flatMap(s => s.params?.keywords || [])
     .filter(Boolean)
   const topicParts = [rawTopic, ...planKeywords].filter(Boolean)
-  const topic = [...new Set(topicParts.map(t => t.trim().toLowerCase()))].join(', ') || rawTopic
+  const topic = [...new Set(topicParts.map(t => t.trim().toLowerCase()))].join(', ') || rawTopic || ''
 
   // Activity logger — logs every action for AI analysis
   const logger = new ActivityLogger(supabase, {
@@ -298,13 +355,21 @@ async function campaignNurture(payload, supabase) {
         const sb = scoreOf(b)
         if (sa !== sb) return sb - sa
 
-        // 3. Tiebreaker: prefer groups not visited recently
+        // 3. Member count — prefer larger groups (more reach per comment).
+        //    2026-05-04: user explicitly asked for member-count priority.
+        //    Comparing log-scaled buckets so 1k-vs-2k stays a tie but
+        //    1k-vs-100k strongly prefers the 100k group.
+        const ma = Math.log10(Math.max(1, a.member_count || 1))
+        const mb = Math.log10(Math.max(1, b.member_count || 1))
+        if (Math.abs(ma - mb) >= 0.5) return mb - ma // ≥3x size difference
+
+        // 4. Tiebreaker: prefer groups not visited recently
         const aRecent = recentNames.indexOf(a.name)
         const bRecent = recentNames.indexOf(b.name)
         if (aRecent === -1 && bRecent !== -1) return -1
         if (bRecent === -1 && aRecent !== -1) return 1
 
-        // 4. Final tiebreaker: random
+        // 5. Final tiebreaker: random
         return Math.random() - 0.5
       })
 
@@ -381,7 +446,11 @@ async function campaignNurture(payload, supabase) {
     let totalComments = 0
     const groupResults = []
     let aiGroupEvalsThisRun = 0
-    const MAX_AI_GROUP_EVALS = 2
+    // 2026-05-04: bumped 2→5. With 8 visited groups per session and most
+    // junction members having NO ai_relevance cache (or stale 4+ days),
+    // 2 fresh evals/run left 6 groups bypassing eval with undefined
+    // aiDecision — pipeline would silently fall through and produce 0 cmt.
+    const MAX_AI_GROUP_EVALS = 5
 
     // === RANDOMIZE TASK ORDER per nick (avoid pattern detection) ===
     // 50% chance: scan first then comment | 50% comment from existing scans then scan new
@@ -444,6 +513,47 @@ async function campaignNurture(payload, supabase) {
         const status = await checkAccountStatus(page, supabase, account_id)
         if (status.blocked) throw new Error(`Account blocked: ${status.detail}`)
 
+        // 2026-05-04: backfill member_count from the live group header if the
+        // DB row is missing it. Scout's regex on search-result snippets often
+        // missed VN formats ("1,2K thành viên", "5,1 N thành viên",
+        // "1,2 triệu thành viên") so most joined groups landed with 0 — which
+        // killed the member-count signal in the tier scoring formula.
+        // Run only when current value looks unset/garbage.
+        if (!group.member_count || group.member_count < 10) {
+          try {
+            const liveCount = await page.evaluate(() => {
+              const txt = (document.body.innerText || '').slice(0, 8000)
+              // Try several formats. Capture order: number + optional suffix.
+              const patterns = [
+                /([\d.,]+)\s*(triệu|million|tr)\s*(thành viên|members?|người)/i,
+                /([\d.,]+)\s*(nghìn|N|K|k)\s*(thành viên|members?|người)/i,
+                /([\d.,]+)\s*(thành viên|members?|người)/i,
+              ]
+              for (const re of patterns) {
+                const m = txt.match(re)
+                if (!m) continue
+                const raw = m[1].replace(/[,]/g, '.')
+                const num = parseFloat(raw) || 0
+                if (!num) continue
+                const suf = (m[2] || '').toLowerCase()
+                if (/triệu|million|tr/.test(suf)) return Math.round(num * 1_000_000)
+                if (/nghìn|n|k/.test(suf)) return Math.round(num * 1000)
+                // No suffix → strip dot thousand-sep, parse as int
+                return parseInt(m[1].replace(/[.,]/g, '')) || 0
+              }
+              return 0
+            }).catch(() => 0)
+            if (liveCount && liveCount >= 10) {
+              console.log(`[NURTURE] member_count backfill: ${group.name} → ${liveCount}`)
+              group.member_count = liveCount
+              try {
+                await supabase.from('fb_groups').update({ member_count: liveCount })
+                  .eq('fb_group_id', group.fb_group_id)
+              } catch {}
+            }
+          } catch {}
+        }
+
         // Language check — analyze first 8 posts + group description
         const groupAnalysis = await page.evaluate(() => {
           const articles = document.querySelectorAll('[role="article"]')
@@ -497,7 +607,7 @@ async function campaignNurture(payload, supabase) {
         // AI decides if group is relevant — replaces hardcoded keyword/language checks
         // If AI fails → skip this group THIS RUN (not failure, will retry next time)
         // Cache result in ai_relevance for 7 days
-        const topicKey = topic.toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
+        const topicKey = (topic || '').toLowerCase().trim().replace(/\s+/g, '_').slice(0, 50)
         const cachedEval = group.ai_relevance?.[topicKey]
         const CACHE_TTL = 2 * 24 * 3600 * 1000 // 2 days (was 7 — too long for volatile group content)
         const cacheValid = cachedEval?.evaluated_at && (Date.now() - new Date(cachedEval.evaluated_at).getTime()) < CACHE_TTL
@@ -505,6 +615,18 @@ async function campaignNurture(payload, supabase) {
         if (cacheValid) {
           const cachedDecision = cachedEval.decision || (cachedEval.score >= 3 || cachedEval.relevant ? 'engage' : 'reject')
           result.aiDecision = { action: cachedDecision, score: cachedEval.score, tier: cachedEval.tier, reason: cachedEval.reason || 'cached' }
+
+          // 2026-05-04: log group decision to DB so we can debug from outside
+          try {
+            logger.log('nurture_group_decision', {
+              target_type: 'group', target_name: group.name, target_id: group.fb_group_id,
+              details: {
+                decision: cachedDecision, score: cachedEval.score, tier: cachedEval.tier,
+                reason: cachedEval.reason || 'cached', source: 'cache',
+                lang: groupAnalysis?.lang, viRatio: groupAnalysis?.viRatio,
+              },
+            })
+          } catch {}
 
           if (cachedDecision === 'reject') {
             console.log(`[NURTURE] Skip "${group.name}" — cached REJECT (score: ${cachedEval.score}, reason: ${cachedEval.reason || 'cached'})`)
@@ -519,6 +641,18 @@ async function campaignNurture(payload, supabase) {
           // Rate limit AI evals: max 2 per run, rest will be evaluated in future runs
           if (aiGroupEvalsThisRun >= MAX_AI_GROUP_EVALS) {
             console.log(`[NURTURE] ⚠️ "${group.name}" — skipping AI eval (${aiGroupEvalsThisRun}/${MAX_AI_GROUP_EVALS} evals this run), will evaluate next run`)
+            // 2026-05-04: log rate-limit-bypass to DB so we can see it from outside
+            try {
+              logger.log('nurture_group_decision', {
+                target_type: 'group', target_name: group.name, target_id: group.fb_group_id,
+                details: {
+                  decision: 'engage', source: 'rate_limit_bypass',
+                  evals_used: aiGroupEvalsThisRun, evals_max: MAX_AI_GROUP_EVALS,
+                  lang: groupAnalysis?.lang, viRatio: groupAnalysis?.viRatio,
+                  reason: 'AI eval limit hit, proceeding without group decision',
+                },
+              })
+            } catch {}
             // Don't skip the group — let it proceed without eval (give benefit of doubt)
           } else {
           // Need AI evaluation — extract group info from page
@@ -542,16 +676,24 @@ async function campaignNurture(payload, supabase) {
               }
               const posts = []
               const articles = document.querySelectorAll('[role="article"]')
+              const SKIP_CLOSEST = '[role="button"], [role="group"], h1, h2, h3, h4'
               for (const article of [...articles].slice(0, 8)) {
                 // Skip nested articles (comments)
                 const parentArticle = article.parentElement?.closest('[role="article"]')
                 if (parentArticle && parentArticle !== article) continue
 
+                // 2026-05-04: same aggressive walker as commentable extractor
+                // — `div[dir="auto"]` alone is empty on modern FB.
                 let postText = ''
-                // Try div[dir="auto"] first, fallback to article.innerText
-                for (const d of article.querySelectorAll('div[dir="auto"]')) {
-                  const t = d.innerText?.trim() || ''
-                  if (t.length > 10 && t.length > postText.length) postText = t
+                for (const el of article.querySelectorAll('div, span')) {
+                  if (el.closest(SKIP_CLOSEST)) continue
+                  const inComment = el.closest('[role="article"]')
+                  if (inComment && inComment !== article) continue
+                  const t = (el.innerText || '').trim()
+                  if (t.length < 10 || t.length > 5000) continue
+                  if (/^\d+\s*(lượt|reactions?|comments?|bình luận|share|chia sẻ)/i.test(t)) continue
+                  if (/^(\d+\s*(giờ|phút|ngày|tuần|tháng|năm|h|m|d|w|mo|y)|\d+\s*(hour|min|day|week|month|year)s?\s*(ago|trước)?)/i.test(t)) continue
+                  if (t.length > postText.length) postText = t
                 }
                 if (!postText) {
                   postText = (article.innerText || '').substring(0, 300).trim()
@@ -673,8 +815,13 @@ async function campaignNurture(payload, supabase) {
         } catch (e) { console.warn('[NURTURE] DOM debug failed:', e.message) }
 
         // ===== LIKE POSTS (desktop, JS-based) =====
+        // 2026-05-04: cap likes at 1/group. User wants COMMENT to be the
+        // primary KPI signal, not likes. Likes still happen as natural
+        // engagement before commenting (1 like per group ≈ "noticed a post,
+        // about to engage") but most session time goes to comment phase.
         if (likeCheck.allowed && tracker.get('like') < maxLikesSession) {
-          const maxLikes = getActionParams(parsed_plan, 'like', { countMin: 3, countMax: 5 }).count
+          const planMax = getActionParams(parsed_plan, 'like', { countMin: 3, countMax: 5 }).count
+          const maxLikes = Math.min(planMax, 1) // hard-cap 1/group
           let likesInGroup = 0
 
           // Find MAIN POST like buttons only (NOT comment like buttons)
@@ -705,20 +852,36 @@ async function campaignNurture(payload, supabase) {
                   (/^(Like|Thích|Thich)$/i.test(label) || /^(Like|Thích|Thich)$/i.test(text)) &&
                   pressed !== 'true'
                 ) {
-                  // Extract post permalink from article (multiple strategies)
+                  // Extract post permalink — same multi-pass strategy as the
+                  // comment scraper so like activity logs also carry post_url
+                  // (was null on every modern-FB feed entry).
                   let postUrl = null
-                  const selectors = [
-                    'a[href*="/posts/"]', 'a[href*="/permalink/"]', 'a[href*="story_fbid"]',
-                    'a[href*="/groups/"][role="link"]'
-                  ]
-                  for (const sel of selectors) {
-                    if (postUrl) break
-                    for (const link of article.querySelectorAll(sel)) {
-                      const href = link.href || ''
-                      if (href.match(/\/(posts|permalink)\/\d+/) || href.includes('story_fbid')) {
-                        postUrl = href.split('?')[0]; break
-                      }
+                  const tryUrl = (href) => {
+                    if (!href) return null
+                    if (href.match(/\/(posts|permalink|multi_permalinks)\/(pfbid[\w]+|\d+)/) ||
+                        href.includes('story_fbid=') ||
+                        href.match(/\/(videos|photos|reel)\/\d+/) ||
+                        href.match(/\/groups\/[^/]+\/(posts|permalink)\/(pfbid[\w]+|\d+)/)) {
+                      return href.split('?')[0]
                     }
+                    return null
+                  }
+                  // Pass 1: classic anchors with explicit /posts/ etc.
+                  for (const link of article.querySelectorAll('a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="/videos/"], a[href*="/photos/"], a[href*="/reel/"], a[href*="/multi_permalinks/"]')) {
+                    postUrl = tryUrl(link.href || '')
+                    if (postUrl) break
+                  }
+                  // Pass 2: any anchor whose href passes the regex (covers __cft__ token URLs).
+                  if (!postUrl) {
+                    for (const link of article.querySelectorAll('a[href]')) {
+                      postUrl = tryUrl(link.href || link.getAttribute('href') || '')
+                      if (postUrl) break
+                    }
+                  }
+                  // Pass 3: <a><time> permalink — FB's canonical post link.
+                  if (!postUrl) {
+                    const timeAnchor = article.querySelector('a[role="link"] time, a[role="link"] abbr')?.closest('a')
+                    if (timeAnchor) postUrl = tryUrl(timeAnchor.href || '')
                   }
                   // Extract engagement counts from article
                   let reactions = 0, commentCount = 0
@@ -752,14 +915,29 @@ async function campaignNurture(payload, supabase) {
               const btn = await page.$(`[data-nurture-like="${i}"]`)
               if (!btn) continue
 
+              // 2026-05-04: human-like reading pause before each like.
+              // User reported 4 likes in 60s on a single group — that's a
+              // bot-pattern (real users scroll/read, don't tap rapid-fire).
+              // Pre-click: scroll to post + look at it like a human.
               await btn.scrollIntoViewIfNeeded()
-              await R.sleepRange(800, 1500)
+              await R.sleepRange(2500, 5500)
+              // Half the time, do a small scroll away+back to simulate
+              // reading neighbouring posts before deciding to like.
+              if (Math.random() < 0.5) {
+                try {
+                  await page.mouse.wheel(0, R.randInt(150, 400))
+                  await R.sleepRange(800, 1800)
+                  await page.mouse.wheel(0, -R.randInt(150, 400))
+                  await R.sleepRange(600, 1400)
+                  await btn.scrollIntoViewIfNeeded()
+                  await R.sleepRange(400, 900)
+                } catch {}
+              }
 
               // Click using dispatchEvent for React compatibility
               await page.evaluate((idx) => {
                 const el = document.querySelector(`[data-nurture-like="${idx}"]`)
                 if (!el) return
-                // Dispatch full mouse event sequence for React
                 const rect = el.getBoundingClientRect()
                 const x = rect.left + rect.width / 2
                 const y = rect.top + rect.height / 2
@@ -769,9 +947,8 @@ async function campaignNurture(payload, supabase) {
                 el.dispatchEvent(new MouseEvent('click', opts))
               }, i)
 
-              await R.sleepRange(1500, 2500)
+              await R.sleepRange(2500, 4500)
 
-              // Count as success — strict verification unreliable (FB re-renders)
               likesInGroup++
               totalLikes++
               tracker.increment('like')
@@ -782,8 +959,22 @@ async function campaignNurture(payload, supabase) {
               console.log(`[NURTURE] Liked #${totalLikes} (session: ${tracker.get('like')}/${maxLikesSession})`)
               logger.log('like', { target_type: 'group', target_id: group.fb_group_id, target_name: group.name, target_url: group.url, details: { post_url: likeableInfo[i]?.postUrl || null, reactions: likeableInfo[i]?.reactions || 0, comments: likeableInfo[i]?.commentCount || 0 } })
 
-              // Human delay between likes (minGapSeconds: 2)
-              await R.sleepRange(2000, 5000)
+              // 2026-05-04: between-likes gap bumped 2-5s → 15-45s, with a
+              // 1-in-4 chance of a "got distracted" pause of 60-120s. Real
+              // users don't like 4 posts in 60s; they scroll, read full
+              // content, sometimes click a link, then come back. Total
+              // session length grows but FB engagement signal looks human.
+              if (i < likesToDo - 1) {
+                try {
+                  await page.mouse.wheel(0, R.randInt(300, 800))
+                  await R.sleepRange(1500, 3000)
+                } catch {}
+                if (Math.random() < 0.25) {
+                  await R.sleepRange(60000, 120000) // long pause
+                } else {
+                  await R.sleepRange(15000, 45000)  // normal between-likes gap
+                }
+              }
             } catch (err) {
               result.errors.push(`like: ${err.message}`)
             }
@@ -801,19 +992,53 @@ async function campaignNurture(payload, supabase) {
           const maxComments = getActionParams(parsed_plan, 'comment', { countMin: 1, countMax: 2 }).count
 
           // Get ALL previously commented posts for this USER (never comment same post twice, ANY campaign)
+          // 2026-05-05: also load post_url tokens (pfbid) + a body-hash equivalent
+          // by extracting the activity log (campaign_activity_log has the post body
+          // we wrote). Prevents duplicate comments when FB rotates pfbid in URL —
+          // user reported same nick commented 2x on same post (2 weeks apart) because
+          // the URL token differed and `/posts/\d+` regex missed pfbid.
           const { data: prevComments } = await supabase
             .from('comment_logs')
             .select('post_url, fb_post_id')
             .eq('owner_id', payload.owner_id || payload.created_by)
             .not('post_url', 'is', null)
             .order('created_at', { ascending: false })
-            .limit(1000)
+            .limit(1500)
           const commentedUrls = new Set()
           const commentedPostIds = new Set()
+          const commentedTokens = new Set() // pfbid tokens
           for (const c of (prevComments || [])) {
-            if (c.post_url) commentedUrls.add(c.post_url)
+            if (c.post_url) {
+              commentedUrls.add(c.post_url)
+              // Strip query, normalize trailing /, drop fbclid/__cft__
+              const clean = c.post_url.split('?')[0].replace(/\/$/, '')
+              commentedUrls.add(clean)
+              // Extract any pfbid token in the URL
+              const pfm = c.post_url.match(/\/(pfbid[\w]+)/)
+              if (pfm) commentedTokens.add(pfm[1])
+            }
             if (c.fb_post_id) commentedPostIds.add(c.fb_post_id)
           }
+          // Also load activity log post bodies as a SECOND dedup signal — pfbid
+          // rotates over weeks but post body text doesn't.
+          const commentedBodyHashes = new Set()
+          try {
+            const { data: prevActs } = await supabase
+              .from('campaign_activity_log')
+              .select('details')
+              .eq('account_id', account_id)
+              .eq('action_type', 'comment')
+              .not('details', 'is', null)
+              .order('created_at', { ascending: false })
+              .limit(500)
+            for (const a of (prevActs || [])) {
+              // logger writes post_text on success; older builds wrote target_*
+              const body = a?.details?.post_text || a?.details?.post_body || a?.details?.target_post_body || ''
+              if (body && body.length >= 30) {
+                commentedBodyHashes.add(body.substring(0, 100).toLowerCase().replace(/\s+/g, ' ').trim())
+              }
+            }
+          } catch {}
 
           // === EXPAND "See more" / "Xem thêm" links to get full post content ===
           // FB truncates long posts behind these links — click them so AI sees full context
@@ -841,6 +1066,21 @@ async function campaignNurture(payload, supabase) {
               await R.sleepRange(800, 1500) // wait for content to render
             }
           } catch {}
+
+          // 2026-05-04: wait for FB to actually render at least one post in
+          // the feed before scrolling. Without this, sessions where the AI
+          // eval came from cache (fast path, no scroll needed for eval) hit
+          // the post-extraction loop too early — DOM only has the group
+          // header article, the 3 scroll attempts run on a still-loading
+          // feed, and we end up with 0 posts. Symptom: 35s sessions visiting
+          // 3 groups with 0 likes / 0 comments and skip_reasons=[]. Wait up
+          // to 12s for at least 2 articles to appear (group header + 1 real
+          // post); fall through if FB really has no posts (small/dead group).
+          try {
+            await page.waitForFunction(() => {
+              return document.querySelectorAll('[role="article"]').length >= 2
+            }, { timeout: 12000 })
+          } catch { /* feed may legitimately be empty — let scroll retry handle it */ }
 
           // Scroll to trigger FB lazy-loading of feed posts. Without this,
           // DOM at `domcontentloaded` may only contain the group header/about
@@ -897,34 +1137,44 @@ async function campaignNurture(payload, supabase) {
                 }
                 if (isNested) { diag.skipped.nested++; continue }
 
-                // Extract post body — expanded selector list (FB changes DOM often)
+                // 2026-05-04: extraction broken — DB nurture_extract showed 4
+                // posts with bodyLen=0. FB rolled out new DOM where the legacy
+                // data-ad-* attributes are gone and text lives in deeper spans.
+                // New strategy: aggressively walk the article subtree and pick
+                // the LONGEST visible text block, skipping toolbar / heading /
+                // engagement-count / nested-comment chrome.
                 let body = ''
-                const bodySelectors = [
+                const SKIP_CLOSEST = '[role="button"], [role="group"], h1, h2, h3, h4'
+                // First try old attribute selectors (rare modern FB but still seen)
+                const legacySelectors = [
                   '[data-ad-preview="message"]',
                   '[data-ad-comet-preview="message"]',
                   'div[data-ad-preview]',
                   '[data-testid="post_message"]',
                   'div[data-testid*="post"]',
                 ]
-                for (const sel of bodySelectors) {
+                for (const sel of legacySelectors) {
                   const el = article.querySelector(sel)
                   if (el?.innerText?.trim()?.length > body.length) body = el.innerText.trim()
                 }
-                // Fallback: longest div[dir="auto"] that's not a button label
-                if (body.length < 3) {
-                  for (const d of article.querySelectorAll('div[dir="auto"]')) {
-                    // Skip if inside a toolbar/button (like/comment/share labels)
-                    if (d.closest('[role="button"]') || d.closest('[role="group"]')) continue
-                    const t = (d.innerText || '').trim()
-                    if (t.length > body.length && t.length < 5000 && t.length > 3) body = t
-                  }
-                }
-                // Further fallback: longest <span> text (video/shared posts use spans)
-                if (body.length < 3) {
-                  for (const s of article.querySelectorAll('span')) {
-                    if (s.closest('[role="button"]') || s.closest('[role="group"]')) continue
-                    const t = (s.innerText || '').trim()
-                    if (t.length > body.length && t.length > 20 && t.length < 2000) body = t
+                // Walk every div + span; pick the longest visible-text block
+                // that isn't inside the skip-zone. Modern FB nests post text
+                // ~6 levels deep without the legacy data-ad-* anchor.
+                if (body.length < 20) {
+                  const candidates = article.querySelectorAll('div, span')
+                  for (const el of candidates) {
+                    if (el.closest(SKIP_CLOSEST)) continue
+                    // Skip nested-comment articles
+                    const inComment = el.closest('[role="article"]')
+                    if (inComment && inComment !== article) continue
+                    // Skip if this element CONTAINS another element with longer text — only count leaf-ish
+                    const text = (el.innerText || '').trim()
+                    if (text.length < 10 || text.length > 5000) continue
+                    // Filter out engagement counts ("123 lượt thích", "bình luận")
+                    if (/^\d+\s*(lượt|reactions?|comments?|bình luận|share|chia sẻ)/i.test(text)) continue
+                    // Filter out timestamps ("2 giờ", "5 phút trước")
+                    if (/^(\d+\s*(giờ|phút|ngày|tuần|tháng|năm|h|m|d|w|mo|y)|\d+\s*(hour|min|day|week|month|year)s?\s*(ago|trước)?)/i.test(text)) continue
+                    if (text.length > body.length) body = text
                   }
                 }
 
@@ -1041,8 +1291,34 @@ async function campaignNurture(payload, supabase) {
                 }
               } catch {}
 
+                // 2026-05-05: extract post age (timestamp) so eligible filter
+                // can skip stale posts. FB renders the timestamp as text near
+                // the author header — typical patterns: "5 tuần", "3 ngày",
+                // "12 giờ", "5 weeks ago". Also live in the timestamp <abbr>
+                // tooltip / time element which we walk first.
+                let postAge = ''
+                try {
+                  const timeEl = article.querySelector('a[role="link"] abbr, a[role="link"] time, abbr[data-utime], time')
+                  if (timeEl) {
+                    const t = (timeEl.getAttribute('aria-label') || timeEl.getAttribute('title') || timeEl.innerText || '').trim()
+                    if (t) postAge = t
+                  }
+                  if (!postAge) {
+                    // Fallback: scan small spans near header for VN/EN timestamp
+                    for (const sp of article.querySelectorAll('span, a')) {
+                      if (sp.closest('[role="article"][aria-label*="omment" i]')) continue
+                      const t = (sp.innerText || '').trim()
+                      if (t.length > 0 && t.length < 30 &&
+                          /(\d+)\s*(năm|tháng|tuần|ngày|giờ|phút|year|month|week|day|hour|min|h\b|d\b|w\b)/i.test(t)) {
+                        postAge = t
+                        break
+                      }
+                    }
+                  }
+                } catch {}
+
                 // Keep up to 1500 chars per post (was 400) — AI needs context
-                results.push({ index: results.length, postUrl, body: body.substring(0, 1500), author, isTranslated, threadComments })
+                results.push({ index: results.length, postUrl, body: body.substring(0, 1500), author, isTranslated, threadComments, postAge })
               }
               // Return both posts + diagnostics so the agent can log why extraction failed
               return { posts: results, diag }
@@ -1058,8 +1334,12 @@ async function campaignNurture(payload, supabase) {
               }
             }
 
-            // If we got >= 2 posts, stop scrolling. Otherwise retry.
-            if (commentableInfo.length >= 2) break
+            // 2026-05-04: bumped from >=2 to >=5 so the comment evaluator has
+            // a real pool to pick the most substantive post from. With only 2
+            // posts to choose from we kept landing on rao-vặt / quảng cáo
+            // posts where Hermes can't write meaningful comments (and the
+            // tightened quality gate then rejected everything).
+            if (commentableInfo.length >= 5) break
           } // end scroll retry loop
 
           // Debug: save screenshot + DOM JSON if 0 posts extracted (even if likes worked)
@@ -1099,16 +1379,50 @@ async function campaignNurture(payload, supabase) {
             }
           }
 
-          // Filter: skip translated, already commented (by ANY nick in this campaign), spam
+          // 2026-05-05: tightened dedup + age filter per user request.
+          //   1. URL match (full + cleaned)
+          //   2. Numeric fb_post_id from /posts/\d+ or story_fbid=
+          //   3. pfbid token (FB rotates these but identical post → same token cycle)
+          //   4. Body-hash match (most reliable across URL changes)
+          //   5. Age filter: skip posts older than MAX_POST_AGE_DAYS (FB shows
+          //      "5 tuần", "3 tháng" — commenting on these looks like a bot
+          //      scraping old content; user wants only fresh posts).
+          const MAX_POST_AGE_DAYS = 7
           const eligible = commentableInfo.filter(p => {
             if (p.isTranslated) return false
+
+            // 1. Full URL match
             if (p.postUrl && commentedUrls.has(p.postUrl)) return false
-            // Also check fb_post_id extracted from URL
             if (p.postUrl) {
-              const m = p.postUrl.match(/(?:posts|permalink)\/(\d+)/) || p.postUrl.match(/story_fbid=(\d+)/)
+              const clean = p.postUrl.split('?')[0].replace(/\/$/, '')
+              if (commentedUrls.has(clean)) return false
+            }
+
+            // 2. Numeric fb_post_id
+            if (p.postUrl) {
+              const m = p.postUrl.match(/(?:posts|permalink|multi_permalinks)\/(\d+)/)
+                || p.postUrl.match(/story_fbid=(\d+)/)
               if (m && commentedPostIds.has(m[1])) return false
             }
-            const lower = p.body.toLowerCase()
+
+            // 3. pfbid token
+            if (p.postUrl) {
+              const pf = p.postUrl.match(/\/(pfbid[\w]+)/)
+              if (pf && commentedTokens.has(pf[1])) return false
+            }
+
+            // 4. Body-hash match — most reliable when FB rotates URL tokens
+            if (p.body && p.body.length >= 30) {
+              const bodyKey = p.body.substring(0, 100).toLowerCase().replace(/\s+/g, ' ').trim()
+              if (commentedBodyHashes.has(bodyKey)) return false
+            }
+
+            // 5. Post age filter
+            const ageDays = parsePostAgeDays(p.postAge || '')
+            if (ageDays !== null && ageDays > MAX_POST_AGE_DAYS) return false
+
+            // Spam filter (unchanged)
+            const lower = (p.body || '').toLowerCase()
             const spamWords = ['inbox', 'liên hệ ngay', 'giảm giá', 'mua ngay', 'chuyên cung cấp']
             if (spamWords.filter(w => lower.includes(w)).length >= 2) return false
             return true
@@ -1118,10 +1432,58 @@ async function campaignNurture(payload, supabase) {
           commentDebug.eligible = eligible.length
           console.log(`[NURTURE] Extracted ${commentableInfo.length} posts, ${eligible.length} eligible for comment`)
 
-          // === SMART SKIP: 0 eligible posts → record skip + move to next group ===
+          // 2026-05-04: log extraction outcome to DB so we can debug from
+          // outside the agent (UI logs are in-memory only). Include a sample
+          // of why posts were filtered out so we can see if the issue is
+          // already-commented dedupe, translation, spam, or empty extraction.
+          try {
+            const filterReasons = { translated: 0, dup_url: 0, dup_id: 0, spam: 0 }
+            const samplePosts = []
+            for (const p of commentableInfo.slice(0, 5)) {
+              if (p.isTranslated) filterReasons.translated++
+              else if (p.postUrl && commentedUrls.has(p.postUrl)) filterReasons.dup_url++
+              else if (p.postUrl) {
+                const m = p.postUrl.match(/(?:posts|permalink)\/(\d+)/) || p.postUrl.match(/story_fbid=(\d+)/)
+                if (m && commentedPostIds.has(m[1])) filterReasons.dup_id++
+              }
+              const lower = (p.body || '').toLowerCase()
+              const spamWords = ['inbox', 'liên hệ ngay', 'giảm giá', 'mua ngay', 'chuyên cung cấp']
+              if (spamWords.filter(w => lower.includes(w)).length >= 2) filterReasons.spam++
+              samplePosts.push({
+                bodyLen: (p.body || '').length,
+                bodyPreview: (p.body || '').substring(0, 80),
+                hasUrl: !!p.postUrl,
+                isTranslated: !!p.isTranslated,
+              })
+            }
+            logger.log('nurture_extract', {
+              target_type: 'group', target_name: group.name, target_id: group.fb_group_id,
+              details: {
+                commentable: commentableInfo.length,
+                eligible: eligible.length,
+                filter_reasons: filterReasons,
+                sample_posts: samplePosts,
+                already_commented_count: commentedUrls.size + commentedPostIds.size,
+              },
+            })
+          } catch (e) {
+            console.warn(`[NURTURE] log nurture_extract failed: ${e.message}`)
+          }
+
+          // === SMART SKIP: 0 eligible posts ===
+          // 2026-05-04: only blame the group if extraction succeeded (commentable>0)
+          // but the eligible filter removed everything (translated/dup/spam).
+          // If commentable===0 the page didn't render any posts for us — that's
+          // an agent-side pipeline issue (waitForFunction timeout, FB DOM
+          // change, etc.) and punishing the group with consecutive_skips++ has
+          // been auto-blocking innocent groups all day.
           if (eligible.length === 0) {
-            await recordGroupSkip(supabase, account_id, group.fb_group_id)
-            console.log(`[NURTURE] Skip "${group.name}" — 0 eligible posts (consecutive skips will increment)`)
+            if (commentableInfo.length > 0) {
+              await recordGroupSkip(supabase, account_id, group.fb_group_id)
+              console.log(`[NURTURE] Skip "${group.name}" — ${commentableInfo.length} commentable but 0 eligible (recorded as skip)`)
+            } else {
+              console.log(`[NURTURE] Skip "${group.name}" — 0 commentable extracted (agent issue, NOT recording as skip)`)
+            }
           } else {
             // Has eligible posts → record yield (resets consecutive_skips)
             await recordGroupYield(supabase, account_id, group.fb_group_id, eligible.length)
@@ -1396,11 +1758,18 @@ async function campaignNurture(payload, supabase) {
                     ? post.comments.map(c => c?.text || c?.body || '').filter(Boolean).slice(0, 5)
                     : []
 
+                  // 2026-05-05: resolve "random" voice → pick a fresh tone
+                  // every comment so all nicks don't speak the same way.
+                  const RANDOM_VOICES = ['casual', 'lazy', 'curious', 'experienced', 'skeptical', 'helpful', 'newbie', 'sarcastic', 'gen_z', 'professional', 'humor']
+                  let resolvedVoice = brandConfig.brand_voice || brandConfig.tone || 'casual'
+                  if (resolvedVoice === 'random') {
+                    resolvedVoice = RANDOM_VOICES[Math.floor(Math.random() * RANDOM_VOICES.length)]
+                  }
                   const oppResult = await generateOpportunityComment({
                     postContent: postText,
                     brandName: brandConfig.brand_name,
                     brandDescription: brandConfig.brand_description || '',
-                    brandVoice: brandConfig.brand_voice || brandConfig.tone || 'thân thiện, tự nhiên',
+                    brandVoice: resolvedVoice,
                     commentAngle: evaluation?.comment_angle || '',
                     existingComments,
                     language: postLanguage,
@@ -1452,8 +1821,19 @@ async function campaignNurture(payload, supabase) {
                 })
               }
 
-              const commentText = typeof commentResult === 'object' ? commentResult.text : commentResult
+              let commentText = typeof commentResult === 'object' ? commentResult.text : commentResult
               const isAI = typeof commentResult === 'object' ? (commentResult.ai || commentResult.smart) : false
+
+              // 2026-05-05: strip ALL emoji/icon characters per user request.
+              // Skill prompt says no emoji but models occasionally add ❤️/👍.
+              // Strips Unicode emoji ranges + variation selectors + ZWJ. Plain
+              // ASCII punctuation is preserved.
+              if (commentText) {
+                commentText = commentText
+                  .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}\u{1F900}-\u{1F9FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1FA70}-\u{1FAFF}\u{FE00}-\u{FE0F}\u{200D}\u{20D0}-\u{20FF}\u{1F1E6}-\u{1F1FF}]/gu, '')
+                  .replace(/\s{2,}/g, ' ')
+                  .trim()
+              }
 
               if (!commentText || commentText.length <= 6) { commentDebug.gen_failed++; continue }
 
@@ -1576,8 +1956,25 @@ async function campaignNurture(payload, supabase) {
           }
         }
       } catch (err) {
-        console.warn(`[NURTURE] Group "${group.name}" failed: ${err.message}`)
+        // 2026-05-04: capture stack trace + DB log so we can pinpoint the
+        // exact `.toLowerCase()` call that's throwing on undefined.
+        const stack = err.stack ? err.stack.split('\n').slice(0, 4).join(' | ') : 'no stack'
+        console.warn(`[NURTURE] Group "${group?.name || group?.fb_group_id}" failed: ${err.message} | ${stack}`)
         result.errors.push(`group: ${err.message}`)
+        try {
+          logger.log('nurture_group_error', {
+            target_type: 'group', target_name: group?.name, target_id: group?.fb_group_id,
+            details: {
+              error: err.message,
+              stack: stack.substring(0, 500),
+              group_has_name: !!group?.name,
+              group_has_fb_id: !!group?.fb_group_id,
+              group_has_url: !!group?.url,
+              group_topic: group?.topic,
+              group_tags: group?.tags,
+            },
+          })
+        } catch {}
         if (err.message.includes('blocked') || err.message.includes('checkpoint')) {
           if (page) await saveDebugScreenshot(page, `nurture-blocked-${account_id}`)
           throw err
@@ -1692,6 +2089,9 @@ async function campaignNurture(payload, supabase) {
         const langMatch = !group.language || campaignLanguage === 'mixed' || group.language === campaignLanguage
         const { score, tier } = scoreGroup({
           engagementRate, postsPerDay, topicRelevance, languageMatch: langMatch,
+          memberCount: group.member_count || 0,
+          commentsThisSession: commented,
+          likesThisSession: liked,
         })
         const yieldedAnything = (liked + commented) > 0
         const update = {
