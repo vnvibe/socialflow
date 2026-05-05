@@ -31,6 +31,8 @@ const HERMES_SKILL_MAP = {
   checkpoint_predictor: 'checkpoint_predictor',
   traffic_conductor: 'traffic_conductor',
   social_graph_spreader: 'social_graph_spreader',
+  // Per-nick schedule personality generator (2026-05-05)
+  nick_schedule_planner: 'nick_schedule_planner',
 }
 
 function mapSkill(functionName) {
