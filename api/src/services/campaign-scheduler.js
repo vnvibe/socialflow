@@ -1025,28 +1025,43 @@ async function executeRoleCampaign(campaign) {
         }
       } catch {}
 
-      // 2026-05-05: per-nick personality schedule.
-      // Old behavior: linear stagger `i * 60s` → all nicks fire within a 3-min
-      // cluster after every cron trigger, which is a textbook bot signature.
+      // 2026-05-05: per-nick personality schedule, AI-driven.
+      // Priority:
+      //   1. accounts.schedule_profile.peak_offset_minutes — set by AI via
+      //      POST /accounts/:id/generate-schedule (Hermes nick_schedule_planner).
+      //      Each nick keeps a personality (morning_dev / night_owl / ...).
+      //   2. UUID hash fallback — for nicks not yet AI-profiled.
+      //   3. Always ±N min jitter from profile.jitter_minutes (or 15 default).
       //
-      // New behavior:
-      //   - Deterministic per-nick base offset derived from accountId UUID
-      //     (same nick fires at the same minute-of-cycle every time, like a
-      //     real person's daily routine).
-      //   - Random ±15 min jitter on every fire so the exact second drifts.
-      //   - Spread across a 0-120 min window from cron trigger so different
-      //     nicks act at very different times — no more cluster.
-      //
-      // Scout role keeps light stagger only; it's a utility job that can run
-      // close to the cron tick without raising flags.
+      // Scout role keeps light stagger; it's utility, no anti-bot need.
       let totalDelaySec
       if (role.role_type === 'scout') {
         totalDelaySec = roleDelay + i * (campaign.nick_stagger_seconds || 60)
       } else {
-        const seedHex = String(accountId || '').replace(/-/g, '').slice(-6) || '000000'
-        const seedNum = parseInt(seedHex, 16) || 0
-        const baseOffsetMin = (seedNum % 120) // 0-119 min, deterministic per nick
-        const jitterMin = Math.floor(Math.random() * 31) - 15 // ±15 min random
+        // Look up the per-nick profile once (small cost: 1 select per nick per
+        // cycle — rows are cached at the campaign-scheduler service level by
+        // the broader account fetch elsewhere; this is the fallback path).
+        let baseOffsetMin
+        let jitterRange = 15
+        try {
+          const { data: prof } = await supabase
+            .from('accounts')
+            .select('schedule_profile')
+            .eq('id', accountId)
+            .maybeSingle()
+          const profile = prof?.schedule_profile
+          if (profile && Number.isFinite(profile.peak_offset_minutes)) {
+            baseOffsetMin = profile.peak_offset_minutes
+            if (Number.isFinite(profile.jitter_minutes)) jitterRange = profile.jitter_minutes
+          }
+        } catch {}
+        if (!Number.isFinite(baseOffsetMin)) {
+          // Fallback for nicks without AI-generated profile yet.
+          const seedHex = String(accountId || '').replace(/-/g, '').slice(-6) || '000000'
+          const seedNum = parseInt(seedHex, 16) || 0
+          baseOffsetMin = seedNum % 120
+        }
+        const jitterMin = Math.floor(Math.random() * (jitterRange * 2 + 1)) - jitterRange
         totalDelaySec = roleDelay + Math.max(0, baseOffsetMin * 60 + jitterMin * 60)
       }
       const scheduledAt = new Date(Date.now() + totalDelaySec * 1000)

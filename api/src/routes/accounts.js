@@ -465,6 +465,93 @@ Trả về CHỈ JSON, không markdown wrapper.`
     }
   })
 
+  // 2026-05-05: AI-driven per-nick schedule profile generator.
+  // POST /accounts/:id/generate-schedule — call Hermes to design a daily
+  // "personality schedule" so the scheduler can stagger nicks at humanly-
+  // believable, deterministic-yet-varied times. Stored on accounts.schedule_profile.
+  fastify.post('/:id/generate-schedule', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: acc } = await supabase
+      .from('accounts')
+      .select('id, username, owner_id, fb_user_id, fb_created_at, created_at')
+      .eq('id', req.params.id).maybeSingle()
+    if (!acc) return reply.code(404).send({ error: 'Account not found' })
+    if (req.user.role !== 'admin' && acc.owner_id !== req.user.id) {
+      return reply.code(403).send({ error: 'Forbidden' })
+    }
+
+    // Existing offsets in same campaign(s) — feed to AI so it picks a slot
+    // that's not too close to other nicks.
+    const { data: peers } = await supabase
+      .from('accounts')
+      .select('schedule_profile')
+      .eq('owner_id', acc.owner_id)
+      .neq('id', acc.id)
+      .not('schedule_profile', 'is', null)
+      .limit(50)
+    const existingOffsets = (peers || [])
+      .map(p => p.schedule_profile?.peak_offset_minutes)
+      .filter(n => Number.isFinite(n))
+
+    const ageDays = Math.floor((Date.now() - new Date(acc.fb_created_at || acc.created_at).getTime()) / 86400000)
+
+    const { getOrchestratorForUser } = require('../services/ai/orchestrator')
+    const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
+
+    const userPrompt = `Tạo schedule profile cho nick FB này. Mục tiêu: scheduler sẽ pick thời điểm fire jobs trong ngày sao cho nick này nhìn như 1 người THẬT có thói quen riêng, KHÁC các nick khác (anti-bot).
+
+Nick: { username: "${acc.username || acc.fb_user_id || 'unknown'}", age_days: ${ageDays} }
+Existing offsets (đã dùng bởi nick khác cùng owner): ${JSON.stringify(existingOffsets)}
+
+Trả về CHỈ JSON object với fields:
+- personality: 1 trong [morning_dev, night_owl, nine_to_five, flexible_freelancer, student, shift_worker, retired_active]
+- active_hours_start: int 0-23
+- active_hours_end: int 0-26 (cross-midnight ok, vd 26 = 2 sáng hôm sau)
+- peak_offset_minutes: int 0-179 — phút sau cron trigger nick này thường fire. PHẢI cách existing_offsets ít nhất 20.
+- jitter_minutes: int 10-30
+- rest_windows: array of [start_min_of_day, end_min_of_day] — vd lunch [[720,780]]. 1-3 windows.
+- explanation: 1 câu Vietnamese ngắn
+
+Match personality:
+- morning_dev → peak_offset 0-30, active 6-22
+- night_owl → peak_offset 90-179, active 11-26
+- nine_to_five → peak_offset 30-90, active 8-22
+- shift_worker → peak_offset 60-150, active 14-26 hoặc 22-30
+
+Không markdown wrapper. Chỉ JSON.`
+
+    try {
+      const result = await orchestrator.call('nick_schedule_planner', [
+        { role: 'user', content: userPrompt }
+      ], { max_tokens: 400, temperature: 0.7 })
+      const text = (result?.text || result || '').trim()
+      const m = text.match(/\{[\s\S]*\}/)
+      if (!m) return reply.code(502).send({ error: 'Hermes did not return JSON', raw: text.slice(0, 300) })
+      let profile
+      try { profile = JSON.parse(m[0]) } catch (e) {
+        return reply.code(502).send({ error: 'Invalid JSON from Hermes', raw: m[0].slice(0, 300) })
+      }
+
+      // Sanity defaults — guard against malformed AI output
+      profile.personality = profile.personality || 'flexible_freelancer'
+      profile.active_hours_start = Number.isFinite(profile.active_hours_start) ? profile.active_hours_start : 8
+      profile.active_hours_end = Number.isFinite(profile.active_hours_end) ? profile.active_hours_end : 22
+      profile.peak_offset_minutes = Number.isFinite(profile.peak_offset_minutes) ? Math.max(0, Math.min(179, profile.peak_offset_minutes)) : 60
+      profile.jitter_minutes = Number.isFinite(profile.jitter_minutes) ? Math.max(5, Math.min(45, profile.jitter_minutes)) : 20
+      profile.generated_at = new Date().toISOString()
+
+      // Persist on account row
+      await supabase.from('accounts').update({
+        schedule_profile: profile,
+        active_hours_start: profile.active_hours_start,
+        active_hours_end: profile.active_hours_end,
+      }).eq('id', acc.id)
+
+      return { profile, raw: text.slice(0, 500) }
+    } catch (err) {
+      return reply.code(502).send({ error: `AI generate-schedule failed: ${err.message}` })
+    }
+  })
+
   // PUT /accounts/:id/voice-profile — Update voice profile.
   // Body: { voice_profile: {...} } — JSONB blob (see Hermes format_voice_profile_block).
   fastify.put('/:id/voice-profile', { preHandler: fastify.authenticate }, async (req, reply) => {
