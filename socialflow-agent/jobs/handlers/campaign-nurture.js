@@ -314,6 +314,24 @@ async function campaignNurture(payload, supabase) {
       console.log(`[NURTURE] ${groups.length}/${allLabeled.length} groups gán nhãn match topic "${topic}"`)
     }
 
+    // 2026-05-05: language hard filter — campaign.language=vi → ONLY visit
+    // groups marked vi (or unknown — give benefit of doubt). EN groups joined
+    // by the nick are skipped entirely, not counted toward any KPI for this
+    // campaign. User rule: "EN nhóm bỏ qua không cho vào kpi vì camp chỉ
+    // dành cho tiếng việt". Mixed campaigns visit everything.
+    if (campaignLanguage && campaignLanguage !== 'mixed') {
+      const before = groups.length
+      groups = groups.filter(g => {
+        const gl = (g.language || '').toLowerCase()
+        if (!gl || gl === 'unknown') return true
+        return gl === campaignLanguage
+      })
+      const filtered = before - groups.length
+      if (filtered > 0) {
+        console.log(`[NURTURE] Lang filter: dropped ${filtered} non-${campaignLanguage} groups (campaign=${campaignLanguage}-only)`)
+      }
+    }
+
     // ── SMART ROTATION: ưu tiên group có score cao + recent yield ──
     // Score-based sort: tier1 (>=8) → tier2 (5-7) → tier3 (<5)
     // Penalty: groups with consecutive_skips >= 2 đẩy xuống cuối
