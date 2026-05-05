@@ -1,6 +1,34 @@
 const { parseMission } = require('../services/campaign-planner')
 const { rebalanceKPI } = require('../services/kpi-calculator')
 
+// 2026-05-05: Apply per-nick budgets from ai_plan.per_nick to accounts.daily_budget.
+// Each nick can have a unique daily limit set by Hermes (warm-up phase × voice ×
+// personality), or hand-tuned by the user in the campaign UI. The agent's
+// hard-limits.js reads accounts.daily_budget[key].max → so this is the wire
+// between "campaign plan" and "agent enforcement".
+async function applyPerNickBudgets(supabase, aiPlan) {
+  if (!aiPlan?.per_nick || typeof aiPlan.per_nick !== 'object') return
+  const todayUtc = new Date(); todayUtc.setUTCHours(0, 0, 0, 0)
+  const resetAt = new Date(todayUtc.getTime() + 86400000).toISOString()
+  for (const [accountId, plan] of Object.entries(aiPlan.per_nick)) {
+    const db = plan?.daily_budget
+    if (!db || typeof db !== 'object') continue
+    try {
+      const { data: existing } = await supabase.from('accounts')
+        .select('daily_budget').eq('id', accountId).maybeSingle()
+      const merged = { ...(existing?.daily_budget || {}) }
+      for (const [key, max] of Object.entries(db)) {
+        if (!Number.isFinite(max)) continue
+        const cur = merged[key] || { used: 0, max: 0, reset_at: resetAt }
+        merged[key] = { used: cur.used || 0, max: Math.floor(max), reset_at: cur.reset_at || resetAt }
+      }
+      await supabase.from('accounts').update({ daily_budget: merged }).eq('id', accountId)
+    } catch (e) {
+      console.warn(`[per-nick-budget] apply failed for ${accountId}: ${e.message}`)
+    }
+  }
+}
+
 // Phase 15: shared onboarding helper — fires priority scout jobs for nicks
 // that have <3 active campaign_groups, respecting warmup (>=21d) + dedup.
 async function onboardNewNicks(supabase, campaignId, nickIds, userId) {
@@ -444,6 +472,110 @@ module.exports = async (fastify) => {
     }
   })
 
+  // POST /campaigns/preview-plan-per-nick — Hermes generates a UNIQUE budget per nick
+  // (warm-up phase × voice × personality from schedule_profile). UI shows the mini
+  // plan inline under each nick name and lets user override before save.
+  fastify.post('/preview-plan-per-nick', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { account_ids, topic, mission, brand_config, runs_per_day } = req.body || {}
+    if (!Array.isArray(account_ids) || !account_ids.length) {
+      return reply.code(400).send({ error: 'account_ids required' })
+    }
+
+    const { data: accounts } = await supabase
+      .from('accounts')
+      .select('id, username, fb_user_id, fb_created_at, created_at, schedule_profile, daily_budget')
+      .in('id', account_ids)
+      .eq('owner_id', req.user.id)
+    if (!accounts?.length) return reply.code(400).send({ error: 'No valid accounts found' })
+
+    // voice_profile lives in nick_personality — fetch in parallel and zip in
+    const { data: voiceRows } = await supabase
+      .from('nick_personality')
+      .select('account_id, voice_profile')
+      .in('account_id', account_ids)
+    const voiceByAcc = Object.fromEntries((voiceRows || []).map(r => [r.account_id, r.voice_profile]))
+
+    const { getOrchestratorForUser } = require('../services/ai/orchestrator')
+    const orchestrator = await getOrchestratorForUser(req.user.id, supabase)
+
+    // Hard cap floor — even if Hermes says higher, never cross HARD_LIMITS.
+    const HARD_CAPS = { browse: 20, like: 80, comment: 15, opportunity_comment: 3, scout: 5, friend_request: 15, post: 3 }
+    const FALLBACK_BY_PHASE = {
+      week1:  { browse: 1, like: 10, comment: 0, opportunity_comment: 0, scout: 0, friend_request: 0, post: 0 },
+      week2:  { browse: 2, like: 22, comment: 2, opportunity_comment: 0, scout: 0, friend_request: 1, post: 0 },
+      week3:  { browse: 3, like: 35, comment: 5, opportunity_comment: 0, scout: 1, friend_request: 3, post: 0 },
+      week4:  { browse: 4, like: 45, comment: 8, opportunity_comment: 1, scout: 2, friend_request: 7, post: 1 },
+      mature: { browse: 5, like: 60, comment: 12, opportunity_comment: 2, scout: 4, friend_request: 12, post: 2 },
+    }
+    const phaseFor = (ageDays) => {
+      if (ageDays <= 7) return 'week1'
+      if (ageDays <= 14) return 'week2'
+      if (ageDays <= 21) return 'week3'
+      if (ageDays <= 30) return 'week4'
+      return 'mature'
+    }
+    const sanitize = (b, phase) => {
+      const fb = FALLBACK_BY_PHASE[phase]
+      const out = {}
+      for (const k of Object.keys(HARD_CAPS)) {
+        const raw = Number.isFinite(b?.[k]) ? Math.floor(b[k]) : fb[k]
+        out[k] = Math.max(0, Math.min(HARD_CAPS[k], raw))
+      }
+      return out
+    }
+
+    // Run all nicks in parallel — Hermes is local so fan-out is fine
+    const perNick = {}
+    await Promise.all(accounts.map(async (acc) => {
+      const ageDays = Math.floor((Date.now() - new Date(acc.fb_created_at || acc.created_at).getTime()) / 86400000)
+      const phase = phaseFor(ageDays)
+      const ctx = {
+        nick: {
+          username: acc.username || acc.fb_user_id || 'unknown',
+          age_days: ageDays,
+          brand_voice: voiceByAcc[acc.id]?.brand_voice || brand_config?.brand_voice || 'casual',
+        },
+        schedule_profile: acc.schedule_profile || null,
+        runs_per_day: runs_per_day || 5,
+        brand: brand_config?.brand_name ? { brand_name: brand_config.brand_name } : {},
+        topic: topic || mission || '',
+      }
+      const userPrompt = `Tạo daily budget JSON cho nick này:\n${JSON.stringify(ctx, null, 2)}\n\nTrả về JSON theo schema, KHÔNG reasoning, KHÔNG markdown.`
+      try {
+        const result = await orchestrator.call('nick_budget_planner', [
+          { role: 'user', content: userPrompt }
+        ], { max_tokens: 300, temperature: 0.3 })
+        const text = (result?.text || '').trim()
+        const m = text.match(/\{[\s\S]*\}/)
+        let parsed = null
+        if (m) {
+          try { parsed = JSON.parse(m[0]) } catch {}
+        }
+        const daily_budget = sanitize(parsed?.daily_budget, phase)
+        perNick[acc.id] = {
+          daily_budget,
+          phase: parsed?.phase || phase,
+          note: parsed?.note || `Phase ${phase}`,
+          age_days: ageDays,
+          username: acc.username || acc.fb_user_id,
+          ai_generated: !!parsed?.daily_budget,
+        }
+      } catch (err) {
+        // Fallback: phase-based table
+        perNick[acc.id] = {
+          daily_budget: { ...FALLBACK_BY_PHASE[phase] },
+          phase,
+          note: `Fallback ${phase} (Hermes lỗi: ${err.message?.slice(0, 60)})`,
+          age_days: ageDays,
+          username: acc.username || acc.fb_user_id,
+          ai_generated: false,
+        }
+      }
+    }))
+
+    return { per_nick: perNick }
+  })
+
   // POST /campaigns
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const {
@@ -519,6 +651,11 @@ module.exports = async (fastify) => {
           .eq('id', connectRole.id)
       }
     }
+
+    // 2026-05-05: Apply per-nick budgets from ai_plan.per_nick to accounts.daily_budget.
+    // This is the wire that makes the per-nick plan actually take effect — agent's
+    // hard-limits.js reads daily_budget.{key}.max for each nick to gate actions.
+    await applyPerNickBudgets(supabase, ai_plan)
 
     // Phase 15: onboard all nicks in the new campaign — auto-assign existing
     // groups + fire priority scout jobs for nicks with <3 groups.
@@ -682,6 +819,11 @@ module.exports = async (fastify) => {
         req.log?.warn?.(`KPI rebalance after PUT failed: ${err.message}`))
     }
 
+    // 2026-05-05: re-apply per-nick budgets when ai_plan changes via general PUT
+    if (req.body.ai_plan !== undefined) {
+      await applyPerNickBudgets(supabase, req.body.ai_plan)
+    }
+
     // Phase 15: surface new-nick count so the UI can toast about onboarding
     return {
       ...data,
@@ -722,6 +864,9 @@ module.exports = async (fastify) => {
         }
       }
     }
+
+    // 2026-05-05: re-apply per-nick budgets when plan edited mid-flight
+    await applyPerNickBudgets(supabase, ai_plan)
 
     return { ok: true, applied_at: new Date().toISOString() }
   })
