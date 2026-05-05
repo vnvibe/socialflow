@@ -33,6 +33,8 @@ const HERMES_SKILL_MAP = {
   social_graph_spreader: 'social_graph_spreader',
   // Per-nick schedule personality generator (2026-05-05)
   nick_schedule_planner: 'nick_schedule_planner',
+  // Per-nick daily budget planner (2026-05-05)
+  nick_budget_planner: 'nick_budget_planner',
 }
 
 function mapSkill(functionName) {

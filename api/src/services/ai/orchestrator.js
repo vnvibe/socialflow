@@ -194,6 +194,10 @@ class AIOrchestrator {
       reporter:       { provider: 'hermes', model: 'deepseek-chat', max_tokens: 1000 },
       group_evaluator:{ provider: 'hermes', model: 'deepseek-chat', max_tokens: 400 },
       cookie_death_analyzer: { provider: 'hermes', model: 'deepseek-chat', max_tokens: 800 },
+      // Per-nick planner skills (2026-05-05) — pinned to Hermes since prompts
+      // live in /opt/socialflow/hermes-api/skills/. DeepSeek doesn't know them.
+      nick_schedule_planner: { provider: 'hermes', model: 'deepseek-chat', max_tokens: 400 },
+      nick_budget_planner:   { provider: 'hermes', model: 'deepseek-chat', max_tokens: 400 },
     }
     return DEFAULTS[functionName] || DEFAULTS.caption_gen
   }

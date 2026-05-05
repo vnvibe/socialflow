@@ -82,6 +82,13 @@ export default function CampaignForm() {
   const [planRows, setPlanRows] = useState([])
   const [planConfirmed, setPlanConfirmed] = useState(false)
 
+  // 2026-05-05: per-nick plan — Hermes generates a unique daily budget per nick
+  // (warm-up phase × voice × personality from schedule_profile). Shape:
+  //   { [account_id]: { daily_budget: {browse, like, comment, opportunity_comment, scout, friend_request, post}, phase, note, age_days, username, ai_generated } }
+  const [perNickPlan, setPerNickPlan] = useState({})
+  const [perNickLoading, setPerNickLoading] = useState(false)
+  const [expandedNick, setExpandedNick] = useState(null)  // account_id of nick whose mini-editor is open
+
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
     queryFn: () => api.get('/accounts').then(r => r.data),
@@ -121,6 +128,9 @@ export default function CampaignForm() {
         const runs = cronParts[1]?.split(',').length || 2
         setPlanRows(buildPlanRows(existing.ai_plan, runs))
         setPlanConfirmed(existing.ai_plan_confirmed || false)
+        if (existing.ai_plan.per_nick && typeof existing.ai_plan.per_nick === 'object') {
+          setPerNickPlan(existing.ai_plan.per_nick)
+        }
       }
       const cron = existing.cron_expression || '0 9 * * *'
       const parts = cron.split(' ')
@@ -131,7 +141,7 @@ export default function CampaignForm() {
     }
   }, [existing])
 
-  const resetPlan = () => { setAiPlan(null); setPlanRows([]); setPlanConfirmed(false) }
+  const resetPlan = () => { setAiPlan(null); setPlanRows([]); setPlanConfirmed(false); setPerNickPlan({}) }
   const runsPerDay = (DEFAULT_PRESETS.find(p => p.key === scheduleMode)?.runs || 2)
 
   const updateCron = (mode, h1, h2, cH, cM, cDays) => {
@@ -177,19 +187,34 @@ export default function CampaignForm() {
   } : null
 
   // === Mutations ===
+  // 2026-05-05: previewMut now ALSO fetches per-nick plans in parallel — each
+  // selected nick gets its own Hermes-generated daily budget reflecting age,
+  // voice, and personality (from schedule_profile). User can override per-nick
+  // numbers inline before saving.
   const previewMut = useMutation({
-    mutationFn: () => {
-      return api.post('/campaigns/preview-plan', {
-        mission: form.mission,
-        topic: form.topic,
-        account_ids: selectedAccountIds,
-        runs_per_day: runsPerDay,
-        brand_config: brandPayload,
-      }).then(r => r.data)
+    mutationFn: async () => {
+      const [planResp, perNickResp] = await Promise.all([
+        api.post('/campaigns/preview-plan', {
+          mission: form.mission,
+          topic: form.topic,
+          account_ids: selectedAccountIds,
+          runs_per_day: runsPerDay,
+          brand_config: brandPayload,
+        }),
+        api.post('/campaigns/preview-plan-per-nick', {
+          mission: form.mission,
+          topic: form.topic,
+          account_ids: selectedAccountIds,
+          runs_per_day: runsPerDay,
+          brand_config: brandPayload,
+        }).catch(() => ({ data: { per_nick: {} } })),  // graceful fallback
+      ])
+      return { plan: planResp.data.plan, per_nick: perNickResp.data?.per_nick || {} }
     },
     onSuccess: (data) => {
       setAiPlan(data.plan)
       setPlanRows(buildPlanRows(data.plan, runsPerDay))
+      setPerNickPlan(data.per_nick || {})
       setPlanConfirmed(false)
     },
     onError: (err) => toast.error(err.response?.data?.error || 'AI không thể tạo kế hoạch'),
@@ -205,6 +230,11 @@ export default function CampaignForm() {
     mutationFn: async () => {
       // Apply edited rows back to plan steps before saving
       const finalPlan = aiPlan ? applyRowsToPlan(aiPlan, planRows, runsPerDay) : null
+      // Attach per-nick budgets so backend can push them to accounts.daily_budget
+      // and the agent enforces unique limits per nick (warmup × voice × personality).
+      if (finalPlan && perNickPlan && Object.keys(perNickPlan).length) {
+        finalPlan.per_nick = perNickPlan
+      }
       const payload = {
         ...form,
         account_ids: selectedAccountIds,
@@ -438,6 +468,95 @@ export default function CampaignForm() {
                 <button onClick={() => { setSelectedAccountIds([]); resetPlan() }}
                   className="text-[10px] text-app-muted hover:underline">Bỏ chọn</button>
               </div>
+
+              {/* Per-nick mini plans — only show after AI generation */}
+              {selectedAccountIds.length > 0 && Object.keys(perNickPlan).length > 0 && (
+                <div className="pt-3 mt-3 border-t border-app-border space-y-1.5">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-medium text-purple-700 flex items-center gap-1">
+                      <Sparkles size={11} /> Kế hoạch riêng từng nick (AI tự tính)
+                    </span>
+                    <span className="text-[10px] text-app-muted">click để chỉnh</span>
+                  </div>
+                  {selectedAccountIds.map(aid => {
+                    const acc = accounts.find(a => a.id === aid)
+                    if (!acc) return null
+                    const plan = perNickPlan[aid]
+                    if (!plan) return (
+                      <div key={aid} className="flex items-center justify-between px-2 py-1.5 bg-app-base rounded text-[11px] text-app-muted">
+                        <span>{acc.username || acc.fb_user_id}</span>
+                        <span className="italic">đang chờ AI...</span>
+                      </div>
+                    )
+                    const isExpanded = expandedNick === aid
+                    const db = plan.daily_budget || {}
+                    const updateBudget = (key, val) => {
+                      const num = Math.max(0, parseInt(val) || 0)
+                      setPerNickPlan(prev => ({
+                        ...prev,
+                        [aid]: { ...prev[aid], daily_budget: { ...prev[aid].daily_budget, [key]: num }, ai_generated: false }
+                      }))
+                      setPlanConfirmed(false)
+                    }
+                    return (
+                      <div key={aid} className="bg-app-base rounded border border-app-border overflow-hidden">
+                        <button
+                          onClick={() => setExpandedNick(isExpanded ? null : aid)}
+                          className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-app-elevated transition-colors text-left"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[11px] font-medium text-app-primary truncate">{acc.username || acc.fb_user_id}</span>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                              plan.phase === 'mature' ? 'bg-green-100 text-green-700' :
+                              plan.phase === 'week4' ? 'bg-blue-100 text-blue-700' :
+                              plan.phase === 'week3' ? 'bg-yellow-100 text-yellow-700' :
+                              plan.phase === 'week2' ? 'bg-orange-100 text-orange-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>{plan.phase} · {plan.age_days}d</span>
+                            {!plan.ai_generated && <span className="text-[9px] px-1 py-0.5 bg-app-elevated text-app-muted rounded">đã sửa</span>}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[10px] text-app-muted ml-2">
+                            <span title="Like">👍 {db.like ?? '-'}</span>
+                            <span title="Comment">💬 {db.comment ?? '-'}</span>
+                            <span title="Quảng cáo">📣 {db.opportunity_comment ?? '-'}</span>
+                            <span title="Scout">🔍 {db.scout ?? '-'}</span>
+                            <span title="Friend">👥 {db.friend_request ?? '-'}</span>
+                          </div>
+                        </button>
+                        {isExpanded && (
+                          <div className="px-3 pb-2.5 pt-1 bg-app-surface border-t border-app-border space-y-2">
+                            {plan.note && (
+                              <p className="text-[10px] italic text-purple-700">{plan.note}</p>
+                            )}
+                            <div className="grid grid-cols-2 gap-2">
+                              {[
+                                { key: 'browse', label: '👀 Lướt feed' },
+                                { key: 'like', label: '👍 Like' },
+                                { key: 'comment', label: '💬 Comment' },
+                                { key: 'opportunity_comment', label: '📣 Quảng cáo' },
+                                { key: 'scout', label: '🔍 Thám dò nhóm' },
+                                { key: 'friend_request', label: '👥 Kết bạn' },
+                                { key: 'post', label: '📝 Đăng bài' },
+                              ].map(({ key, label }) => (
+                                <label key={key} className="flex items-center justify-between gap-2 text-[10px]">
+                                  <span className="text-app-muted">{label}</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={db[key] ?? 0}
+                                    onChange={e => updateBudget(key, e.target.value)}
+                                    className="w-14 border border-app-border rounded px-1.5 py-0.5 text-[10px] text-right"
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
