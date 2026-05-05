@@ -396,21 +396,33 @@ module.exports = async (fastify) => {
         return reply.code(400).send({ error: 'selected_actions, mission, or requirement required' })
       }
 
-      // Compute daily budget
+      // 2026-05-05: cap per-nick daily at HARD_LIMITS (agent enforces these
+      // anyway). Pre-cap math `count_max × runsPerDay` for an 8-run/day schedule
+      // produces 40 cmt + 64 like + 40 fr per nick which scares users in the UI
+      // even though the agent's poller would never let those run. Cap to safe
+      // mature-nick limits and emit a note explaining warm-up scaling.
       const perNickDaily = {}
+      const perNickRaw = {}  // pre-cap value, kept for warning detail
       for (const role of roles) {
         for (const step of (role.steps || [])) {
           const key = step.quota_key || step.action
           const max = step.count_max || step.count_min || 1
-          perNickDaily[key] = Math.max(perNickDaily[key] || 0, max * runsPerDay)
+          const raw = max * runsPerDay
+          perNickRaw[key] = Math.max(perNickRaw[key] || 0, raw)
+          const hardCap = HARD_LIMITS[key]?.maxPerDay
+          // Final budget = min(requested by plan, mature-nick safe cap).
+          // Safety floor of 1 so we don't accidentally write 0 for tiny limits.
+          perNickDaily[key] = Math.max(1, hardCap ? Math.min(raw, hardCap) : raw)
         }
       }
 
       const warnings = []
-      for (const [key, perNick] of Object.entries(perNickDaily)) {
-        const limit = HARD_LIMITS[key]
-        if (limit && perNick > limit) warnings.push(`${key}: ${perNick}/nick/ngay vuot gioi han ${limit}/nick/ngay`)
+      for (const [key, raw] of Object.entries(perNickRaw)) {
+        const limit = HARD_LIMITS[key]?.maxPerDay
+        if (limit && raw > limit) warnings.push(`${key}: AI plan đề xuất ${raw}/nick/ngày, đã CAP về ${limit} (giới hạn an toàn — vượt sẽ tăng nguy cơ checkpoint)`)
       }
+      // Always-present note about warm-up scaling — applies to ALL plans.
+      warnings.push('NICK MỚI (<30 ngày): agent tự scale xuống 0-50% các giới hạn trên theo warm-up phase (week1: chỉ browse+like; week2: +comment nhẹ; week3: +join_group; week4: gần đầy đủ).')
 
       const totalSteps = roles.reduce((sum, r) => sum + (r.steps?.length || 0), 0)
 
@@ -435,7 +447,7 @@ module.exports = async (fastify) => {
   // POST /campaigns
   fastify.post('/', { preHandler: fastify.authenticate }, async (req, reply) => {
     const {
-      name, topic, requirement, mission, language, brand_config, ad_mode,
+      name, topic, requirement, mission, language, min_member_count, brand_config, ad_mode,
       account_ids, ai_plan, ai_plan_confirmed,
       target_pages, target_groups, target_profiles,
       content_ids, rotation_mode, spin_mode,
@@ -453,6 +465,7 @@ module.exports = async (fastify) => {
       requirement: requirement || null,
       mission: mission || null,
       language: language || 'vi',
+      min_member_count: Number.isFinite(min_member_count) ? min_member_count : null,
       brand_config: brand_config || null,
       ad_mode: ad_mode || 'normal',
       account_ids: account_ids || [],
@@ -542,6 +555,7 @@ module.exports = async (fastify) => {
   fastify.put('/:id', { preHandler: fastify.authenticate }, async (req, reply) => {
     const allowed = [
       'name', 'topic', 'requirement', 'mission', 'language', 'brand_config', 'ad_mode',
+      'min_member_count',                   // 2026-05-02: scout member-count gate
       'account_ids', 'ai_plan', 'ai_plan_confirmed',
       'target_pages', 'target_groups', 'target_profiles',
       'content_ids', 'rotation_mode', 'spin_mode',
