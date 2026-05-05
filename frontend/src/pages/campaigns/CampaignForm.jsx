@@ -22,10 +22,22 @@ const DAY_LABELS = [
   { value: 0, label: 'CN' },
 ]
 
+// 2026-05-05: expanded tones + random option per user request. "random"
+// tells the comment generator to pick a tone per-comment so traffic looks
+// like a real diverse user-base instead of every nick speaking the same way.
 const VOICE_OPTIONS = [
-  { value: 'casual',     label: 'Thân thiện' },
+  { value: 'random',       label: '🎲 Ngẫu nhiên' },
+  { value: 'casual',       label: 'Thân thiện' },
   { value: 'professional', label: 'Chuyên nghiệp' },
-  { value: 'humor',      label: 'Hài hước' },
+  { value: 'humor',        label: 'Hài hước' },
+  { value: 'lazy',         label: 'Cộc lốc / lười' },
+  { value: 'curious',      label: 'Tò mò / hỏi nhiều' },
+  { value: 'experienced',  label: 'Đàn anh / kinh nghiệm' },
+  { value: 'skeptical',    label: 'Hoài nghi / khó tính' },
+  { value: 'helpful',      label: 'Nhiệt tình giúp đỡ' },
+  { value: 'newbie',       label: 'Newbie / mới biết' },
+  { value: 'sarcastic',    label: 'Mỉa mai nhẹ' },
+  { value: 'gen_z',        label: 'Gen Z / teencode' },
 ]
 
 export default function CampaignForm() {
@@ -40,7 +52,7 @@ export default function CampaignForm() {
     topic: '',
     mission: '',
     language: 'vi',
-    min_member_count: 100,
+    min_member_count: 100,  // tối thiểu để scout join (default 100, user can lower)
     schedule_type: 'recurring',
     cron_expression: `${randMin()} 6,10,14,18,22 * * *`,
   })
@@ -367,10 +379,12 @@ export default function CampaignForm() {
               </div>
 
               <div>
-                <label className="text-xs font-medium text-app-muted mb-2 block">Giọng điệu</label>
-                <div className="flex gap-2">
+                <label className="text-xs font-medium text-app-muted mb-2 block">
+                  Giọng điệu {brand.brand_voice === 'random' && <span className="text-orange-500">(random — AI chọn tone khác nhau cho mỗi cmt)</span>}
+                </label>
+                <div className="flex flex-wrap gap-2">
                   {VOICE_OPTIONS.map(v => (
-                    <label key={v.value} className={`flex-1 cursor-pointer px-3 py-2 rounded-lg border text-center text-xs transition-colors ${
+                    <label key={v.value} className={`cursor-pointer px-3 py-2 rounded-lg border text-center text-xs transition-colors ${
                       brand.brand_voice === v.value
                         ? 'bg-orange-50 border-orange-300 text-orange-700 font-medium'
                         : 'bg-app-surface border-app-border text-app-muted hover:bg-app-base'
