@@ -173,7 +173,8 @@ async function campaignNurture(payload, supabase) {
   // fall back to legacy config.advertising shape
   const brandConfig = payload.brand_config || config?.brand_config || config?.advertising || null
   const adEnabled = brandConfig && (payload.ad_mode === 'ad_enabled' || config?.ad_mode === 'ad_enabled' || brandConfig.brand_name)
-  const canDoAdComment = adEnabled && nickAge >= 30 // warmup >= 30 days required
+  const canDoAdComment = adEnabled && nickAge >= 7
+  console.log(`[NURTURE] 📢 Ad check: brandConfig=${!!brandConfig} brand_name=${brandConfig?.brand_name || 'N/A'} adEnabled=${adEnabled} nickAge=${nickAge}d canDoAd=${canDoAdComment}`)
 
   // Count today's ad comments for this nick (max 2/day)
   let adCommentsToday = 0
@@ -1783,7 +1784,8 @@ async function campaignNurture(payload, supabase) {
               }
 
               // === AD TRIGGER: trust AI's contextual decision (no keyword matching) ===
-              // hasAdOpportunity comes from evaluatePosts() which already considered brandConfig
+              if (!canDoAdComment && brandConfig?.brand_name) console.log(`[NURTURE] 📢 Ad blocked: canDoAd=false (nickAge=${nickAge}d < 7)`)
+              else if (hasAdOpportunity && !canDoAdComment) console.log(`[NURTURE] 📢 Ad opportunity found but nick too young (${nickAge}d < 7)`)
               if (canDoAdComment && adCommentsToday < AD_COMMENT_DAILY_LIMIT && hasAdOpportunity && brandConfig?.brand_name && (evaluation?.score || 0) >= 6) {
                 try {
                   // Extract any existing comments from the post to avoid duplicating brand mentions
