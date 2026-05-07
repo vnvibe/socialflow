@@ -179,9 +179,9 @@ function NickRow({ nick, role, campaignId, runningJob, todayStats, todayJobs, on
               <div className="text-info truncate">→ {runningJob.payload?.action || runningJob.type}</div>
               <div className="text-app-dim text-[10px]">started {formatAgo(runningJob.started_at)}</div>
             </>
-          ) : nick.status === 'checkpoint' || nick.status === 'expired' ? (
+          ) : nick.status === 'checkpoint' || nick.status === 'expired' || nick.status === 'session_expired' ? (
             <div className="flex items-center gap-2">
-              <span className="text-danger">⚠ {nick.status}</span>
+              <span className="text-danger">⚠ {nick.status === 'session_expired' ? 'session expired' : nick.status}</span>
               <button
                 onClick={(e) => {
                   e.stopPropagation()

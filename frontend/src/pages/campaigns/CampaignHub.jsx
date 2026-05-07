@@ -1144,25 +1144,14 @@ function ExecutionTab({ campaignId }) {
   const failed = jobs.filter(j => j.status === 'failed').length
 
   return (
-    <div className="flex flex-col h-full">
-      <div
-        className="flex items-center gap-8 px-6 py-3"
-        style={{ borderBottom: '1px solid var(--border)' }}
-      >
-        <DenseStat value={running} label="Running" color="hermes" />
-        <DenseStat value={pending} label="Queued" />
-        <DenseStat value={done} label="Done" color="hermes" />
-        <DenseStat value={failed} label="Failed" color={failed > 0 ? 'danger' : 'primary'} />
-      </div>
-      <div className="flex-1 overflow-auto">
-        {jobs.length === 0 ? (
-          <div className="p-8 text-center text-app-muted font-mono-ui text-xs">
-            No jobs for this campaign yet.
-          </div>
-        ) : (
-          jobs.map(job => <JobRow key={job.id} job={job} />)
-        )}
-      </div>
+    <div
+      className="flex items-center gap-8 px-6 py-3"
+      style={{ borderBottom: '1px solid var(--border)' }}
+    >
+      <DenseStat value={running} label="Running" color="hermes" />
+      <DenseStat value={pending} label="Queued" />
+      <DenseStat value={done} label="Done" color="hermes" />
+      <DenseStat value={failed} label="Failed" color={failed > 0 ? 'danger' : 'primary'} />
     </div>
   )
 }
@@ -1207,15 +1196,20 @@ const ACTION_LABEL = {
 }
 const FILTERABLE_TYPES = [
   { value: '',                    label: 'Tất cả' },
-  { value: 'comment',             label: 'Comment' },
-  { value: 'opportunity_comment', label: 'Comment (AD)' },
-  { value: 'like',                label: 'Like' },
-  { value: 'react',               label: 'React' },
-  { value: 'post',                label: 'Post' },
-  { value: 'join_group',          label: 'Join Group' },
-  { value: 'friend_request',      label: 'Kết bạn' },
-  { value: 'check_group_membership', label: 'Check pending' },
-  { value: 'visit_group',         label: 'Vào nhóm' },
+  { value: 'like',                label: '❤️ Like' },
+  { value: 'comment',             label: '💬 Comment' },
+  { value: 'opportunity_comment', label: '💬 Comment (AD)' },
+  { value: 'join_group',          label: '👥 Tham gia nhóm' },
+  { value: 'friend_request',      label: '🤝 Kết bạn' },
+  { value: 'react',               label: '❤️ React' },
+  { value: 'visit_group',         label: '👀 Vào nhóm' },
+  { value: 'ai_evaluate_posts',   label: '🧠 AI đánh giá bài' },
+  { value: 'ai_evaluate_group',   label: '🧠 AI đánh giá nhóm' },
+  { value: 'post',                label: '📝 Post' },
+  { value: 'check_group_membership', label: '🔍 Check membership' },
+  { value: 'comment_rejected',    label: '🛑 Comment bị từ chối' },
+  { value: 'membership_approved', label: '✅ Duyệt vào nhóm' },
+  { value: 'membership_rejected', label: '🚫 Từ chối vào nhóm' },
 ]
 
 function fmtTime(iso) {
@@ -1457,8 +1451,6 @@ function ActivityTab({ campaignId, campaign }) {
         className="flex items-center gap-2 px-4 py-2.5 flex-wrap"
         style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}
       >
-        <span className="font-semibold text-sm">Hoạt động</span>
-
         <select
           className="px-2 py-1 rounded text-xs"
           style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
@@ -2394,10 +2386,10 @@ export default function CampaignHub() {
           </MergedTab>
         )}
         {tab === 'runtime' && (
-          <MergedTab>
+          <div className="h-full overflow-y-auto">
             <ExecutionTab campaignId={id} />
             <ActivityTab campaignId={id} campaign={campaign} />
-          </MergedTab>
+          </div>
         )}
         {tab === 'assets' && (
           <MergedTab>

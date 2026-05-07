@@ -662,7 +662,7 @@ Return ONLY the comment, no explanation.` : `Viết MỘT bình luận Facebook 
 "${(post_snippet || '').substring(0, 500)}"
 
 === QUY TẮC BẮT BUỘC ===
-1. ĐỌC KỸ bài viết trên, HIỂU nội dung người đăng muốn nói gì
+1. ĐỌC KỸ bài viết, HIỂU nội dung người đăng muốn nói gì
 2. Bình luận PHẢI TRẢ LỜI/PHẢN HỒI đúng nội dung bài viết:
    - Nếu họ HỎI → trả lời hoặc chia sẻ kinh nghiệm liên quan
    - Nếu họ CHIA SẺ → bình luận về điều họ chia sẻ, hỏi thêm chi tiết
@@ -670,9 +670,11 @@ Return ONLY the comment, no explanation.` : `Viết MỘT bình luận Facebook 
 3. KHÔNG viết comment chung chung kiểu "hay quá", "tuyệt vời"
 4. KHÔNG đề cập chủ đề "${topic}" nếu bài viết KHÔNG liên quan trực tiếp
 5. Giọng: ${styleGuides[commentStyle] || styleGuides.casual}
-6. Tối đa 1-2 câu, tối đa 1 emoji
-7. KHÔNG hashtag, KHÔNG link
-8. Tự nhiên như người thật đang nói chuyện
+6. 2-3 câu, 40-70 chữ. KHÔNG viết 1 câu cụt rồi dừng
+7. KHÔNG hashtag, KHÔNG link, tối đa 1 emoji
+8. CẤU TRÚC: ý chính + câu bổ trợ (giải thích, dẫn chứng, hoặc mở rộng). VD: "Nên dùng tool hợp lý hơn bạn ạ. Openclaw nó như trợ lý cá nhân AI thôi"
+9. Dùng từ đệm tiếng Việt tự nhiên: ạ, nhé, nha, á, thôi, mà, nè, luôn, đấy, chứ — tuỳ ngữ cảnh
+10. Xưng hô: mình/bạn/bác/anh/chị tuỳ ngữ cảnh nhóm. KHÔNG xưng "tôi"
 
 Chỉ trả về NỘI DUNG bình luận, không giải thích.`)
 

@@ -21,6 +21,7 @@ const STATUS_LABEL = {
   checking: { text: '🟡 Đang kiểm tra...', color: 'text-warn' },
   checkpoint: { text: '🔴 Checkpoint — cần sửa cookie', color: 'text-danger' },
   expired: { text: '🔴 Cookie hết hạn', color: 'text-danger' },
+  session_expired: { text: '🔴 Session hết hạn — cần cookie mới', color: 'text-danger' },
   disabled: { text: '⚫ Đã tắt', color: 'text-app-muted' },
   banned: { text: '🚫 Banned', color: 'text-danger' },
   at_risk: { text: '🟠 At risk', color: 'text-warn' },
