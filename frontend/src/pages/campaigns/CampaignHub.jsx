@@ -898,6 +898,18 @@ function GroupsTab({ campaignId }) {
     onError: (err) => toast.error(err.response?.data?.error || err.message),
   })
 
+  // Pin/unpin priority — agent visits + comments here BEFORE tier-ranked groups
+  const togglePriority = useMutation({
+    mutationFn: async ({ id, priority_visit }) => {
+      await api.patch(`/campaigns/${campaignId}/groups/${id}/priority`, { priority_visit })
+    },
+    onSuccess: (_, vars) => {
+      toast.success(vars.priority_visit ? 'Đã pin ưu tiên' : 'Đã bỏ pin')
+      qc.invalidateQueries({ queryKey: ['campaigns', campaignId, 'groups'] })
+    },
+    onError: (err) => toast.error(err.response?.data?.error || err.message),
+  })
+
   // Counts
   const counts = useMemo(() => {
     const c = { all: groups.length, member: 0, pending: 0, rejected: 0, banned: 0, unknown: 0 }
@@ -952,18 +964,34 @@ function GroupsTab({ campaignId }) {
         <div className="space-y-2">
           {filteredGroups.map((g) => {
             const badge = STATUS_BADGE[g.join_status || 'unknown']
+            const pinned = g.priority_visit === true
             return (
               <div
                 key={g.id}
                 className="p-3"
                 style={{
                   background: 'var(--bg-elevated)',
-                  border: g.overdue
-                    ? '1px solid rgba(249,115,22,0.4)'
-                    : '1px solid var(--border)',
+                  border: pinned
+                    ? '1px solid var(--hermes)'
+                    : g.overdue
+                      ? '1px solid rgba(249,115,22,0.4)'
+                      : '1px solid var(--border)',
                 }}
               >
                 <div className="flex items-center gap-3 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={pinned}
+                    onChange={(e) => togglePriority.mutate({ id: g.id, priority_visit: e.target.checked })}
+                    disabled={togglePriority.isPending}
+                    title="Pin ưu tiên — agent sẽ visit + comment ở đây trước"
+                    className="cursor-pointer accent-hermes"
+                  />
+                  {pinned && (
+                    <span className="text-[10px] uppercase text-hermes" title="Pinned to top of visit queue">
+                      📌 pin
+                    </span>
+                  )}
                   <span className="flex-1 text-app-primary truncate">{g.name || g.fb_group_id}</span>
                   <span className="text-app-muted">👥 {g.member_count ? (g.member_count >= 1000 ? `${Math.round(g.member_count / 1000)}k` : g.member_count) : '?'}</span>
                   <span className={badge.color}>{badge.text}</span>

@@ -1417,7 +1417,7 @@ module.exports = async (fastify) => {
 
     const { data, error } = await supabase
       .from('campaign_groups')
-      .select('id, score, tier, status, added_at, last_nurtured_at, assigned_nick_id, fb_groups(id, fb_group_id, name, url, member_count, group_type, topic, ai_relevance, is_blocked, account_id, joined_via_campaign_id, global_score, score_tier, language, is_member, pending_approval, ai_note, ai_join_score, ai_risk_level, skip_until, tags, user_approved)')
+      .select('id, score, tier, status, added_at, last_nurtured_at, assigned_nick_id, fb_groups(id, fb_group_id, name, url, member_count, group_type, topic, ai_relevance, is_blocked, account_id, joined_via_campaign_id, global_score, score_tier, language, is_member, pending_approval, ai_note, ai_join_score, ai_risk_level, skip_until, tags, user_approved, priority_visit, membership_check_attempts, membership_last_checked_at, consecutive_skips)')
       .eq('campaign_id', req.params.id)
       .neq('status', 'removed')
       .order('tier', { ascending: true })
@@ -1830,6 +1830,37 @@ module.exports = async (fastify) => {
       .single()
     if (error) return reply.code(500).send({ error: error.message })
     if (!data) return reply.code(404).send({ error: 'No KPI row for today — nick may not be active in this campaign yet' })
+    return data
+  })
+
+  // PATCH /campaigns/:id/groups/:fbGroupRowId/priority — pin/unpin a group so
+  // the agent visits + comments here BEFORE tier-ranked groups. Per-nick
+  // per-group flag (fb_groups row is keyed by (account_id, fb_group_id)).
+  // Body: { priority_visit: boolean }
+  fastify.patch('/:id/groups/:fbGroupRowId/priority', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { data: campaign } = await supabase.from('campaigns')
+      .select('id').eq('id', req.params.id).eq('owner_id', req.user.id).single()
+    if (!campaign) return reply.code(404).send({ error: 'Campaign not found' })
+
+    const pin = req.body?.priority_visit === true
+    // Verify the fb_groups row belongs to a nick the user owns (via account_id)
+    const { data: row, error: rerr } = await supabase
+      .from('fb_groups')
+      .select('id, account_id, accounts!inner(owner_id)')
+      .eq('id', req.params.fbGroupRowId)
+      .single()
+    if (rerr || !row) return reply.code(404).send({ error: 'Group row not found' })
+    if (row.accounts?.owner_id !== req.user.id) {
+      return reply.code(403).send({ error: 'Not your nick' })
+    }
+
+    const { data, error } = await supabase
+      .from('fb_groups')
+      .update({ priority_visit: pin })
+      .eq('id', req.params.fbGroupRowId)
+      .select('id, priority_visit')
+      .single()
+    if (error) return reply.code(500).send({ error: error.message })
     return data
   })
 
