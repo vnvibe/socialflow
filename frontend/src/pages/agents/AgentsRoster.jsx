@@ -621,7 +621,7 @@ function DiagnosisRow({ decision, nickId }) {
   )
 }
 
-function NickDetailPanel({ nick, onClose }) {
+function NickDetailPanel({ nick, onClose, onRepair }) {
   const { data: memories = [] } = useQuery({
     queryKey: ['ai-memory', nick?.id],
     enabled: !!nick,
@@ -908,6 +908,12 @@ function NickDetailPanel({ nick, onClose }) {
             }}
           >
             HEALTH CHECK
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={() => onRepair?.(nick)}
+          >
+            🍪 COOKIE
           </button>
           <a
             href={`/accounts/${nick.id}`}
@@ -1257,7 +1263,7 @@ export default function AgentsRoster() {
         </div>
       </div>
 
-      <NickDetailPanel nick={selected} onClose={() => setSelected(null)} />
+      <NickDetailPanel nick={selected} onClose={() => setSelected(null)} onRepair={setRepairNick} />
 
       {repairNick && (
         <CookieRepairModal

@@ -1045,7 +1045,7 @@ async function campaignNurture(payload, supabase) {
               .from('campaign_activity_log')
               .select('details')
               .eq('account_id', account_id)
-              .eq('action_type', 'comment')
+              .in('action_type', ['comment', 'opportunity_comment'])
               .not('details', 'is', null)
               .order('created_at', { ascending: false })
               .limit(500)
@@ -1416,9 +1416,9 @@ async function campaignNurture(payload, supabase) {
               if (commentedUrls.has(clean)) return false
             }
 
-            // 2. Numeric fb_post_id
+            // 2. fb_post_id (numeric or pfbid)
             if (p.postUrl) {
-              const m = p.postUrl.match(/(?:posts|permalink|multi_permalinks)\/(\d+)/)
+              const m = p.postUrl.match(/(?:posts|permalink|multi_permalinks)\/(pfbid[\w]+|\d+)/)
                 || p.postUrl.match(/story_fbid=(\d+)/)
               if (m && commentedPostIds.has(m[1])) return false
             }
@@ -1461,7 +1461,7 @@ async function campaignNurture(payload, supabase) {
               if (p.isTranslated) filterReasons.translated++
               else if (p.postUrl && commentedUrls.has(p.postUrl)) filterReasons.dup_url++
               else if (p.postUrl) {
-                const m = p.postUrl.match(/(?:posts|permalink)\/(\d+)/) || p.postUrl.match(/story_fbid=(\d+)/)
+                const m = p.postUrl.match(/(?:posts|permalink)\/(pfbid[\w]+|\d+)/) || p.postUrl.match(/story_fbid=(\d+)/)
                 if (m && commentedPostIds.has(m[1])) filterReasons.dup_id++
               }
               const lower = (p.body || '').toLowerCase()
@@ -1679,10 +1679,20 @@ async function campaignNurture(payload, supabase) {
             try {
               const thisPostUrl = post.postUrl
               if (thisPostUrl && commentedUrls.has(thisPostUrl)) continue
-              // Cross-nick dedup by fb_post_id
+              // Cross-nick dedup by fb_post_id (numeric + pfbid)
               if (thisPostUrl) {
-                const m = thisPostUrl.match(/(?:posts|permalink)\/(\d+)/) || thisPostUrl.match(/story_fbid=(\d+)/)
-                if (m && commentedPostIds.has(m[1])) { console.log(`[NURTURE] Skip post ${m[1]} — already commented by another nick`); continue }
+                const m = thisPostUrl.match(/(?:posts|permalink)\/(pfbid[\w]+|\d+)/) || thisPostUrl.match(/story_fbid=(\d+)/)
+                if (m && commentedPostIds.has(m[1])) { console.log(`[NURTURE] Skip post ${m[1]} — already commented`); continue }
+              }
+              // Cross-session dedup by pfbid token
+              if (thisPostUrl) {
+                const pf = thisPostUrl.match(/\/(pfbid[\w]+)/)
+                if (pf && commentedTokens.has(pf[1])) { console.log(`[NURTURE] Skip post pfbid ${pf[1].substring(0, 12)}… — already commented`); continue }
+              }
+              // Cross-session dedup by post body hash
+              if (post.body && post.body.length >= 30) {
+                const bodyKey = post.body.substring(0, 100).toLowerCase().replace(/\s+/g, ' ').trim()
+                if (commentedBodyHashes.has(bodyKey)) { console.log(`[NURTURE] Skip post — body hash match (already commented)`); continue }
               }
 
               commentDebug.attempted++
@@ -1883,11 +1893,11 @@ async function campaignNurture(payload, supabase) {
                 console.log(`[NURTURE] ✅ Quality gate PASSED (score: ${gate.score})`)
               }
 
-              // Extract post URL + ID for logging
+              // Extract post URL + ID for logging (pfbid + numeric)
               const thisUrl = post.postUrl || null
               let fbPostId = null
               if (thisUrl) {
-                const m = thisUrl.match(/(?:posts|permalink)\/(\d+)/) || thisUrl.match(/story_fbid=(\d+)/)
+                const m = thisUrl.match(/(?:posts|permalink)\/(pfbid[\w]+|\d+)/) || thisUrl.match(/story_fbid=(\d+)/)
                 if (m) fbPostId = m[1]
               }
 
@@ -1911,6 +1921,8 @@ async function campaignNurture(payload, supabase) {
               // Add to dedup BEFORE posting (prevent double-comment even if crash)
               if (thisUrl) commentedUrls.add(thisUrl)
               if (fbPostId) commentedPostIds.add(fbPostId)
+              if (thisUrl) { const pf = thisUrl.match(/\/(pfbid[\w]+)/); if (pf) commentedTokens.add(pf[1]) }
+              if (postText && postText.length >= 30) commentedBodyHashes.add(postText.substring(0, 100).toLowerCase().replace(/\s+/g, ' ').trim())
 
               // TYPE + SUBMIT comment
               await commentBox.click({ force: true, timeout: 5000 })
