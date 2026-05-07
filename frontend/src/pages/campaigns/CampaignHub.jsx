@@ -6,6 +6,7 @@
  * Existing section components are reused as tab bodies (no logic rewrite).
  */
 import { useState, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Play, Pause, Edit, Loader, Brain, X, Trash2 } from 'lucide-react'
@@ -398,13 +399,14 @@ function OverviewTab({ campaign, campaignId }) {
       )}
       </div>
 
-      {editingKpi && (
+      {editingKpi && createPortal(
         <EditKpiModal
           campaignId={campaignId}
           row={editingKpi.row}
           hasOpp={kpi?.rows?.some(r => (r.target_opportunity_comments || 0) > 0)}
           onClose={() => setEditingKpi(null)}
-        />
+        />,
+        document.body
       )}
     </div>
   )
@@ -721,7 +723,7 @@ function AgentsTab({ campaign }) {
         </div>
       )}
 
-      {pickerOpen && (
+      {pickerOpen && createPortal(
         <div
           className="fixed inset-0 z-40 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.6)' }}
@@ -764,7 +766,8 @@ function AgentsTab({ campaign }) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
