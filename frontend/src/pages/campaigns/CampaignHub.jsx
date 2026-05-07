@@ -137,6 +137,7 @@ function DailyReportCard({ campaignId }) {
 function OverviewTab({ campaign, campaignId }) {
   const nav = useNavigate()
   const [, setSearchParams] = useSearchParams()
+  const [editingKpi, setEditingKpi] = useState(null) // { row } when modal open
   const { data: kpi } = useQuery({
     queryKey: ['campaigns', campaignId, 'kpi'],
     queryFn: async () => {
@@ -344,10 +345,8 @@ function OverviewTab({ campaign, campaignId }) {
               <button
                 key={i}
                 type="button"
-                onClick={() => {
-                  // Jump to Hoạt động tab filtered by this nick
-                  setSearchParams({ tab: 'activity', account_id: row.account_id })
-                }}
+                onClick={() => setEditingKpi({ row })}
+                title="Click để sửa target KPI hôm nay"
                 className="w-full flex items-center gap-3 px-4 py-2 text-xs hover:bg-app-muted/10 text-left"
                 style={{ borderBottom: '1px solid var(--border)' }}
               >
@@ -397,6 +396,110 @@ function OverviewTab({ campaign, campaignId }) {
           </div>
         </div>
       )}
+      </div>
+
+      {editingKpi && (
+        <EditKpiModal
+          campaignId={campaignId}
+          row={editingKpi.row}
+          hasOpp={kpi?.rows?.some(r => (r.target_opportunity_comments || 0) > 0)}
+          onClose={() => setEditingKpi(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// Modal: edit per-nick target KPI for today. Backend route is
+// PATCH /campaigns/:id/kpi-today/:account_id and only accepts target_*
+// fields (done_* + kpi_met are computed and stay read-only).
+function EditKpiModal({ campaignId, row, hasOpp, onClose }) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({
+    target_likes: row.target_likes || 0,
+    target_comments: row.target_comments || 0,
+    target_friend_requests: row.target_friend_requests || 0,
+    target_group_joins: row.target_group_joins || 0,
+    target_opportunity_comments: row.target_opportunity_comments || 0,
+  })
+
+  const save = useMutation({
+    mutationFn: async () => (
+      await api.patch(`/campaigns/${campaignId}/kpi-today/${row.account_id}`, form)
+    ).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['campaigns', campaignId, 'kpi'] })
+      toast.success('Đã cập nhật target KPI')
+      onClose()
+    },
+    onError: (err) => toast.error(err?.response?.data?.error || err.message),
+  })
+
+  const setField = (k) => (e) => {
+    const v = parseInt(e.target.value, 10)
+    setForm(f => ({ ...f, [k]: Number.isFinite(v) && v >= 0 ? Math.min(v, 500) : 0 }))
+  }
+
+  // Click backdrop to close, but not when clicking inside the modal panel.
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-app-surface rounded border border-app-border w-full max-w-md p-5 font-mono-ui text-xs"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-app-muted">Sửa KPI hôm nay</div>
+            <div className="text-app-primary mt-0.5">{row.username || row.account_id?.slice(0, 8)}</div>
+          </div>
+          <button type="button" onClick={onClose} className="text-app-muted hover:text-app-primary">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {[
+            { k: 'target_likes', label: 'Like', done: row.done_likes },
+            { k: 'target_comments', label: 'Comment', done: row.done_comments },
+            ...(hasOpp ? [{ k: 'target_opportunity_comments', label: 'QC (ad/brand)', done: row.done_opportunity_comments }] : []),
+            { k: 'target_friend_requests', label: 'Friend Request', done: row.done_friend_requests },
+            { k: 'target_group_joins', label: 'Join Group', done: row.done_group_joins },
+          ].map(({ k, label, done }) => (
+            <div key={k} className="flex items-center gap-3">
+              <label className="flex-1 text-app-muted">{label}</label>
+              <span className="text-app-dim w-10 text-right">{done || 0} /</span>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                value={form[k]}
+                onChange={setField(k)}
+                className="w-20 px-2 py-1 bg-app-elevated border border-app-border rounded text-app-primary text-right"
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 text-app-muted hover:text-app-primary"
+          >
+            Huỷ
+          </button>
+          <button
+            type="button"
+            onClick={() => save.mutate()}
+            disabled={save.isPending}
+            className="px-4 py-1.5 bg-hermes text-app-bg rounded hover:opacity-90 disabled:opacity-50"
+          >
+            {save.isPending ? 'Đang lưu...' : 'Lưu'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -1486,6 +1589,7 @@ const OUTCOME_LABEL = {
   failed:         { label: '✗ Lỗi',    color: 'text-danger' },
   pending:        { label: '⏳ Chờ',   color: 'text-warn' },
   user_rejected:  { label: '× Bỏ qua', color: 'text-app-muted' },
+  skipped:        { label: '⤳ Bỏ qua (cap)', color: 'text-app-muted' },
 }
 
 function HermesTab({ campaignId }) {
